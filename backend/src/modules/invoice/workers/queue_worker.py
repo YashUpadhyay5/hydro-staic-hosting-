@@ -64,6 +64,7 @@ def process_queue():
                         db_doc.template_config = tpl.sections
                         db.commit()
 
+            t_worker_start = time.time()
             if not db_doc or not db_doc.file_content:
                 import os
                 if db_doc and db_doc.file_path and os.path.exists(db_doc.file_path):
@@ -78,6 +79,13 @@ def process_queue():
                     db_doc.file_content,
                     template_config=tpl_config
                 )
+
+            worker_elapsed_ms = round((time.time() - t_worker_start) * 1000, 2)
+            if isinstance(result, dict):
+                if "metadata" not in result or not isinstance(result["metadata"], dict):
+                    result["metadata"] = {}
+                if not result["metadata"].get("processing_time_ms") or result["metadata"].get("processing_time_ms") == 450.0:
+                    result["metadata"]["processing_time_ms"] = worker_elapsed_ms
 
             # Auto-correct raw OCR tax summary mismatches or blunders before processing duplicate checks
             result = auto_correct_tax_summary(result)

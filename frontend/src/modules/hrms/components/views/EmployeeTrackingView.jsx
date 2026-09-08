@@ -42,8 +42,16 @@ const isCellularPing = (f) => {
     return provider.includes('cell') || provider.includes('net') || f.trackingMethod === 'CELLULAR';
 };
 
+const getAuthoritativeISTDate = (d = new Date()) => {
+    try {
+        return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date(d));
+    } catch {
+        return new Date().toISOString().split('T')[0];
+    }
+};
+
 export default function EmployeeTrackingView({ userId, userName, employees = [], onBack, backText = 'Back to Employees' }) {
-    const [trackingDate, setTrackingDate] = useState(() => new Date().toISOString().split('T')[0]);
+    const [trackingDate, setTrackingDate] = useState(() => getAuthoritativeISTDate());
     const [battery, setBattery] = useState('--');
     const [temp, setTemp] = useState('--');
     const [gpsOff, setGpsOff] = useState('--');
@@ -345,6 +353,18 @@ export default function EmployeeTrackingView({ userId, userName, employees = [],
         fetchTrackingData();
     }, [userId, userName, trackingDate]);
 
+    const matchedEmp = (employees || []).find(e => {
+        if (!e) return false;
+        const uLower = String(userId || '').trim().toLowerCase();
+        const nameLower = String(userName || '').trim().toLowerCase();
+        return (e.id && (String(e.id).trim().toLowerCase() === uLower || String(e.id).trim().toLowerCase() === nameLower)) ||
+               (e.empCode && (String(e.empCode).trim().toLowerCase() === uLower || String(e.empCode).trim().toLowerCase() === nameLower)) ||
+               (e.name && (String(e.name).trim().toLowerCase() === nameLower || String(e.name).trim().toLowerCase() === uLower));
+    });
+    const displayName = matchedEmp?.name || userName || userId || 'Employee';
+    const displayCode = matchedEmp?.empCode || matchedEmp?.emp_code || (userId && !String(userId).startsWith('EMP0') ? userId : '');
+    const displaySubtitle = matchedEmp ? `${matchedEmp.designation || matchedEmp.jobTitle || matchedEmp.department || 'Field Staff'}` : '';
+
     return (
         <div id="employee-tracking-view" className="view active" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
             <div className="view-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
@@ -353,7 +373,19 @@ export default function EmployeeTrackingView({ userId, userName, employees = [],
                         <i className="fa-solid fa-arrow-left"></i>
                         <span>{String(backText || 'Back').replace(/^[←\s]+/, '')}</span>
                     </button>
-                    <h2>{userName} - Tracking</h2>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <h2 style={{ margin: 0 }}>{displayName} - Tracking</h2>
+                        {displayCode && (
+                            <span style={{ fontSize: '0.8rem', color: '#2563eb', fontWeight: 600, background: 'rgba(37, 99, 235, 0.1)', padding: '2px 8px', borderRadius: '4px', border: '1px solid rgba(37, 99, 235, 0.2)' }}>
+                                {displayCode}
+                            </span>
+                        )}
+                    </div>
+                    {displaySubtitle && (
+                        <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                            {displaySubtitle}
+                        </div>
+                    )}
                 </div>
                 <div>
                     <input 

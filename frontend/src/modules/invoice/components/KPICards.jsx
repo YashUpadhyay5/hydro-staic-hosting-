@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { validateGSTIN } from "../utils/gstValidator";
 
 const getFieldConfidence = (sectionId, fieldKey, value) => {
   if (value === undefined || value === null || String(value).trim() === "") return 0;
@@ -56,8 +57,16 @@ const validateDocument = (extraction, dbFields) => {
     errors.push("Missing Consumer Name");
   }
 
+  // 3. GSTIN 15-digit length validation
+  const vendorGst = extraction.vendor_details?.gstin;
+  if (vendorGst && String(vendorGst).trim() && String(vendorGst).trim().length !== 15) {
+    errors.push(`Vendor GSTIN: Length is ${String(vendorGst).trim().length}/15 characters (must be exactly 15)`);
+  }
 
-  // 4. Line Items Validation
+  const consumerGst = extraction.consumer_details?.gstin;
+  if (consumerGst && String(consumerGst).trim() && String(consumerGst).trim().length !== 15) {
+    errors.push(`Consumer GSTIN: Length is ${String(consumerGst).trim().length}/15 characters (must be exactly 15)`);
+  }
   const items = extraction.items || [];
   if (items.length === 0) {
     errors.push("No line items");

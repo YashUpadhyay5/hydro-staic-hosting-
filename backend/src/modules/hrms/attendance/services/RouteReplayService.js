@@ -107,14 +107,52 @@ class RouteReplayService {
       ? Array.from(new Set([employee.id, employee.empCode, employee.name, String(userId)].filter(Boolean)))
       : [String(userId)];
 
-    // Support both YYYY-MM-DD and DD-MM-YYYY formats in DB query
-    let altDate = date;
-    if (date && date.includes('-')) {
-      const parts = date.split('-');
-      if (parts.length === 3) {
-        altDate = `${parts[2]}-${parts[1]}-${parts[0]}`;
+    // Universal Multi-Format Date Normalizer for DB queries
+    const dateVariants = new Set();
+    if (date) {
+      const rawDateStr = String(date).split('T')[0].split(' ')[0].trim();
+      dateVariants.add(rawDateStr);
+      dateVariants.add(String(date));
+
+      let year = null, month = null, day = null;
+      if (rawDateStr.includes('-')) {
+        const parts = rawDateStr.split('-');
+        if (parts.length === 3) {
+          if (parts[0].length === 4) {
+            year = parts[0]; month = parts[1]; day = parts[2];
+          } else if (parts[2].length === 4) {
+            day = parts[0]; month = parts[1]; year = parts[2];
+          }
+        }
+      } else if (rawDateStr.includes('/')) {
+        const parts = rawDateStr.split('/');
+        if (parts.length === 3) {
+          if (parts[2].length === 4) {
+            day = parts[0]; month = parts[1]; year = parts[2];
+          } else if (parts[0].length === 4) {
+            year = parts[0]; month = parts[1]; day = parts[2];
+          }
+        }
+      }
+
+      if (year && month && day) {
+        const yStr = String(year);
+        const mPad = String(month).padStart(2, '0');
+        const dPad = String(day).padStart(2, '0');
+        const mRaw = String(parseInt(month, 10));
+        const dRaw = String(parseInt(day, 10));
+
+        dateVariants.add(`${yStr}-${mPad}-${dPad}`);
+        dateVariants.add(`${dPad}-${mPad}-${yStr}`);
+        dateVariants.add(`${dRaw}-${mRaw}-${yStr}`);
+        dateVariants.add(`${yStr}-${mRaw}-${dRaw}`);
+        dateVariants.add(`${dPad}/${mPad}/${yStr}`);
+        dateVariants.add(`${dRaw}/${mRaw}/${yStr}`);
+        dateVariants.add(`${yStr}/${mPad}/${dPad}`);
+        dateVariants.add(`${yStr}/${mRaw}/${dRaw}`);
       }
     }
+    const allDateVariants = Array.from(dateVariants).filter(Boolean);
 
     // Fetch attendance for time-boundary checking safely
     let checkInTs = null;
@@ -125,7 +163,7 @@ class RouteReplayService {
         attendanceRecord = await Attendance.findOne({
           where: {
             userId: { [Op.or]: targetUserIds },
-            date: { [Op.or]: [date, altDate] }
+            date: { [Op.or]: allDateVariants }
           },
           order: [['createdAt', 'DESC']]
         });
@@ -143,7 +181,7 @@ class RouteReplayService {
     let rawFootprints = await Footprint.findAll({
       where: { 
         userId: { [Op.or]: targetUserIds }, 
-        date: { [Op.or]: [date, altDate] },
+        date: { [Op.or]: allDateVariants },
         latitude: { [Op.ne]: null },
         longitude: { [Op.ne]: null }
       },
@@ -193,6 +231,58 @@ class RouteReplayService {
 
     // Sort by timestamp
     rawFootprints = rawFootprints.sort((a, b) => parseTs(a) - parseTs(b));
+
+    // Dynamic GPS Off Duration Calculation Engine
+    let gpsOffMinutes = 0;
+    let lastOffTime = null;
+
+    const isExplicitGpsOff = (f) => {
+      if (!f) return false;
+      const method = String(f.trackingMethod || f.tracking_method || (f.cell_id || f.cellId ? 'CELLULAR' : 'GPS')).toUpperCase();
+      if (method.includes('CELL') || method.includes('TOWER') || method.includes('NETWORK') || method.includes('WIFI') || Boolean(f.cell_id || f.cellId)) {
+        return false;
+      }
+      return (
+        f.isGpsOff === true || f.isGpsOff === 'true' ||
+        f.isGpsOn === false || f.isGpsOn === 'false' || f.isGpsOn === 0 ||
+        f.locationEnabled === false || f.locationEnabled === 'false' || f.locationEnabled === 0 || 
+        f.location_enabled === 0 || f.location_enabled === '0' || f.location_enabled === false ||
+        String(f.gpsStatus || '').toUpperCase() === 'OFF'
+      );
+    };
+
+    for (let i = 0; i < rawFootprints.length; i++) {
+      const f = rawFootprints[i];
+      const ts = parseTs(f);
+      if (ts === 0) continue;
+
+      if (isExplicitGpsOff(f)) {
+        if (!lastOffTime) lastOffTime = ts;
+      } else {
+        if (lastOffTime) {
+          gpsOffMinutes += (ts - lastOffTime) / 60000;
+          lastOffTime = null;
+        }
+      }
+    }
+
+    if (lastOffTime) {
+      const targetDayStr = String(date || '').split('T')[0];
+      const endOfDayTime = new Date(targetDayStr + 'T23:59:59').getTime();
+      const nowTime = Date.now();
+      const capTime = isNaN(endOfDayTime) ? nowTime : Math.min(endOfDayTime, nowTime);
+      if (capTime > lastOffTime) {
+        gpsOffMinutes += (capTime - lastOffTime) / 60000;
+      }
+    }
+
+    const gpsOffDurationMinutes = Math.round(gpsOffMinutes * 10) / 10;
+    let gpsOffDurationLabel = '0m';
+    if (gpsOffMinutes > 0) {
+      const hrs = Math.floor(gpsOffMinutes / 60);
+      const mins = Math.round(gpsOffMinutes % 60);
+      gpsOffDurationLabel = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
+    }
 
     // 2. Strict GPS Filtering & Categorization Pipeline
     const gpsPoints = [];
@@ -293,6 +383,8 @@ class RouteReplayService {
         idleTime: 0,
         averageSpeed: 0,
         maximumSpeed: 0,
+        gpsOffDurationMinutes,
+        gpsOffDurationLabel,
         gpsPoints: [],
         rawLogs: formattedLogs,
         rawFootprints: formattedLogs,
@@ -329,6 +421,8 @@ class RouteReplayService {
         idleTimeMinutes: 0,
         averageSpeed: 0,
         maximumSpeed: 0,
+        gpsOffDurationMinutes,
+        gpsOffDurationLabel,
         gpsPoints,
         rawLogs: formattedLogs,
         rawFootprints: formattedLogs,
@@ -559,6 +653,8 @@ class RouteReplayService {
       idleTimeMinutes: idleTimeMinutes,
       averageSpeed: avgSpeedKmH,
       maximumSpeed: maxSpeedKmH,
+      gpsOffDurationMinutes,
+      gpsOffDurationLabel,
       gpsPoints,
       rawLogs: formattedLogs,
       rawFootprints: formattedLogs,

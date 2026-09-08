@@ -194,6 +194,58 @@ class RouteReplayService {
     // Sort by timestamp
     rawFootprints = rawFootprints.sort((a, b) => parseTs(a) - parseTs(b));
 
+    // Dynamic GPS Off Duration Calculation Engine
+    let gpsOffMinutes = 0;
+    let lastOffTime = null;
+
+    const isExplicitGpsOff = (f) => {
+      if (!f) return false;
+      const method = String(f.trackingMethod || f.tracking_method || (f.cell_id || f.cellId ? 'CELLULAR' : 'GPS')).toUpperCase();
+      if (method.includes('CELL') || method.includes('TOWER') || method.includes('NETWORK') || method.includes('WIFI') || Boolean(f.cell_id || f.cellId)) {
+        return false;
+      }
+      return (
+        f.isGpsOff === true || f.isGpsOff === 'true' ||
+        f.isGpsOn === false || f.isGpsOn === 'false' || f.isGpsOn === 0 ||
+        f.locationEnabled === false || f.locationEnabled === 'false' || f.locationEnabled === 0 || 
+        f.location_enabled === 0 || f.location_enabled === '0' || f.location_enabled === false ||
+        String(f.gpsStatus || '').toUpperCase() === 'OFF'
+      );
+    };
+
+    for (let i = 0; i < rawFootprints.length; i++) {
+      const f = rawFootprints[i];
+      const ts = parseTs(f);
+      if (ts === 0) continue;
+
+      if (isExplicitGpsOff(f)) {
+        if (!lastOffTime) lastOffTime = ts;
+      } else {
+        if (lastOffTime) {
+          gpsOffMinutes += (ts - lastOffTime) / 60000;
+          lastOffTime = null;
+        }
+      }
+    }
+
+    if (lastOffTime) {
+      const targetDayStr = String(date || '').split('T')[0];
+      const endOfDayTime = new Date(targetDayStr + 'T23:59:59').getTime();
+      const nowTime = Date.now();
+      const capTime = isNaN(endOfDayTime) ? nowTime : Math.min(endOfDayTime, nowTime);
+      if (capTime > lastOffTime) {
+        gpsOffMinutes += (capTime - lastOffTime) / 60000;
+      }
+    }
+
+    const gpsOffDurationMinutes = Math.round(gpsOffMinutes * 10) / 10;
+    let gpsOffDurationLabel = '0m';
+    if (gpsOffMinutes > 0) {
+      const hrs = Math.floor(gpsOffMinutes / 60);
+      const mins = Math.round(gpsOffMinutes % 60);
+      gpsOffDurationLabel = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
+    }
+
     // 2. Strict GPS Filtering & Categorization Pipeline
     const gpsPoints = [];
     let ignoredCellular = 0;
@@ -293,9 +345,11 @@ class RouteReplayService {
         idleTime: 0,
         averageSpeed: 0,
         maximumSpeed: 0,
+        gpsOffDurationMinutes,
+        gpsOffDurationLabel,
         gpsPoints: [],
         rawLogs: formattedLogs,
-      rawFootprints: formattedLogs,
+        rawFootprints: formattedLogs,
         ignoredCellular,
         ignoredWifi,
         ignoredNetwork,
@@ -329,9 +383,11 @@ class RouteReplayService {
         idleTimeMinutes: 0,
         averageSpeed: 0,
         maximumSpeed: 0,
+        gpsOffDurationMinutes,
+        gpsOffDurationLabel,
         gpsPoints,
         rawLogs: formattedLogs,
-      rawFootprints: formattedLogs,
+        rawFootprints: formattedLogs,
         ignoredCellular,
         ignoredWifi,
         ignoredNetwork,
@@ -559,6 +615,8 @@ class RouteReplayService {
       idleTimeMinutes: idleTimeMinutes,
       averageSpeed: avgSpeedKmH,
       maximumSpeed: maxSpeedKmH,
+      gpsOffDurationMinutes,
+      gpsOffDurationLabel,
       gpsPoints,
       rawLogs: formattedLogs,
       rawFootprints: formattedLogs,

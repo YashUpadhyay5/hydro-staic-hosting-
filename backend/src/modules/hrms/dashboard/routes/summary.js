@@ -31,10 +31,7 @@ const handleSummary = async (req, res) => {
       Expense.count({ where: { status: 'pending' } }),
       Attendance.count({ 
         where: { 
-          [Op.or]: [
-            { date: { [Op.in]: [todayStr, altDate] } },
-            require('sequelize').where(require('sequelize').fn('date', require('sequelize').col('createdAt')), todayStr)
-          ]
+          date: { [Op.in]: [todayStr, altDate] }
         } 
       }),
       Employee.count({ where: { role: { [Op.ne]: 'ADMIN' } } })

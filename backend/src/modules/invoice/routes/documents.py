@@ -21,17 +21,60 @@ def debug_config():
     }
 
 
+def _ensure_normalized_bank(ext, file_bytes=None):
+    if not isinstance(ext, dict):
+        return
+    try:
+        from services.ocr_service import OCRService
+        root_ctx = {**ext}
+        bank = ext.get("bank_details") or {}
+        if file_bytes and (not bank.get("bank_name") or not bank.get("account_number") or not bank.get("ifsc_code")):
+            try:
+                import fitz
+                doc = fitz.open(stream=file_bytes, filetype="pdf")
+                pdf_text = "\n".join([page.get_text() for page in doc])
+                doc.close()
+                if pdf_text:
+                    root_ctx["raw_pdf_text"] = pdf_text
+            except Exception:
+                pass
+        ext["bank_details"] = OCRService._normalize_bank_dict(bank, root_ctx)
+    except Exception as e:
+        bank = ext.get("bank_details")
+        if not isinstance(bank, dict):
+            return
+        ifsc_val = bank.get("ifsc_code") or bank.get("ifsc") or bank.get("ifscCode") or bank.get("bank_ifsc") or bank.get("ifs_code") or bank.get("rtgs_ifsc")
+        if ifsc_val:
+            cleaned = str(ifsc_val).strip().replace(" ", "").upper()
+            if len(cleaned) == 11 and cleaned[:4].isalpha() and cleaned[4] in ('O', 'o', 'Q', 'q'):
+                cleaned = cleaned[:4] + '0' + cleaned[5:]
+            bank["ifsc_code"] = cleaned
+            bank["ifsc"] = cleaned
+        acc_val = bank.get("account_number") or bank.get("account_no") or bank.get("acc_no") or bank.get("account")
+        if acc_val:
+            bank["account_number"] = str(acc_val).strip()
+            bank["account_no"] = str(acc_val).strip()
+        bank_name = bank.get("bank_name") or bank.get("bank")
+        if bank_name:
+            bank["bank_name"] = str(bank_name).strip()
+
+
 def normalize_document_response(document):
     if not document:
         return document
     try:
         from workers.queue_worker import auto_correct_tax_summary
-        if document.get("ocr_result"):
+        file_bytes = document.get("file_content")
+        if document.get("ocr_result") and isinstance(document["ocr_result"], dict):
             document["ocr_result"] = auto_correct_tax_summary(document["ocr_result"])
-        if document.get("final_extraction"):
+            if isinstance(document["ocr_result"], dict):
+                _ensure_normalized_bank(document["ocr_result"].get("extraction"), file_bytes)
+        if document.get("final_extraction") and isinstance(document["final_extraction"], dict):
             temp_ocr = {"extraction": document["final_extraction"]}
             normalized_ocr = auto_correct_tax_summary(temp_ocr)
-            document["final_extraction"] = normalized_ocr.get("extraction")
+            if isinstance(normalized_ocr, dict):
+                document["final_extraction"] = normalized_ocr.get("extraction")
+            _ensure_normalized_bank(document["final_extraction"], file_bytes)
     except Exception as e:
         print(f"Failed to dynamically normalize document response: {e}")
     return document
@@ -39,8 +82,7 @@ def normalize_document_response(document):
 
 @router.get("/documents")
 def get_documents(db: Session = Depends(get_db)):
-    docs = QueueService.get_all_documents(db)
-    return [normalize_document_response(d) for d in docs]
+    return QueueService.get_all_documents(db)
 
 
 @router.get("/documents/{document_id}")
@@ -286,7 +328,7 @@ def generate_summary_svg(doc_data: dict) -> str:
 
 
 @router.get("/documents/{document_id}/file")
-def get_document_file(document_id: str, db: Session = Depends(get_db)):
+def get_document_file(document_id: str, download: bool = False, db: Session = Depends(get_db)):
     import os
     import mimetypes
     from models.queue_document import QueueDocument
@@ -364,4 +406,19 @@ def get_document_file(document_id: str, db: Session = Depends(get_db)):
         if not mime_type:
             mime_type = "application/pdf" if is_pdf else "image/jpeg"
 
-    return Response(content=content, media_type=mime_type)
+    # Prepare clean download filename
+    dl_filename = doc.filename or "invoice"
+    if is_pdf and not dl_filename.lower().endswith(".pdf"):
+        dl_filename += ".pdf"
+    elif mime_type == "image/svg+xml" and not dl_filename.lower().endswith(".svg"):
+        dl_filename += ".svg"
+    elif not is_pdf and mime_type != "image/svg+xml" and not any(dl_filename.lower().endswith(ext) for ext in [".png", ".jpg", ".jpeg"]):
+        dl_filename += ".jpg"
+
+    disposition = "attachment" if download else "inline"
+    headers = {
+        "Content-Disposition": f'{disposition}; filename="{dl_filename}"',
+        "Access-Control-Expose-Headers": "Content-Disposition"
+    }
+
+    return Response(content=content, media_type=mime_type, headers=headers)

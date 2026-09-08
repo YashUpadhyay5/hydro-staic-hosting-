@@ -5,16 +5,14 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './core/authentication/Login';
 import Dashboard from './core/layouts/Dashboard';
 
-// HRMS Module
-import HrmsModule from './modules/hrms/HrmsModule';
-
-// Invoice Module
-import InvoiceLayout from './modules/invoice/components/Layout';
-import UploadPage from './modules/invoice/pages/UploadPage';
-import ValidationPage from './modules/invoice/pages/ValidationPage';
-import ArchivePage from './modules/invoice/pages/ArchivePage';
-import AnalyticsPage from './modules/invoice/pages/AnalyticsPage';
-import SettingsPage from './modules/invoice/pages/SettingsPage';
+// Lazy-loaded route components for high-speed initial page loads
+const HrmsModule = React.lazy(() => import('./modules/hrms/HrmsModule'));
+const InvoiceLayout = React.lazy(() => import('./modules/invoice/components/Layout'));
+const UploadPage = React.lazy(() => import('./modules/invoice/pages/UploadPage'));
+const ValidationPage = React.lazy(() => import('./modules/invoice/pages/ValidationPage'));
+const ArchivePage = React.lazy(() => import('./modules/invoice/pages/ArchivePage'));
+const AnalyticsPage = React.lazy(() => import('./modules/invoice/pages/AnalyticsPage'));
+const SettingsPage = React.lazy(() => import('./modules/invoice/pages/SettingsPage'));
 
 // Import style sheets
 import './modules/invoice/styles/dashboard.css';
@@ -46,41 +44,47 @@ function ProtectedRoute({ children, allowedRoles }) {
 export default function AppRoutes() {
     return (
         <BrowserRouter>
-            <Routes>
-                {/* Public Auth Route */}
-                <Route path="/login" element={<Login />} />
+            <Suspense fallback={
+                <div style={{ minHeight: "100vh", width: "100vw", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg-main, #0f172a)", color: "var(--text-primary, #f8fafc)", fontSize: "14px", fontWeight: 600 }}>
+                    Loading Workspace...
+                </div>
+            }>
+                <Routes>
+                    {/* Public Auth Route */}
+                    <Route path="/login" element={<Login />} />
 
-                {/* Platform Hub Dashboard */}
-                <Route path="/" element={
-                    <ProtectedRoute>
-                        <Dashboard />
-                    </ProtectedRoute>
-                } />
+                    {/* Platform Hub Dashboard */}
+                    <Route path="/" element={
+                        <ProtectedRoute>
+                            <Dashboard />
+                        </ProtectedRoute>
+                    } />
 
-                {/* HRMS Module Routes */}
-                <Route path="/hrms/*" element={
-                    <ProtectedRoute allowedRoles={['ADMIN', 'HR', 'MANAGER', 'EMPLOYEE', 'TRACKING_MANAGER', 'FIELD_INVOICE_MANAGER']}>
-                        <HrmsModule />
-                    </ProtectedRoute>
-                } />
+                    {/* HRMS Module Routes */}
+                    <Route path="/hrms/*" element={
+                        <ProtectedRoute allowedRoles={['ADMIN', 'HR', 'MANAGER', 'EMPLOYEE', 'TRACKING_MANAGER', 'FIELD_INVOICE_MANAGER']}>
+                            <HrmsModule />
+                        </ProtectedRoute>
+                    } />
 
-                {/* Invoice Extractor Module Routes */}
-                <Route path="/invoice" element={
-                    <ProtectedRoute allowedRoles={['ADMIN', 'FINANCE', 'FIELD_INVOICE_MANAGER']}>
-                        <InvoiceLayout />
-                    </ProtectedRoute>
-                }>
-                    <Route index element={<Navigate to="uploads" replace />} />
-                    <Route path="uploads" element={<UploadPage />} />
-                    <Route path="validation" element={<ValidationPage />} />
-                    <Route path="archive" element={<ArchivePage />} />
-                    <Route path="analytics" element={<AnalyticsPage />} />
-                    <Route path="settings" element={<SettingsPage />} />
-                </Route>
+                    {/* Invoice Extractor Module Routes */}
+                    <Route path="/invoice" element={
+                        <ProtectedRoute allowedRoles={['ADMIN', 'FINANCE', 'FIELD_INVOICE_MANAGER']}>
+                            <InvoiceLayout />
+                        </ProtectedRoute>
+                    }>
+                        <Route index element={<Navigate to="uploads" replace />} />
+                        <Route path="uploads" element={<UploadPage />} />
+                        <Route path="validation" element={<ValidationPage />} />
+                        <Route path="archive" element={<ArchivePage />} />
+                        <Route path="analytics" element={<AnalyticsPage />} />
+                        <Route path="settings" element={<SettingsPage />} />
+                    </Route>
 
-                {/* Fallback redirect */}
-                <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
+                    {/* Fallback redirect */}
+                    <Route path="*" element={<Navigate to="/" replace />} />
+                </Routes>
+            </Suspense>
         </BrowserRouter>
     );
 }

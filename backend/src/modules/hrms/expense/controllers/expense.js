@@ -1,6 +1,7 @@
 const Expense = require('../../../../shared/models/Expense');
 const Employee = require('../../../../shared/models/Employee');
 const sequelize = require('../../../../config/database');
+const { getCachedEmployees } = require('../../../../core/utils/employeeCache');
 const fs = require('fs');
 const path = require('path');
 
@@ -11,13 +12,7 @@ exports.getAllExpenses = async (req, res) => {
       order: [['createdAt', 'DESC']]
     });
 
-    const employees = await Employee.findAll();
-    const empMap = new Map();
-    employees.forEach(emp => {
-      if (emp.id) empMap.set(String(emp.id).toLowerCase(), emp);
-      if (emp.empCode) empMap.set(String(emp.empCode).toLowerCase(), emp);
-      if (emp.name) empMap.set(String(emp.name).toLowerCase(), emp);
-    });
+    const { employees, empMap } = await getCachedEmployees();
 
     const enriched = expenses.map(exp => {
       const plain = exp.toJSON();

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useOutletContext } from "react-router-dom";
 import API from "../services/api";
 import ExcelDateRangeModal from "../components/ExcelDateRangeModal";
+import { downloadInvoiceFile } from "../utils/constants";
 
 const getDocDetails = (doc) => {
   if (!doc) return { vendorName: "Unknown Vendor", invoiceNo: "N/A", invoiceDate: "N/A", grandTotal: 0 };
@@ -116,9 +117,9 @@ export default function ArchivePage() {
     }
   };
 
-  const handleDownload = (doc) => {
-    const token = localStorage.getItem("token") || "";
-    window.open(`http://${window.location.hostname}:8000/api/documents/${doc.document_id}/file?token=${token}`, "_blank");
+  const handleDownload = async (doc) => {
+    showToast(`Downloading "${doc.filename}"...`);
+    await downloadInvoiceFile(doc);
   };
 
   const handlePrint = (doc) => {
@@ -495,6 +496,13 @@ export default function ArchivePage() {
           </div>
         </div>
       )}
+
+      {/* Date Range Modal for Excel Export */}
+      <ExcelDateRangeModal
+        isOpen={showExcelModal}
+        onClose={() => setShowExcelModal(false)}
+        showToast={showToast}
+      />
     </div>
   );
 }
@@ -506,6 +514,7 @@ function ArchiveDetailView({ doc, onClose }) {
   const vendor = ext.vendor_details || {};
   const consumer = ext.consumer_details || {};
   const invoice = ext.invoice_details || {};
+  const bank = ext.bank_details || ext.vendor_details?.bank_details || {};
   const ts = ext.tax_summary || {};
   const items = ext.items || [];
 
@@ -539,7 +548,7 @@ function ArchiveDetailView({ doc, onClose }) {
             }}
             onClick={() => {
               const token = localStorage.getItem("token") || "";
-              window.open(`http://${window.location.hostname}:8000/api/export/excel?token=${token}`, "_blank");
+              window.open(`http://${window.location.hostname}:8000/api/export/excel?document_id=${encodeURIComponent(doc.document_id)}&token=${token}`, "_blank");
             }}
           >
             <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
@@ -589,6 +598,17 @@ function ArchiveDetailView({ doc, onClose }) {
           </div>
         </div>
 
+        {/* Bank Details */}
+        <div className="detail-section">
+          <h4>Bank Details</h4>
+          <div className="detail-grid-2">
+            <div className="detail-field"><label>Bank Name</label><span>{bank.bank_name || bank.bank || "N/A"}</span></div>
+            <div className="detail-field"><label>Account Number</label><span>{bank.account_number || bank.account_no || bank.acc_no || "N/A"}</span></div>
+            <div className="detail-field"><label>IFSC Code</label><span>{bank.ifsc_code || bank.ifsc || "N/A"}</span></div>
+            <div className="detail-field"><label>Branch</label><span>{bank.branch || bank.branch_name || "N/A"}</span></div>
+          </div>
+        </div>
+
         {/* Tax Summary */}
         <div className="detail-section">
           <h4>Tax Summary</h4>
@@ -627,13 +647,6 @@ function ArchiveDetailView({ doc, onClose }) {
           </div>
         )}
       </div>
-
-      {/* Date Range Modal for Excel Export */}
-      <ExcelDateRangeModal
-        isOpen={showExcelModal}
-        onClose={() => setShowExcelModal(false)}
-        showToast={showToast}
-      />
     </div>
   );
 }

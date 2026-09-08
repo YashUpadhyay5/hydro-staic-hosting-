@@ -35,6 +35,8 @@ def export_excel(
     end_date: Optional[str] = None,
     startDate: Optional[str] = None,
     endDate: Optional[str] = None,
+    document_id: Optional[str] = None,
+    saved_only: Optional[bool] = True,
     db: Session = Depends(get_db)
 ):
     effective_start = start_date or startDate
@@ -44,12 +46,16 @@ def export_excel(
         ExcelService.generate_inventory_excel(
             db,
             start_date=effective_start,
-            end_date=effective_end
+            end_date=effective_end,
+            document_id=document_id,
+            saved_only=saved_only
         )
     )
 
-    filename = "inventory_export.xlsx"
-    if effective_start and effective_end:
+    filename = "inventory_saved_invoices.xlsx"
+    if document_id:
+        filename = f"invoice_{document_id}.xlsx"
+    elif effective_start and effective_end:
         filename = f"invoices_{effective_start}_to_{effective_end}.xlsx"
     elif effective_start:
         filename = f"invoices_from_{effective_start}.xlsx"

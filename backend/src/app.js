@@ -38,6 +38,7 @@ app.set('trust proxy', 1);
 // Global robust CORS Manager
 app.use(corsManager);
 
+
 // The custom corsManager handles all CORS and preflight logic above
 
 // Proxy invoice extractor endpoints directly to python FastAPI service on port 8080
@@ -82,20 +83,9 @@ const invoiceProxy = createProxyMiddleware({
     }
 });
 
-const multer = require('multer');
-const uploadParser = multer({ storage: multer.memoryStorage() }).any();
-
 app.use((req, res, next) => {
     const fullUrl = req.originalUrl || req.url || req.path;
     if (invoiceFilter(fullUrl, req)) {
-        if (fullUrl.includes('/upload')) {
-            return uploadParser(req, res, (err) => {
-                return invoiceProxy(req, res, (proxyErr) => {
-                    if (proxyErr) return handleInvoiceExpressFallback(req, res);
-                    next();
-                });
-            });
-        }
         return invoiceProxy(req, res, (err) => {
             if (err) return handleInvoiceExpressFallback(req, res);
             next();
@@ -173,33 +163,27 @@ app.use('/invoices', express.static(path.join(STORAGE_PATH, 'invoices'), staticO
 app.use('/invoices', express.static(path.join(BACKEND_STORAGE_PATH, 'invoices'), staticOptions));
 
 // --- API ROUTE ENDPOINTS (ALL MERGED & PROTECTED) ---
-const apicache = require('apicache');
-const cache = apicache.middleware('1 minute', (req, res) => {
-    if (req.path && req.path.includes('route-replay')) return false;
-    return req.method === 'GET';
-});
-
 const registerRoutes = (prefix) => {
     app.use(`${prefix}/auth`, authRoutes);
     app.use(`${prefix}/expenses`, verifyToken, expenseRoutes);
     app.use(`${prefix}/attendance`, verifyToken, attendanceRoutes);
     app.use(`${prefix}/footprints`, verifyToken, footprintRoutes);
     app.use(`${prefix}/footprint`, verifyToken, footprintRoutes);
-    app.use(`${prefix}/media`, verifyToken, cache, mediaRoutes);
+    app.use(`${prefix}/media`, verifyToken, mediaRoutes);
     app.use(`${prefix}/leaves`, verifyToken, leaveRoutes);
     app.use(`${prefix}/documents`, verifyToken, documentRoutes);
     app.use(`${prefix}/hrms-documents`, verifyToken, documentRoutes);
-    app.use(`${prefix}/employees`, verifyToken, cache, employeeRoutes);
-    app.use(`${prefix}/geofence`, verifyToken, cache, geofenceRoutes);
+    app.use(`${prefix}/employees`, verifyToken, employeeRoutes);
+    app.use(`${prefix}/geofence`, verifyToken, geofenceRoutes);
     app.use(`${prefix}/ledger`, verifyToken, ledgerRoutes);   // Preserved from v1
-    app.use(`${prefix}/sites`, verifyToken, cache, siteRoutes);       // Preserved from v2
+    app.use(`${prefix}/sites`, verifyToken, siteRoutes);       // Preserved from v2
     app.use(`${prefix}/rules`, verifyToken, ruleRoutes);
-    app.use(`${prefix}/clusters`, verifyToken, cache, clusterRoutes); // Preserved from v2
+    app.use(`${prefix}/clusters`, verifyToken, clusterRoutes); // Preserved from v2
     const databaseGuard = require('./modules/system/routes/databaseGuard');
     app.use(`${prefix}/system/database`, databaseGuard);
     app.use(`${prefix}/payroll`, verifyToken, payrollRoutes);
     app.use(`${prefix}/notifications/whatsapp`, whatsappNotificationRoutes);
-    app.use(`${prefix}/notifications`, verifyToken, cache, notificationRoutes);
+    app.use(`${prefix}/notifications`, verifyToken, notificationRoutes);
     app.use(`${prefix}/chat`, verifyToken, chatRoutes);
     app.use(`${prefix}/dashboard`, dashboardSummaryRoutes);
     app.use(`${prefix}/settings`, verifyToken, settingsRoutes);

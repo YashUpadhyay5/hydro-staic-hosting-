@@ -38,7 +38,13 @@ def parse_numeric(val):
 class ExcelService:
 
     @staticmethod
-    def generate_inventory_excel(db: Session, start_date: str = None, end_date: str = None):
+    def generate_inventory_excel(
+        db: Session,
+        start_date: str = None,
+        end_date: str = None,
+        document_id: str = None,
+        saved_only: bool = True
+    ):
         # 1. Fetch active template
         tpl = db.query(Template).filter(Template.is_default == True).first()
         if not tpl:
@@ -73,10 +79,19 @@ class ExcelService:
                     if not field.get("hidden", False):
                         columns_mapping.append((sec_id, field["key"], f"{sec['name']} - {field['label']}", field.get("type", "Text")))
 
-        # 3. Query processed queue documents containing ocr extraction data with optional uploaded date duration filter
+        # 3. Query queue documents containing ocr extraction data (filtering strictly to saved/verified records)
         query = db.query(QueueDocument).filter(
             QueueDocument.ocr_result.isnot(None)
         )
+
+        if document_id:
+            query = query.filter(QueueDocument.document_id == document_id)
+        elif saved_only:
+            query = query.filter(
+                (QueueDocument.saved == True) | 
+                (QueueDocument.status.in_(["Saved", "VALIDATED", "ARCHIVED", "saved", "validated", "archived"]))
+            )
+
         if start_date:
             query = query.filter(QueueDocument.created_at >= f"{start_date.strip()} 00:00:00")
         if end_date:
@@ -162,10 +177,18 @@ class ExcelService:
                                 val = inv_cess
                             elif f_key == "grand_total":
                                 val = inv_grand_total
-                            else:
-                                val = sec_val.get(f_key, "") if isinstance(sec_val, dict) else ""
+                    elif sec_id == "bank_details":
+                        sec_val = ext.get(sec_id, {}) or {}
+                        if not isinstance(sec_val, dict):
+                            sec_val = {}
+                        if f_key in ["ifsc_code", "ifsc"]:
+                            val = sec_val.get("ifsc_code") or sec_val.get("ifsc") or ""
+                        elif f_key in ["account_number", "account_no", "acc_no"]:
+                            val = sec_val.get("account_number") or sec_val.get("account_no") or sec_val.get("acc_no") or ""
+                        elif f_key in ["bank_name", "bank"]:
+                            val = sec_val.get("bank_name") or sec_val.get("bank") or ""
                         else:
-                            val = ""
+                            val = sec_val.get(f_key, "")
                     else:
                         sec_val = ext.get(sec_id, {}) or {}
                         val = sec_val.get(f_key, "") if isinstance(sec_val, dict) else ""

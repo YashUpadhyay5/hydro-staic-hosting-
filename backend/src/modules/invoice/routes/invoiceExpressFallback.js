@@ -205,20 +205,7 @@ const renderSampleInvoiceSVG = (doc) => {
   </svg>`;
 };
 
-const inMemoryDocuments = [
-  {
-    id: "doc_inv_1001",
-    document_id: "doc_inv_1001",
-    filename: "INV-2026-0801.pdf",
-    original_filename: "INV-2026-0801.pdf",
-    status: "VALIDATED",
-    confidence_score: 98.4,
-    created_at: new Date().toISOString(),
-    final_extraction: sampleExtraction,
-    ocr_result: { confidence: 98.4, extraction: sampleExtraction },
-    extracted_data: sampleExtraction
-  }
-];
+const inMemoryDocuments = [];
 
 const handleInvoiceExpressFallback = async (req, res) => {
   const fullUrl = req.originalUrl || req.url || req.path || '';

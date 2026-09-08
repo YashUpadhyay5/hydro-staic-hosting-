@@ -33,6 +33,42 @@ const isSessionActive = (r) => {
     return !out;
 };
 
+const normalizeToIsoDate = (dStr) => {
+    if (!dStr) return '';
+    const clean = String(dStr).split('T')[0].split(' ')[0].trim();
+    if (clean.includes('-')) {
+        const parts = clean.split('-');
+        if (parts[0].length === 4) return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+        if (parts[2].length === 4) return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+    } else if (clean.includes('/')) {
+        const parts = clean.split('/');
+        if (parts[2].length === 4) return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+        if (parts[0].length === 4) return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+    }
+    return clean;
+};
+
+const getAuthoritativeISTDate = (d = new Date()) => {
+    try {
+        return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date(d));
+    } catch {
+        return new Date().toISOString().split('T')[0];
+    }
+};
+
+const isToday = (dateStr) => {
+    if (!dateStr) return false;
+    const todayIso = normalizeToIsoDate(new Date().toISOString().split('T')[0]);
+    const todayIst = getAuthoritativeISTDate();
+    const clean = normalizeToIsoDate(dateStr);
+    if (clean === todayIso || clean === todayIst) return true;
+    const d = new Date(dateStr);
+    if (!isNaN(d.getTime())) {
+        return d.toDateString() === new Date().toDateString();
+    }
+    return false;
+};
+
 const groupAttendanceRecords = (records, footprintsList = [], employeesList = []) => {
     const grouped = {};
 
@@ -67,14 +103,7 @@ const groupAttendanceRecords = (records, footprintsList = [], employeesList = []
     };
 
     const isTodayStr = (dStr) => {
-        if (!dStr) return false;
-        const todayIso = new Date().toISOString().split('T')[0];
-        if (dStr === todayIso) return true;
-        const d = new Date(dStr);
-        if (!isNaN(d.getTime())) {
-            return d.toDateString() === new Date().toDateString();
-        }
-        return false;
+        return isToday(dStr);
     };
 
     const formatTsTime = (ts) => {
@@ -91,11 +120,38 @@ const groupAttendanceRecords = (records, footprintsList = [], employeesList = []
         }
         if (!dateStr) return;
         
-        const key = `${r.userName || r.userId}_${dateStr}`;
+        const uid = String(r.userId || '').trim().toLowerCase();
+        const uname = String(r.userName || '').trim().toLowerCase();
+        const ucode = String(r.empCode || r.employeeId || '').trim().toLowerCase();
+
+        // Match employee from r.employee or employeesList to get a unified identity key
+        const rEmp = r.employee || (employeesList || []).find(e => {
+            if (!e) return false;
+            const eid = String(e.id || '').trim().toLowerCase();
+            const ecode = String(e.empCode || e.emp_code || e.employeeId || e.empId || '').trim().toLowerCase();
+            const ename = String(e.name || '').trim().toLowerCase();
+            return (uid && (uid === eid || uid === ecode || uid === ename)) ||
+                   (ucode && (ucode === ecode || ucode === eid)) ||
+                   (uname && (uname === ename || uname === eid || uname === ecode));
+        });
+
+        const canonicalId = rEmp?.empCode || rEmp?.id || r.empCode || r.employeeId || r.userId || r.userName;
+        const key = `${canonicalId}_${dateStr}`;
+        
+        const resolvedName = r.userName || rEmp?.name || r.name || r.employeeName;
+        const resolvedCode = r.empCode || rEmp?.empCode || rEmp?.emp_code || r.employeeId;
+        const resolvedJob = r.jobTitle || rEmp?.jobTitle || rEmp?.designation || r.designation;
+        const resolvedDept = r.department || rEmp?.department;
+
         if (!grouped[key]) {
             grouped[key] = {
                 ...r,
                 date: dateStr,
+                userName: resolvedName || r.userName,
+                empCode: resolvedCode || r.empCode,
+                jobTitle: resolvedJob,
+                department: resolvedDept,
+                employee: r.employee || rEmp,
                 checkIn: r.checkIn,
                 checkOut: r.checkOut,
                 punchCount: 1,
@@ -104,6 +160,11 @@ const groupAttendanceRecords = (records, footprintsList = [], employeesList = []
         } else {
             grouped[key].punchCount += 1;
             grouped[key].punches.push(r);
+            if (!grouped[key].userName && resolvedName) grouped[key].userName = resolvedName;
+            if (!grouped[key].empCode && resolvedCode) grouped[key].empCode = resolvedCode;
+            if (!grouped[key].jobTitle && resolvedJob) grouped[key].jobTitle = resolvedJob;
+            if (!grouped[key].department && resolvedDept) grouped[key].department = resolvedDept;
+            if (!grouped[key].employee && (r.employee || rEmp)) grouped[key].employee = r.employee || rEmp;
 
             const existingCheckInTs = parseToTimestamp(grouped[key].checkIn);
             const newCheckInTs = parseToTimestamp(r.checkIn);
@@ -116,6 +177,58 @@ const groupAttendanceRecords = (records, footprintsList = [], employeesList = []
             if (newCheckOutTs && (!existingCheckOutTs || newCheckOutTs > existingCheckOutTs)) {
                 grouped[key].checkOut = r.checkOut;
             }
+        }
+    });
+
+    // Fallback: If employees have active live footprints today but no attendance entry in records, synthesize the active entry
+    (footprintsList || []).forEach(f => {
+        if (!f) return;
+        const fUid = String(f.userId || '').trim().toLowerCase();
+        const fUName = String(f.userName || '').trim().toLowerCase();
+        const fUCode = String(f.empCode || '').trim().toLowerCase();
+        const fDate = f.date ? normalizeToIsoDate(f.date) : getAuthoritativeISTDate();
+        if (!isToday(fDate)) return;
+
+        const fEmp = f.employee || (employeesList || []).find(e => {
+            if (!e) return false;
+            const eid = String(e.id || '').trim().toLowerCase();
+            const ecode = String(e.empCode || e.emp_code || e.employeeId || e.empId || '').trim().toLowerCase();
+            const ename = String(e.name || '').trim().toLowerCase();
+            return (fUid && (fUid === eid || fUid === ecode || fUid === ename)) ||
+                   (fUCode && (fUCode === ecode || fUCode === eid)) ||
+                   (fUName && (fUName === ename || fUName === eid || fUName === ecode));
+        });
+
+        const canonicalId = fEmp?.empCode || fEmp?.id || f.empCode || f.userId || f.userName;
+        const key = `${canonicalId}_${fDate}`;
+
+        if (!grouped[key]) {
+            const timeStr = f.checkIn || formatTsTime(f.timestamp) || '09:30:00 AM';
+            grouped[key] = {
+                id: f.id || `fp-att-${canonicalId}`,
+                userId: fEmp?.empCode || fEmp?.id || f.empCode || f.userId,
+                userName: fEmp?.name || f.userName || 'Employee',
+                empCode: fEmp?.empCode || fEmp?.emp_code || f.empCode || f.userId,
+                jobTitle: fEmp?.jobTitle || fEmp?.designation || f.designation,
+                department: fEmp?.department || f.department,
+                employee: fEmp || f.employee,
+                date: fDate,
+                checkIn: timeStr,
+                checkOut: null,
+                checkInMethod: 'AUTO_RECOVERY_PUNCH',
+                clockOutMethod: null,
+                punchCount: 1,
+                punches: [{
+                    id: f.id || `fp-att-${canonicalId}`,
+                    userId: fEmp?.empCode || fEmp?.id || f.empCode || f.userId,
+                    userName: fEmp?.name || f.userName || 'Employee',
+                    empCode: fEmp?.empCode || fEmp?.emp_code || f.empCode || f.userId,
+                    date: fDate,
+                    checkIn: timeStr,
+                    checkOut: null,
+                    checkInMethod: 'AUTO_RECOVERY_PUNCH'
+                }]
+            };
         }
     });
 
@@ -181,6 +294,7 @@ const groupAttendanceRecords = (records, footprintsList = [], employeesList = []
                 const mainOutTs = parseToTimestamp(lastPunchWithOut.checkOut);
                 if (mainInTs && mainOutTs && mainOutTs > mainInTs) {
                     item.checkOut = lastPunchWithOut.checkOut;
+                    item.clockOutMethod = lastPunchWithOut.clockOutMethod || item.clockOutMethod;
                 } else {
                     item.checkOut = null;
                 }
@@ -194,26 +308,37 @@ const groupAttendanceRecords = (records, footprintsList = [], employeesList = []
             if (isTodayRecord && lastPunch && !cleanCheckOutVal(lastPunch.checkOut)) {
                 item.checkOut = null;
             } else if (!isTodayRecord && !item.checkOut) {
-                // Past date record with no explicit checkOut logged:
-                // Auto-resolve checkOut from employee's location footprints on that date
-                const itemUserStr = String(item.userId || item.userName).trim().toLowerCase();
-                const itemUserNameStr = String(item.userName || '').trim().toLowerCase();
-                
-                const userFps = (footprintsList || []).filter(f => {
-                    const fUser = String(f.userId || f.userName || '').trim().toLowerCase();
-                    const fName = String(f.userName || '').trim().toLowerCase();
-                    const fDate = f.date ? f.date.split('T')[0] : (f.createdAt ? f.createdAt.split('T')[0] : '');
+                // Past date record with no valid checkOut logged:
+                const enrichedOutPunch = cleanPunches.find(p => p.clockOutMethod === 'AUTO_SHIFT_END' || p.clockOutMethod === 'AUTO_STALE_CLEANUP');
+                if (enrichedOutPunch && enrichedOutPunch.checkOut) {
+                    item.checkOut = enrichedOutPunch.checkOut;
+                    item.clockOutMethod = enrichedOutPunch.clockOutMethod;
+                } else {
+                    // Auto-resolve checkOut from employee's location footprints on that date
+                    const itemUserStr = String(item.userId || item.userName).trim().toLowerCase();
+                    const itemUserNameStr = String(item.userName || '').trim().toLowerCase();
                     
-                    const matchUser = (fUser && fUser === itemUserStr) || (fName && fName === itemUserNameStr) || (fUser && itemUserNameStr.includes(fUser));
-                    const matchDate = fDate && (fDate === item.date || new Date(fDate).toDateString() === new Date(item.date).toDateString());
-                    return matchUser && matchDate;
-                }).sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
+                    const userFps = (footprintsList || []).filter(f => {
+                        const fUser = String(f.userId || f.userName || '').trim().toLowerCase();
+                        const fName = String(f.userName || '').trim().toLowerCase();
+                        const fDate = f.date ? f.date.split('T')[0] : (f.createdAt ? f.createdAt.split('T')[0] : '');
+                        
+                        const matchUser = (fUser && fUser === itemUserStr) || (fName && fName === itemUserNameStr) || (fUser && itemUserNameStr.includes(fUser));
+                        const matchDate = fDate && (fDate === item.date || new Date(fDate).toDateString() === new Date(item.date).toDateString());
+                        return matchUser && matchDate;
+                    }).sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
 
-                if (userFps.length > 0) {
-                    const lastFp = userFps[userFps.length - 1];
-                    const lastFpTime = formatTsTime(lastFp.timestamp);
-                    if (lastFpTime) {
-                        item.checkOut = lastFpTime;
+                    if (userFps.length > 0) {
+                        const lastFp = userFps[userFps.length - 1];
+                        const lastFpTime = formatTsTime(lastFp.timestamp);
+                        if (lastFpTime) {
+                            item.checkOut = lastFpTime;
+                            item.clockOutMethod = 'AUTO_LOCATION_ANCHOR';
+                        }
+                    } else {
+                        // Dynamic Shift End fallback for unclosed past days
+                        item.checkOut = item.shiftCode === '10-7' ? '19:00:00' : (item.shiftCode === '8-5' ? '17:00:00' : '18:00:00');
+                        item.clockOutMethod = 'AUTO_SHIFT_END';
                     }
                 }
             }
@@ -326,16 +451,122 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
         } else if (clean.includes('/')) {
             const parts = clean.split('/');
             if (parts[2].length === 4) return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+            if (parts[0].length === 4) return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
         }
         return clean;
     };
 
-    const getGpsIcon = (userId, recordDate) => {
-        const f = latestFootprints[userId];
+    const getAllDateAliases = (dStr) => {
+        if (!dStr) return [];
+        const aliases = new Set();
+        const raw = String(dStr).split('T')[0].split(' ')[0].trim();
+        aliases.add(raw);
+        aliases.add(String(dStr));
+
+        let year = null, month = null, day = null;
+        if (raw.includes('-')) {
+            const parts = raw.split('-');
+            if (parts.length === 3) {
+                if (parts[0].length === 4) {
+                    year = parts[0]; month = parts[1]; day = parts[2];
+                } else if (parts[2].length === 4) {
+                    day = parts[0]; month = parts[1]; year = parts[2];
+                }
+            }
+        } else if (raw.includes('/')) {
+            const parts = raw.split('/');
+            if (parts.length === 3) {
+                if (parts[2].length === 4) {
+                    day = parts[0]; month = parts[1]; year = parts[2];
+                } else if (parts[0].length === 4) {
+                    year = parts[0]; month = parts[1]; day = parts[2];
+                }
+            }
+        }
+
+        if (year && month && day) {
+            const yStr = String(year);
+            const mPad = String(month).padStart(2, '0');
+            const dPad = String(day).padStart(2, '0');
+            const mRaw = String(parseInt(month, 10));
+            const dRaw = String(parseInt(day, 10));
+
+            aliases.add(`${yStr}-${mPad}-${dPad}`);
+            aliases.add(`${dPad}-${mPad}-${yStr}`);
+            aliases.add(`${dRaw}-${mRaw}-${yStr}`);
+            aliases.add(`${yStr}-${mRaw}-${dRaw}`);
+            aliases.add(`${dPad}/${mPad}/${yStr}`);
+            aliases.add(`${dRaw}/${mRaw}/${yStr}`);
+            aliases.add(`${yStr}/${mPad}/${dPad}`);
+            aliases.add(`${yStr}/${mRaw}/${dRaw}`);
+        }
+        return Array.from(aliases).filter(Boolean);
+    };
+
+    // Standardized GPS Off helpers
+    const isCellularPing = (f) => {
+        if (!f) return false;
+        const provider = String(f.provider || f.trackingMethod || f.tracking_method || '').toLowerCase();
+        return provider.includes('cell') || provider.includes('net') || f.trackingMethod === 'CELLULAR' || Boolean(f.cell_id || f.cellId);
+    };
+
+    const isExplicitGpsOff = (f) => {
+        if (!f) return false;
+        if (isCellularPing(f)) return false;
+        return (
+            f.isGpsOff === true || f.isGpsOff === 'true' ||
+            f.isGpsOn === false || f.isGpsOn === 'false' || f.isGpsOn === 0 ||
+            f.locationEnabled === false || f.locationEnabled === 'false' || f.locationEnabled === 0 || 
+            f.location_enabled === 0 || f.location_enabled === '0' || f.location_enabled === false ||
+            String(f.gpsStatus || '').toUpperCase() === 'OFF'
+        );
+    };
+
+    const getGpsIcon = (empOrId, recordOrDate) => {
+        let emp = typeof empOrId === 'object' && empOrId !== null ? empOrId : null;
+        let record = typeof recordOrDate === 'object' && recordOrDate !== null ? recordOrDate : null;
+        let userId = emp ? emp.id : (typeof empOrId === 'string' ? empOrId : null);
+        let recordDate = record ? record.date : (typeof recordOrDate === 'string' ? recordOrDate : null);
+
+        const empId = emp ? emp.id : (record ? record.userId : userId);
+        const empCode = emp ? (emp.empCode || emp.emp_code) : (record ? (record.empCode || record.emp_code) : null);
+        const empName = emp ? emp.name : (record ? record.userName : null);
+
+        const normRecDate = recordDate ? normalizeDateStr(recordDate) : null;
+        const todayStr = normalizeDateStr(new Date().toISOString().split('T')[0]);
+        const isToday = !normRecDate || normRecDate === todayStr;
+
+        if (!isToday) return null;
+
+        // Tier 1: Direct map lookup
+        let f = empId ? latestFootprints[empId] : null;
+
+        // Tier 2: Search latestAllFootprints
+        if (!f && latestAllFootprints && latestAllFootprints.length > 0) {
+            const targetIds = [
+                empId ? String(empId).trim().toLowerCase() : '',
+                empCode ? String(empCode).trim().toLowerCase() : '',
+                record?.userId ? String(record.userId).trim().toLowerCase() : ''
+            ].filter(Boolean);
+            const targetNames = [
+                empName ? String(empName).trim().toLowerCase() : '',
+                record?.userName ? String(record.userName).trim().toLowerCase() : ''
+            ].filter(Boolean);
+
+            f = latestAllFootprints.find(fp => {
+                const fUid = fp.userId ? String(fp.userId).trim().toLowerCase() : '';
+                const fUName = fp.userName ? String(fp.userName).trim().toLowerCase() : '';
+                const fEmpCode = (fp.empCode || fp.emp_code) ? String(fp.empCode || fp.emp_code).trim().toLowerCase() : '';
+                return (fUid && targetIds.includes(fUid)) || 
+                       (fEmpCode && targetIds.includes(fEmpCode)) ||
+                       (fUName && targetNames.includes(fUName)) ||
+                       (fUid && targetNames.includes(fUid));
+            });
+        }
+
         if (!f) return null;
-        if (recordDate && normalizeDateStr(f.date) !== normalizeDateStr(recordDate)) return null;
         
-        const enabled = f.locationEnabled !== false;
+        const enabled = !isExplicitGpsOff(f) && f.locationEnabled !== false;
         const color = enabled ? "#10b981" : "#ef4444";
         
         return (
@@ -347,6 +578,151 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                 <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>{enabled ? 'Active' : 'Off'}</span>
             </div>
         );
+    };
+
+    const getLocationInfo = (emp, record) => {
+        if (!emp && !record) {
+            return {
+                address: 'No location logged',
+                timeDisplay: '',
+                isLive: false,
+                footprint: null
+            };
+        }
+
+        const empId = emp ? emp.id : (record ? record.userId : null);
+        const empCode = emp ? (emp.empCode || emp.emp_code) : (record ? (record.empCode || record.emp_code) : null);
+        const empName = emp ? emp.name : (record ? record.userName : null);
+        const recordDate = record?.date ? normalizeDateStr(record.date) : (record?.createdAt ? normalizeDateStr(record.createdAt) : null);
+        const todayStr = normalizeDateStr(new Date().toISOString().split('T')[0]);
+        const isToday = !recordDate || recordDate === todayStr;
+
+        let address = null;
+        let timeDisplay = null;
+        let matchedFp = null;
+        let isLive = false;
+
+        // Multi-tier lookup for live / latest footprint if today
+        if (isToday) {
+            // Tier 1: Direct map lookup
+            if (emp && emp.id && latestFootprints[emp.id]) {
+                const f = latestFootprints[emp.id];
+                const fpDate = f.date ? normalizeDateStr(f.date) : (f.timestamp ? normalizeDateStr(new Date(Number(f.timestamp)).toISOString()) : null);
+                if (!recordDate || !fpDate || fpDate === recordDate) {
+                    matchedFp = f;
+                }
+            }
+
+            // Tier 2: Search latestAllFootprints array by alias
+            if (!matchedFp && latestAllFootprints && latestAllFootprints.length > 0) {
+                const targetIds = [
+                    empId ? String(empId).trim().toLowerCase() : '',
+                    empCode ? String(empCode).trim().toLowerCase() : '',
+                    record?.userId ? String(record.userId).trim().toLowerCase() : ''
+                ].filter(Boolean);
+                const targetNames = [
+                    empName ? String(empName).trim().toLowerCase() : '',
+                    record?.userName ? String(record.userName).trim().toLowerCase() : ''
+                ].filter(Boolean);
+
+                matchedFp = latestAllFootprints.find(fp => {
+                    const fUid = fp.userId ? String(fp.userId).trim().toLowerCase() : '';
+                    const fUName = fp.userName ? String(fp.userName).trim().toLowerCase() : '';
+                    const fEmpCode = (fp.empCode || fp.emp_code) ? String(fp.empCode || fp.emp_code).trim().toLowerCase() : '';
+                    return (fUid && targetIds.includes(fUid)) || 
+                           (fEmpCode && targetIds.includes(fEmpCode)) ||
+                           (fUName && targetNames.includes(fUName)) ||
+                           (fUid && targetNames.includes(fUid));
+                });
+            }
+
+            if (matchedFp) {
+                if (matchedFp.address && matchedFp.address.trim() && matchedFp.address !== 'No location logged' && matchedFp.address !== 'N/A' && matchedFp.address !== 'Location Logged') {
+                    address = matchedFp.address;
+                } else if (matchedFp.location && matchedFp.location.trim() && matchedFp.location !== 'No location logged' && matchedFp.location !== 'N/A') {
+                    address = matchedFp.location;
+                } else if ((matchedFp.latitude != null || matchedFp.lat != null) && (matchedFp.longitude != null || matchedFp.lon != null || matchedFp.lng != null)) {
+                    const lat = matchedFp.latitude ?? matchedFp.lat;
+                    const lon = matchedFp.longitude ?? matchedFp.lon ?? matchedFp.lng;
+                    address = `Lat: ${Number(lat).toFixed(4)}, Lon: ${Number(lon).toFixed(4)}`;
+                }
+                if (matchedFp.timestamp) {
+                    timeDisplay = formatLastUpdateTime(matchedFp.timestamp);
+                    isLive = true;
+                }
+            }
+        }
+
+        // Tier 3: If address not yet resolved, check record fields
+        if (!address && record) {
+            if (record.address && record.address.trim() && record.address !== 'No location logged' && record.address !== 'N/A') {
+                address = record.address;
+            } else if (record.location && record.location.trim() && record.location !== 'No location logged' && record.location !== 'N/A') {
+                address = record.location;
+            } else if ((record.latitude != null || record.lat != null) && (record.longitude != null || record.lon != null || record.lng != null)) {
+                const lat = record.latitude ?? record.lat;
+                const lon = record.longitude ?? record.lon ?? record.lng;
+                address = `Lat: ${Number(lat).toFixed(4)}, Lon: ${Number(lon).toFixed(4)}`;
+            }
+        }
+
+        // Tier 4: Search historical footprints array matching date and employee
+        if (!address && footprints && footprints.length > 0) {
+            const targetIds = [
+                empId ? String(empId).trim().toLowerCase() : '',
+                empCode ? String(empCode).trim().toLowerCase() : '',
+                record?.userId ? String(record.userId).trim().toLowerCase() : ''
+            ].filter(Boolean);
+            const targetNames = [
+                empName ? String(empName).trim().toLowerCase() : '',
+                record?.userName ? String(record.userName).trim().toLowerCase() : ''
+            ].filter(Boolean);
+
+            const histFp = footprints.slice().reverse().find(fp => {
+                const fUid = fp.userId ? String(fp.userId).trim().toLowerCase() : '';
+                const fUName = fp.userName ? String(fp.userName).trim().toLowerCase() : '';
+                const fEmpCode = (fp.empCode || fp.emp_code) ? String(fp.empCode || fp.emp_code).trim().toLowerCase() : '';
+                const fpDate = fp.date ? normalizeDateStr(fp.date) : (fp.timestamp ? normalizeDateStr(new Date(Number(fp.timestamp)).toISOString()) : null);
+                
+                const matchesUser = (fUid && targetIds.includes(fUid)) || 
+                                    (fEmpCode && targetIds.includes(fEmpCode)) ||
+                                    (fUName && targetNames.includes(fUName)) ||
+                                    (fUid && targetNames.includes(fUid));
+                const matchesDate = !recordDate || !fpDate || fpDate === recordDate;
+                return matchesUser && matchesDate;
+            });
+
+            if (histFp) {
+                if (histFp.address && histFp.address.trim() && histFp.address !== 'No location logged' && histFp.address !== 'N/A' && histFp.address !== 'Location Logged') {
+                    address = histFp.address;
+                } else if (histFp.location && histFp.location.trim() && histFp.location !== 'No location logged' && histFp.location !== 'N/A') {
+                    address = histFp.location;
+                } else if ((histFp.latitude != null || histFp.lat != null) && (histFp.longitude != null || histFp.lon != null || histFp.lng != null)) {
+                    const lat = histFp.latitude ?? histFp.lat;
+                    const lon = histFp.longitude ?? histFp.lon ?? histFp.lng;
+                    address = `Lat: ${Number(lat).toFixed(4)}, Lon: ${Number(lon).toFixed(4)}`;
+                }
+                if (!timeDisplay && histFp.timestamp) {
+                    timeDisplay = formatLastUpdateTime(histFp.timestamp);
+                }
+            }
+        }
+
+        // Final fallbacks for timeDisplay if not set from live footprint
+        if (!timeDisplay && record) {
+            if (record.checkIn) {
+                timeDisplay = `${formatCheckInDisplay(record.checkIn)} (Check-in)`;
+            } else if (record.createdAt) {
+                timeDisplay = formatLastUpdateTime(new Date(record.createdAt).getTime());
+            }
+        }
+
+        return {
+            address: address || 'No location logged',
+            timeDisplay: timeDisplay || '',
+            isLive,
+            footprint: matchedFp
+        };
     };
 
     const formatLastUpdateTime = (timestamp) => {
@@ -396,36 +772,71 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
         
         const empId = emp ? emp.id : (record ? record.userId : null);
         const empName = emp ? emp.name : (record ? record.userName : null);
-        
-        // Tier 1: Direct map lookup
-        let f = empId ? latestFootprints[empId] : null;
+        const recordDate = record?.date ? normalizeDateStr(record.date) : (record?.createdAt ? normalizeDateStr(record.createdAt) : null);
+        const todayStr = normalizeDateStr(new Date().toISOString().split('T')[0]);
+        const isToday = !recordDate || recordDate === todayStr;
 
-        // Tier 2: Search latestAllFootprints array by userId or userName
-        if (!f && latestAllFootprints && latestAllFootprints.length > 0) {
+        let batVal = null;
+        let updateTime = null;
+
+        // If today's record, prefer live/latest telemetry
+        if (isToday) {
+            // Tier 1: Direct map lookup
+            let f = empId ? latestFootprints[empId] : null;
+
+            // Tier 2: Search latestAllFootprints array by userId or userName
+            if (!f && latestAllFootprints && latestAllFootprints.length > 0) {
+                const targetId = empId ? String(empId).trim().toLowerCase() : '';
+                const targetName = empName ? String(empName).trim().toLowerCase() : '';
+                
+                f = latestAllFootprints.find(fp => {
+                    const fUid = fp.userId ? String(fp.userId).trim().toLowerCase() : '';
+                    const fUName = fp.userName ? String(fp.userName).trim().toLowerCase() : '';
+                    return (targetId && fUid === targetId) || (targetName && (fUName === targetName || fUid === targetName));
+                });
+            }
+
+            if (f && (f.batteryLevel != null || f.battery_level != null)) {
+                batVal = f.batteryLevel ?? f.battery_level;
+                updateTime = formatLastUpdateTime(f.timestamp);
+            }
+        }
+
+        // For past dates or if live telemetry not present, check enriched record data
+        if (batVal === null && record) {
+            if (record.batteryLevel != null || record.battery_level != null) {
+                batVal = record.batteryLevel ?? record.battery_level;
+                if (record.lastBatteryTime) {
+                    updateTime = formatLastUpdateTime(record.lastBatteryTime);
+                } else if (record.checkOut) {
+                    updateTime = formatCheckInDisplay(record.checkOut);
+                } else if (record.checkIn) {
+                    updateTime = formatCheckInDisplay(record.checkIn);
+                }
+            }
+        }
+
+        // Tier 3: Search loaded footprints array matching date and employee
+        if (batVal === null && footprints && footprints.length > 0) {
             const targetId = empId ? String(empId).trim().toLowerCase() : '';
             const targetName = empName ? String(empName).trim().toLowerCase() : '';
             
-            f = latestAllFootprints.find(fp => {
+            const matchedFp = footprints.slice().reverse().find(fp => {
                 const fUid = fp.userId ? String(fp.userId).trim().toLowerCase() : '';
                 const fUName = fp.userName ? String(fp.userName).trim().toLowerCase() : '';
-                return (targetId && fUid === targetId) || (targetName && (fUName === targetName || fUid === targetName));
+                const fpDate = fp.date ? normalizeDateStr(fp.date) : null;
+                const matchesUser = (targetId && fUid === targetId) || (targetName && (fUName === targetName || fUid === targetName));
+                const matchesDate = !recordDate || !fpDate || fpDate === recordDate;
+                return matchesUser && matchesDate && (fp.batteryLevel != null || fp.battery_level != null);
             });
+
+            if (matchedFp) {
+                batVal = matchedFp.batteryLevel ?? matchedFp.battery_level;
+                updateTime = formatLastUpdateTime(matchedFp.timestamp);
+            }
         }
 
-        // Tier 3: Search loaded footprints array
-        if (!f && footprints && footprints.length > 0) {
-            const targetId = empId ? String(empId).trim().toLowerCase() : '';
-            const targetName = empName ? String(empName).trim().toLowerCase() : '';
-            
-            f = footprints.slice().reverse().find(fp => {
-                const fUid = fp.userId ? String(fp.userId).trim().toLowerCase() : '';
-                const fUName = fp.userName ? String(fp.userName).trim().toLowerCase() : '';
-                return (targetId && fUid === targetId) || (targetName && (fUName === targetName || fUid === targetName));
-            });
-        }
-
-        const batVal = f ? (f.batteryLevel ?? f.battery_level) : null;
-        if (!f || batVal === null || batVal === undefined) {
+        if (batVal === null || batVal === undefined) {
             return <span style={{ color: '#9ca3af', fontSize: '0.85rem' }}>No Data</span>;
         }
 
@@ -435,7 +846,6 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
         }
         const pct = Math.round(level * 100);
         const color = level < 0.2 ? "#ef4444" : level < 0.5 ? "#f59e0b" : "#10b981";
-        const updateTime = formatLastUpdateTime(f.timestamp);
 
         return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
@@ -454,6 +864,54 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                 )}
             </div>
         );
+    };
+
+    const getPunchMethodBadge = (method, isCheckOut = false) => {
+        if (!method) return null;
+        const m = String(method).toUpperCase();
+        if (m === 'MANUAL_APP') {
+            return (
+                <span style={{ fontSize: '0.68rem', color: '#059669', background: '#d1fae5', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '3px' }} title="Clocked by employee on Mobile App">
+                    📱 App
+                </span>
+            );
+        }
+        if (m === 'MANUAL_WEB') {
+            return (
+                <span style={{ fontSize: '0.68rem', color: '#2563eb', background: '#dbeafe', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '3px' }} title="Clocked via Web Portal">
+                    💻 Web
+                </span>
+            );
+        }
+        if (m === 'AUTO_SHIFT_END') {
+            return (
+                <span style={{ fontSize: '0.68rem', color: '#d97706', background: '#fef3c7', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '3px' }} title="Automatically clocked out at shift end">
+                    🤖 Auto (Shift)
+                </span>
+            );
+        }
+        if (m === 'AUTO_STALE_CLEANUP') {
+            return (
+                <span style={{ fontSize: '0.68rem', color: '#b45309', background: '#ffedd5', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '3px' }} title="Auto-closed by system fallback cleanup">
+                    ⚠️ Auto-Closed
+                </span>
+            );
+        }
+        if (m === 'AUTO_LOCATION_ANCHOR') {
+            return (
+                <span style={{ fontSize: '0.68rem', color: '#7c3aed', background: '#ede9fe', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '3px' }} title="Auto-closed at last known GPS location">
+                    📍 Auto (GPS)
+                </span>
+            );
+        }
+        if (m === 'AUTO_RECOVERY_PUNCH') {
+            return (
+                <span style={{ fontSize: '0.68rem', color: '#0284c7', background: '#e0f2fe', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '3px' }} title="Auto-recovered from live device telemetry">
+                    🔄 Auto-Recovered
+                </span>
+            );
+        }
+        return null;
     };
     
     // Search & Filter States
@@ -487,11 +945,13 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                 setTimeout(() => setLoading(false), 300);
 
                 // Phase 2: Fetch full attendance logs for complete reports, footprints & leaves in background
+                const targetDateQuery = fromDate || new Date().toISOString().split('T')[0];
                 Promise.all([
                     api.getAttendance({ limit: 10000 }).catch(err => { console.warn('Full attendance fetch warning:', err); return null; }),
                     api.getLatestAllFootprints().catch(err => { console.warn('Footprints fetch warning:', err); return []; }),
+                    api.getFootprints ? api.getFootprints(null, targetDateQuery).catch(err => { console.warn('Footprints history fetch warning:', err); return []; }) : Promise.resolve([]),
                     api.getLeaves ? api.getLeaves().catch(err => { console.warn('Leaves fetch warning:', err); return []; }) : Promise.resolve([])
-                ]).then(([fullAttendanceRes, latestAllData, leavesData]) => {
+                ]).then(([fullAttendanceRes, latestAllData, footprintsData, leavesData]) => {
                     if (fullAttendanceRes) {
                         const fullData = Array.isArray(fullAttendanceRes) ? fullAttendanceRes : (fullAttendanceRes.data || []);
                         if (fullData.length > 0) {
@@ -499,6 +959,7 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                         }
                     }
                     if (latestAllData) setLatestAllFootprints(latestAllData);
+                    if (footprintsData && Array.isArray(footprintsData)) setFootprints(footprintsData);
                     if (leavesData) setLeaves(leavesData);
                 });
             } catch (err) {
@@ -508,18 +969,22 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
             }
         };
         fetchData();
-    }, []);
+    }, [fromDate]);
 
     useEffect(() => {
-        if (!employees.length || !footprints.length) return;
+        if (!employees.length) return;
         
         // Map employee names to all userIds they have used in attendance
         const employeeIdsMap = {};
         employees.forEach(emp => {
             const ids = new Set([String(emp.id).trim().toLowerCase()]);
+            if (emp.empCode) ids.add(String(emp.empCode).trim().toLowerCase());
+            if (emp.emp_code) ids.add(String(emp.emp_code).trim().toLowerCase());
+            if (emp.name) ids.add(String(emp.name).trim().toLowerCase());
             attendance.forEach(r => {
                 if (r.userName && String(r.userName).trim().toLowerCase() === String(emp.name).trim().toLowerCase()) {
                     if (r.userId) ids.add(String(r.userId).trim().toLowerCase());
+                    if (r.empCode) ids.add(String(r.empCode).trim().toLowerCase());
                 }
             });
             employeeIdsMap[emp.id] = Array.from(ids);
@@ -542,102 +1007,186 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
             });
             if (latestF) {
                 latest[emp.id] = latestF;
+                if (emp.empCode) latest[emp.empCode] = latestF;
+                if (emp.emp_code) latest[emp.emp_code] = latestF;
             }
         });
         setLatestFootprints(latest);
+    }, [employees, attendance, latestAllFootprints]);
 
-        // Calculate today's GPS-only distance and GPS off duration for each employee
-        const todayStr = new Date().toISOString().split('T')[0];
-        const distances = {};
-        const gpsOffDurations = {};
-
-        employees.forEach(emp => {
-            const associatedIds = employeeIdsMap[emp.id] || [String(emp.id).trim().toLowerCase()];
-            const empName = emp.name ? String(emp.name).trim().toLowerCase() : '';
-
-            // Compute GPS off duration
-            const allEmpFootprints = footprints.filter(f => {
-                const fUid = f.userId ? String(f.userId).trim().toLowerCase() : '';
-                const fUName = f.userName ? String(f.userName).trim().toLowerCase() : '';
-                return ((fUid && associatedIds.includes(fUid)) || (fUName && fUName === empName)) && 
-                       normalizeDateStr(f.date) === normalizeDateStr(todayStr);
-            }).sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
-
-            let gpsOffMinutes = 0;
-            let lastOffTime = null;
-
-            for (let i = 0; i < allEmpFootprints.length; i++) {
-                const f = allEmpFootprints[i];
-                const isOff = f.isGpsOff === true || f.isGpsOff === 'true' || f.locationEnabled === false || f.locationEnabled === 'false' || f.locationEnabled === 0;
-                if (isOff) {
-                    if (!lastOffTime) lastOffTime = parseInt(f.timestamp);
-                } else {
-                    if (lastOffTime) {
-                        gpsOffMinutes += (parseInt(f.timestamp) - lastOffTime) / 60000;
-                        lastOffTime = null;
-                    }
-                }
-            }
-            
-            if (lastOffTime) {
-                const endOfDayTime = new Date(todayStr + 'T23:59:59').getTime();
-                const nowTime = new Date().getTime();
-                const capTime = Math.min(endOfDayTime, nowTime);
-                gpsOffMinutes += (capTime - lastOffTime) / 60000;
-            }
-
-            if (gpsOffMinutes > 0) {
-                const hrs = Math.floor(gpsOffMinutes / 60);
-                const mins = Math.floor(gpsOffMinutes % 60);
-                gpsOffDurations[emp.id] = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
-            } else {
-                gpsOffDurations[emp.id] = '0m';
-            }
-        });
-        setTodayGpsOffDurations(gpsOffDurations);
-    }, [employees, footprints, attendance, latestAllFootprints]);
-
-    // Dedicated Audited Route Replay Today Travel Distance Fetcher Engine
+    // Dedicated Audited Route Replay Multi-Date Travel Distance & GPS Off Duration Fetcher Engine
     useEffect(() => {
         if (!employees || employees.length === 0) return;
-        const targetDateStr = fromDate || new Date().toISOString().split('T')[0];
-        
+        const todayStr = new Date().toISOString().split('T')[0];
+        const defaultDate = fromDate || todayStr;
+        const pairsToFetch = new Map(); // pairKey -> { targetId, dateStr, emp }
+
+        // 1. Gather all unique (targetId, dateStr) pairs from attendance records
+        if (attendance && attendance.length > 0) {
+            attendance.forEach(rec => {
+                const recDate = normalizeDateStr(rec.date || rec.createdAt);
+                if (!recDate) return;
+                const rawUser = rec.userId || rec.userName || rec.empCode;
+                if (!rawUser) return;
+
+                const uLower = String(rawUser).trim().toLowerCase();
+                const matchedEmp = employees.find(e => 
+                    (e.id && String(e.id).trim().toLowerCase() === uLower) ||
+                    (e.empCode && String(e.empCode).trim().toLowerCase() === uLower) ||
+                    (e.emp_code && String(e.emp_code).trim().toLowerCase() === uLower) ||
+                    (e.name && String(e.name).trim().toLowerCase() === uLower)
+                );
+
+                const targetId = matchedEmp ? (matchedEmp.id || matchedEmp.empCode || rawUser) : rawUser;
+                const pairKey = `${String(targetId).trim().toLowerCase()}_${recDate}`;
+                if (!pairsToFetch.has(pairKey)) {
+                    pairsToFetch.set(pairKey, { targetId, dateStr: recDate, emp: matchedEmp });
+                }
+            });
+        }
+
+        // 2. Add default date for all employees
         employees.forEach(emp => {
             const targetId = emp.employeeId || emp.userId || emp.id;
             if (!targetId) return;
-            api.getRouteReplay(targetId, targetDateStr, 'osrm').then(res => {
-                if (res && res.roadDistance !== undefined) {
-                    const distStr = Number(res.roadDistance).toFixed(2);
-                    setTodayDistances(prev => ({
-                        ...prev,
-                        [emp.id]: distStr,
-                        [targetId]: distStr,
-                        [emp.name]: distStr,
-                        [String(emp.name).trim().toLowerCase()]: distStr
-                    }));
+            const pairKey = `${String(targetId).trim().toLowerCase()}_${defaultDate}`;
+            if (!pairsToFetch.has(pairKey)) {
+                pairsToFetch.set(pairKey, { targetId, dateStr: defaultDate, emp });
+            }
+        });
+
+        // 3. Query Route Replay for each unique (targetId, dateStr)
+        pairsToFetch.forEach(({ targetId, dateStr, emp }) => {
+            api.getRouteReplay(targetId, dateStr, 'osrm').then(res => {
+                if (res) {
+                    const dateAliases = getAllDateAliases(dateStr);
+                    const allAliasKeys = [
+                        emp?.id,
+                        emp?.empCode,
+                        emp?.emp_code,
+                        emp?.name,
+                        targetId,
+                        String(targetId).trim().toLowerCase()
+                    ].filter(Boolean);
+
+                    const isCurrentDate = isToday(dateStr);
+
+                    if (res.roadDistance !== undefined) {
+                        const distStr = Number(res.roadDistance).toFixed(2);
+                        const distUpdates = {};
+                        allAliasKeys.forEach(k => {
+                            const kStr = String(k).trim();
+                            const kLower = kStr.toLowerCase();
+                            dateAliases.forEach(dAlias => {
+                                distUpdates[`${kStr}_${dAlias}`] = distStr;
+                                distUpdates[`${kLower}_${dAlias}`] = distStr;
+                            });
+                            if (isCurrentDate) {
+                                distUpdates[kStr] = distStr;
+                                distUpdates[kLower] = distStr;
+                            }
+                        });
+                        setTodayDistances(prev => ({ ...prev, ...distUpdates }));
+                    }
+
+                    if (res.gpsOffDurationLabel !== undefined && res.gpsOffDurationLabel !== null) {
+                        const offLabel = res.gpsOffDurationLabel || '0m';
+                        const offUpdates = {};
+                        allAliasKeys.forEach(k => {
+                            const kStr = String(k).trim();
+                            const kLower = kStr.toLowerCase();
+                            dateAliases.forEach(dAlias => {
+                                offUpdates[`${kStr}_${dAlias}`] = offLabel;
+                                offUpdates[`${kLower}_${dAlias}`] = offLabel;
+                            });
+                            if (isCurrentDate) {
+                                offUpdates[kStr] = offLabel;
+                                offUpdates[kLower] = offLabel;
+                            }
+                        });
+                        setTodayGpsOffDurations(prev => ({ ...prev, ...offUpdates }));
+                    }
                 }
             }).catch(err => {
-                console.warn(`[RouteReplay Fetch Warning] Could not fetch distance for ${targetId}:`, err);
+                console.warn(`[RouteReplay Fetch Warning] Could not fetch distance/gps off for ${targetId} on ${dateStr}:`, err);
             });
         });
-    }, [employees, fromDate]);
+    }, [employees, attendance, fromDate]);
 
-    // Case-Insensitive & Multi-Key Resilient Distance Resolver
+    // Case-Insensitive & Multi-Key Date-Aware Distance Resolver
     const getAuditedDistanceForRecord = (record, emp) => {
+        const rawDate = record?.date || record?.createdAt;
+        const dateAliases = getAllDateAliases(rawDate);
         const possibleKeys = [
             record?.userId,
             record?.userName,
+            record?.empCode,
             emp?.id,
+            emp?.empCode,
+            emp?.emp_code,
             emp?.employeeId,
             emp?.userId,
             emp?.name
         ].filter(Boolean).map(k => String(k).trim().toLowerCase());
 
-        const matchedKey = Object.keys(todayDistances).find(k => 
-            possibleKeys.includes(String(k).trim().toLowerCase())
-        );
+        // Tier 1: Search date-specific keys across all date aliases
+        for (const key of possibleKeys) {
+            for (const dAlias of dateAliases) {
+                const dateKey = `${key}_${dAlias}`;
+                if (todayDistances[dateKey] !== undefined) {
+                    return todayDistances[dateKey];
+                }
+            }
+        }
 
-        return matchedKey ? todayDistances[matchedKey] : null;
+        // Tier 2: Search fallback general keys ONLY if record is confirmed to be for today
+        if (isToday(rawDate)) {
+            for (const key of possibleKeys) {
+                if (todayDistances[key] !== undefined) {
+                    return todayDistances[key];
+                }
+            }
+        }
+
+        return null;
+    };
+
+    // Case-Insensitive & Multi-Key Date-Aware GPS Off Duration Resolver
+    const getGpsOffDurationForRecord = (record, emp) => {
+        const rawDate = record?.date || record?.createdAt;
+        const dateAliases = getAllDateAliases(rawDate);
+        const possibleKeys = [
+            record?.userId,
+            record?.userName,
+            record?.empCode,
+            emp?.id,
+            emp?.empCode,
+            emp?.emp_code,
+            emp?.employeeId,
+            emp?.userId,
+            emp?.name
+        ].filter(Boolean).map(k => String(k).trim().toLowerCase());
+
+        // Tier 1: Search date-specific keys across all date aliases
+        for (const key of possibleKeys) {
+            for (const dAlias of dateAliases) {
+                const dateKey = `${key}_${dAlias}`;
+                if (todayGpsOffDurations[dateKey] !== undefined) {
+                    return todayGpsOffDurations[dateKey];
+                }
+            }
+        }
+
+        // Tier 2: Search fallback general keys ONLY if record is confirmed to be for today
+        if (isToday(rawDate)) {
+            for (const key of possibleKeys) {
+                if (todayGpsOffDurations[key] !== undefined) {
+                    return todayGpsOffDurations[key];
+                }
+            }
+        }
+
+        return '0m';
     };
 
     // Reset page when search or filter changes
@@ -683,54 +1232,6 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
         { label: 'Shift Schedule', value: 'shift-schedule', icon: 'fa-calendar-days' },
         { label: 'Total Reports', value: 'total-reports', icon: 'fa-square-poll-horizontal' }
     ];
-
-    // Check if date matches today
-    const isToday = (dateStr) => {
-        if (!dateStr) return false;
-        const today = new Date();
-        const todayYear = today.getFullYear();
-        const todayMonth = today.getMonth() + 1; // 1-indexed
-        const todayDay = today.getDate();
-
-        // Standardize string
-        const cleanStr = String(dateStr).split('T')[0].split(' ')[0].trim();
-
-        // Try parsing DD-MM-YYYY or YYYY-MM-DD
-        const parts = cleanStr.split(/[-/]/);
-        if (parts.length === 3) {
-            let year = 0, month = 0, day = 0;
-            if (parts[0].length === 4) {
-                // YYYY-MM-DD
-                year = parseInt(parts[0], 10);
-                month = parseInt(parts[1], 10);
-                day = parseInt(parts[2], 10);
-            } else if (parts[2].length === 4) {
-                // DD-MM-YYYY or MM-DD-YYYY
-                year = parseInt(parts[2], 10);
-                const p0 = parseInt(parts[0], 10);
-                const p1 = parseInt(parts[1], 10);
-                
-                // Try DD-MM-YYYY
-                if (year === todayYear && p0 === todayDay && p1 === todayMonth) {
-                    return true;
-                }
-                // Try MM-DD-YYYY fallback
-                if (year === todayYear && p1 === todayDay && p0 === todayMonth) {
-                    return true;
-                }
-            }
-            if (year === todayYear && month === todayMonth && day === todayDay) {
-                return true;
-            }
-        }
-
-        const rDate = new Date(dateStr);
-        if (!isNaN(rDate.getTime())) {
-            return rDate.toDateString() === today.toDateString();
-        }
-        const todayFormatted = today.toISOString().split('T')[0];
-        return cleanStr.includes(todayFormatted) || today.toLocaleDateString().includes(cleanStr);
-    };
 
     // Calculate working hours dynamically
     const calculateWorkingHours = (record) => {
@@ -832,14 +1333,29 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
     if (statusFilter === 'all') {
         filteredData = groupedAttendance.map(r => ({ ...r, type: 'log' }));
     } else if (statusFilter === 'not-clocked-in') {
-        const employeesWithLogToday = groupedAttendance
+        const activeOrLoggedTodayKeys = new Set();
+        groupedAttendance
             .filter(r => isToday(r.date))
-            .map(r => r.userName ? r.userName.toLowerCase() : null)
-            .filter(Boolean);
+            .forEach(r => {
+                if (r.userId) activeOrLoggedTodayKeys.add(String(r.userId).trim().toLowerCase());
+                if (r.userName) activeOrLoggedTodayKeys.add(String(r.userName).trim().toLowerCase());
+                if (r.empCode) activeOrLoggedTodayKeys.add(String(r.empCode).trim().toLowerCase());
+                if (r.employeeId) activeOrLoggedTodayKeys.add(String(r.employeeId).trim().toLowerCase());
+                if (r.employee?.id) activeOrLoggedTodayKeys.add(String(r.employee.id).trim().toLowerCase());
+                if (r.employee?.empCode) activeOrLoggedTodayKeys.add(String(r.employee.empCode).trim().toLowerCase());
+                if (r.employee?.name) activeOrLoggedTodayKeys.add(String(r.employee.name).trim().toLowerCase());
+            });
         
-        const absentEmployees = employees.filter(emp => 
-            !employeesWithLogToday.includes(emp.name.toLowerCase())
-        );
+        const absentEmployees = (employees || []).filter(emp => {
+            if (!emp) return false;
+            const eid = emp.id ? String(emp.id).trim().toLowerCase() : '';
+            const ecode = emp.empCode ? String(emp.empCode).trim().toLowerCase() : (emp.emp_code ? String(emp.emp_code).trim().toLowerCase() : '');
+            const ename = emp.name ? String(emp.name).trim().toLowerCase() : '';
+            const isLogged = (eid && activeOrLoggedTodayKeys.has(eid)) ||
+                             (ecode && activeOrLoggedTodayKeys.has(ecode)) ||
+                             (ename && activeOrLoggedTodayKeys.has(ename));
+            return !isLogged;
+        });
         
         filteredData = absentEmployees.map(emp => {
             let status = 'Absent';
@@ -851,7 +1367,9 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                 
                 const empLeaves = leaves.filter(l => 
                     (l.userName && String(l.userName).trim().toLowerCase() === String(emp.name).trim().toLowerCase()) ||
-                    (l.employeeName && String(l.employeeName).trim().toLowerCase() === String(emp.name).trim().toLowerCase())
+                    (l.employeeName && String(l.employeeName).trim().toLowerCase() === String(emp.name).trim().toLowerCase()) ||
+                    (l.userId && String(l.userId).trim().toLowerCase() === String(emp.id).trim().toLowerCase()) ||
+                    (l.userId && String(l.userId).trim().toLowerCase() === String(emp.empCode).trim().toLowerCase())
                 );
                 
                 const leaveToday = empLeaves.find(l => {
@@ -884,6 +1402,10 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                 date: new Date().toISOString().split('T')[0],
                 userId: emp.id,
                 userName: emp.name,
+                empCode: emp.empCode || emp.emp_code,
+                department: emp.department,
+                jobTitle: emp.jobTitle || emp.designation,
+                employee: emp,
                 checkIn: null,
                 checkOut: null,
                 workingHours: '-',
@@ -894,11 +1416,11 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
         });
     } else if (statusFilter === 'clocked-out') {
         filteredData = groupedAttendance
-            .filter(r => isToday(r.date) && r.checkOut)
+            .filter(r => isToday(r.date) && cleanCheckOutVal(r.checkOut))
             .map(r => ({ ...r, type: 'log' }));
     } else if (statusFilter === 'active-today') {
         filteredData = groupedAttendance
-            .filter(r => isToday(r.date) && !r.checkOut)
+            .filter(r => isToday(r.date) && !cleanCheckOutVal(r.checkOut))
             .map(r => ({ ...r, type: 'log' }));
     }
 
@@ -928,13 +1450,14 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
         });
     }
 
-    // 3. Apply Search Query (by Employee Name or Date)
+    // 3. Apply Search Query (by Employee Name, Code, or Date)
     if (searchQuery.trim() !== '') {
         const query = searchQuery.toLowerCase();
         filteredData = filteredData.filter(item => {
             const nameMatch = item.userName && item.userName.toLowerCase().includes(query);
+            const codeMatch = (item.empCode || item.userId) && String(item.empCode || item.userId).toLowerCase().includes(query);
             const dateMatch = item.date && formatDate(item.date).toLowerCase().includes(query);
-            return nameMatch || dateMatch;
+            return nameMatch || codeMatch || dateMatch;
         });
     }
 
@@ -2688,30 +3211,87 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                             <tr><td colSpan={statusFilter === 'not-clocked-in' ? 3 : 9} style={{ textAlign: 'center', padding: '30px' }}>No logs or matching records found.</td></tr>
                         ) : (
                             paginatedData.map((record, index) => {
-                                const emp = employees.find(e => 
-                                    (e.id && String(e.id).trim().toLowerCase() === String(record.userId).trim().toLowerCase()) ||
-                                    (e.empCode && String(e.empCode).trim().toLowerCase() === String(record.userId).trim().toLowerCase()) ||
-                                    (e.name && String(e.name).trim().toLowerCase() === String(record.userName).trim().toLowerCase())
-                                );
-                                const displayName = emp ? emp.name : (record.userName || record.userId);
+                                const targetUid = String(record.userId || '').trim().toLowerCase();
+                                const targetUname = String(record.userName || '').trim().toLowerCase();
+                                const targetEmpCode = String(record.empCode || record.employeeId || '').trim().toLowerCase();
+
+                                const emp = record.employee || (employees || []).find(e => {
+                                    if (!e) return false;
+                                    const eId = String(e.id || '').trim().toLowerCase();
+                                    const eCode = String(e.empCode || e.emp_code || e.employeeId || e.empId || '').trim().toLowerCase();
+                                    const eName = String(e.name || '').trim().toLowerCase();
+                                    return (targetUid && (targetUid === eId || targetUid === eCode || targetUid === eName)) ||
+                                           (targetEmpCode && (targetEmpCode === eCode || targetEmpCode === eId)) ||
+                                           (targetUname && (targetUname === eName || targetUname === eId || targetUname === eCode));
+                                });
+                                
+                                const displayName = emp?.name || record.userName || emp?.employeeName || record.userId || 'Employee';
+                                const displayCode = emp?.empCode || emp?.emp_code || emp?.employeeId || record.empCode || (record.userId && !String(record.userId).startsWith('EMP0') ? record.userId : '');
+                                const displayDept = emp?.department || record.department || emp?.designation || record.jobTitle || '';
+                                
                                 return (
                                     <tr 
                                         key={record.id || index}
-                                        onClick={() => emp && onSelectEmployee && onSelectEmployee(emp.id, emp.name)}
-                                        style={{ cursor: emp ? 'pointer' : 'default' }}
-                                        title={emp ? `View ${displayName}'s Tracking Details` : ''}
+                                        onClick={() => onSelectEmployee && onSelectEmployee(emp?.id || record.userId, displayName)}
+                                        style={{ cursor: 'pointer' }}
+                                        title={`View ${displayName}'s Tracking Details`}
                                     >
                                         {statusFilter !== 'not-clocked-in' && <td>{formatDate(record.date)}</td>}
                                         <td>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                                 {record.type === 'absent' && (
-                                                    <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ef4444' }} title="Not Clocked-in"></span>
+                                                    <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ef4444', flexShrink: 0 }} title="Not Clocked-in"></span>
                                                 )}
-                                                {displayName}
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                        <span style={{ fontWeight: 600 }}>{displayName}</span>
+                                                        {displayCode && (
+                                                            <span style={{ fontSize: '0.72rem', color: '#2563eb', fontWeight: 600, background: 'rgba(37, 99, 235, 0.08)', padding: '1px 5px', borderRadius: '4px', border: '1px solid rgba(37, 99, 235, 0.15)' }}>
+                                                                {displayCode}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    {displayDept && (
+                                                        <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                                                            {displayDept}
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </div>
                                         </td>
-                                        {statusFilter !== 'not-clocked-in' && <td>{formatDate(record.checkIn, true)}</td>}
-                                        {statusFilter !== 'not-clocked-in' && <td>{record.checkOut ? formatDate(record.checkOut, true) : '-'}</td>}
+                                        {statusFilter !== 'not-clocked-in' && (
+                                            <td>
+                                                {record.checkIn ? (
+                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                                                        <span style={{ fontWeight: 600 }}>{formatDate(record.checkIn, true)}</span>
+                                                        <div>
+                                                            {getPunchMethodBadge(record.checkInMethod || (record.coords ? 'MANUAL_APP' : 'MANUAL_WEB'), false)}
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    '-'
+                                                )}
+                                            </td>
+                                        )}
+                                        {statusFilter !== 'not-clocked-in' && (
+                                            <td>
+                                                {record.checkOut ? (
+                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                                                        <span style={{ fontWeight: 600 }}>{formatDate(record.checkOut, true)}</span>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
+                                                            {getPunchMethodBadge(record.clockOutMethod || (record.checkOut === '19:00:00' ? 'AUTO_STALE_CLEANUP' : (record.coords ? 'MANUAL_APP' : 'MANUAL_WEB')), true)}
+                                                            {record.shiftCode && (
+                                                                <span style={{ fontSize: '0.68rem', color: '#64748b', background: '#f1f5f9', padding: '1px 5px', borderRadius: '4px', fontWeight: 500 }} title={`Shift: ${record.shiftLabel || record.shiftCode}`}>
+                                                                    {record.shiftCode}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    '-'
+                                                )}
+                                            </td>
+                                        )}
                                         {statusFilter !== 'not-clocked-in' && (
                                             <td>
                                                 {record.checkOut ? (
@@ -2764,23 +3344,24 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                                         {statusFilter !== 'not-clocked-in' && (
                                             <>
                                                 <td>
-                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxWidth: '240px' }}>
-                                                        <span style={{ fontWeight: 600, color: '#334155', fontSize: '0.8rem', whiteSpace: 'normal', wordBreak: 'break-word' }}>
-                                                            {emp && latestFootprints[emp.id]?.date === record.date ? (latestFootprints[emp.id]?.address || record.address || 'No location logged') : (record.address || 'No location logged')}
-                                                        </span>
-                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                                                            {emp && latestFootprints[emp.id]?.date === record.date && latestFootprints[emp.id]?.timestamp ? (
-                                                                <span style={{ fontSize: '0.7rem', color: '#64748b' }}>
-                                                                    {new Date(latestFootprints[emp.id].timestamp).toLocaleString()}
+                                                    {(() => {
+                                                        const locInfo = getLocationInfo(emp, record);
+                                                        return (
+                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxWidth: '240px' }}>
+                                                                <span style={{ fontWeight: 600, color: '#334155', fontSize: '0.8rem', whiteSpace: 'normal', wordBreak: 'break-word' }}>
+                                                                    {locInfo.address}
                                                                 </span>
-                                                            ) : record.checkIn ? (
-                                                                <span style={{ fontSize: '0.7rem', color: '#64748b' }}>
-                                                                    {formatCheckInDisplay(record.checkIn)} (Check-in)
-                                                                </span>
-                                                            ) : null}
-                                                            {emp && getGpsIcon(emp.id, record.date)}
-                                                        </div>
-                                                    </div>
+                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                                                                    {locInfo.timeDisplay && (
+                                                                        <span style={{ fontSize: '0.7rem', color: '#64748b' }}>
+                                                                            {locInfo.timeDisplay}
+                                                                        </span>
+                                                                    )}
+                                                                    {getGpsIcon(emp, record)}
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })()}
                                                 </td>
                                                 <td>{getBatteryIcon(emp, record)}</td>
                                                 <td>
@@ -2799,25 +3380,30 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                                                                 return dist && Number(dist) > 0 ? `${dist} km` : '0.00 km';
                                                             })()}
                                                         </span>
-                                                        {emp && (
-                                                            <div style={{ 
-                                                                display: 'flex', 
-                                                                alignItems: 'center', 
-                                                                gap: '4px', 
-                                                                color: todayGpsOffDurations[emp.id] && todayGpsOffDurations[emp.id] !== '0m' ? '#ef4444' : '#64748b', 
-                                                                background: todayGpsOffDurations[emp.id] && todayGpsOffDurations[emp.id] !== '0m' ? '#fee2e2' : '#f1f5f9', 
-                                                                padding: '3px 8px', 
-                                                                borderRadius: '10px', 
-                                                                fontSize: '0.75rem', 
-                                                                fontWeight: 600 
-                                                            }}>
-                                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                                                                    <line x1="18" y1="6" x2="6" y2="18"></line>
-                                                                    <line x1="6" y1="6" x2="18" y2="18"></line>
-                                                                </svg>
-                                                                <span>{todayGpsOffDurations[emp.id] || '0m'} Off</span>
-                                                            </div>
-                                                        )}
+                                                        {emp && (() => {
+                                                            const offDuration = getGpsOffDurationForRecord(record, emp);
+                                                            const isOffActive = offDuration && offDuration !== '0m' && offDuration !== '0m Off' && offDuration !== '--';
+                                                            const displayLabel = offDuration.endsWith('Off') ? offDuration : `${offDuration} Off`;
+                                                            return (
+                                                                <div style={{ 
+                                                                    display: 'flex', 
+                                                                    alignItems: 'center', 
+                                                                    gap: '4px', 
+                                                                    color: isOffActive ? '#ef4444' : '#64748b', 
+                                                                    background: isOffActive ? '#fee2e2' : '#f1f5f9', 
+                                                                    padding: '3px 8px', 
+                                                                    borderRadius: '10px', 
+                                                                    fontSize: '0.75rem', 
+                                                                    fontWeight: 600 
+                                                                }}>
+                                                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                                                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                                                                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                                                                    </svg>
+                                                                    <span>{displayLabel}</span>
+                                                                </div>
+                                                            );
+                                                        })()}
                                                     </div>
                                                 </td>
                                             </>
@@ -3026,8 +3612,11 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                                             {/* Check In Block */}
                                             <div style={{ background: '#ffffff', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#10b981', fontSize: '0.75rem', fontWeight: 700, marginBottom: '4px' }}>
-                                                    <i className="fa-solid fa-right-to-bracket"></i> CHECK IN
+                                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#10b981', fontSize: '0.75rem', fontWeight: 700 }}>
+                                                        <i className="fa-solid fa-right-to-bracket"></i> CHECK IN
+                                                    </div>
+                                                    {getPunchMethodBadge(p.checkInMethod || (p.coords ? 'MANUAL_APP' : 'MANUAL_WEB'), false)}
                                                 </div>
                                                 <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#1e293b' }}>
                                                     {formatDate(p.checkIn, true)}
@@ -3041,8 +3630,11 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
 
                                             {/* Check Out Block */}
                                             <div style={{ background: '#ffffff', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#ef4444', fontSize: '0.75rem', fontWeight: 700, marginBottom: '4px' }}>
-                                                    <i className="fa-solid fa-right-from-bracket"></i> CHECK OUT
+                                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#ef4444', fontSize: '0.75rem', fontWeight: 700 }}>
+                                                        <i className="fa-solid fa-right-from-bracket"></i> CHECK OUT
+                                                    </div>
+                                                    {p.checkOut && getPunchMethodBadge(p.clockOutMethod || (p.checkOut === '19:00:00' ? 'AUTO_STALE_CLEANUP' : (p.coords ? 'MANUAL_APP' : 'MANUAL_WEB')), true)}
                                                 </div>
                                                 <div style={{ fontWeight: 700, fontSize: '0.95rem', color: p.checkOut ? '#1e293b' : '#f59e0b' }}>
                                                     {p.checkOut ? formatDate(p.checkOut, true) : (isToday(selectedPunchHistory.date) ? 'Active Session' : (selectedPunchHistory.checkOut ? formatDate(selectedPunchHistory.checkOut, true) : '-'))}

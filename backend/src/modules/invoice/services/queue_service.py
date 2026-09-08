@@ -91,6 +91,31 @@ class QueueService:
                 db_doc.status = "Saved"
                 db.commit()
                 db.refresh(db_doc)
+
+            # Ensure saved bank details from inventory are merged into extraction
+            if exists.bank_name or exists.account_number or exists.ifsc_code or exists.bank_branch:
+                inv_bank = {
+                    "bank_name": exists.bank_name or "",
+                    "branch": exists.bank_branch or "",
+                    "account_number": exists.account_number or "",
+                    "account_no": exists.account_number or "",
+                    "ifsc_code": exists.ifsc_code or "",
+                    "ifsc": exists.ifsc_code or ""
+                }
+                if db_doc.final_extraction and isinstance(db_doc.final_extraction, dict):
+                    fb = db_doc.final_extraction.get("bank_details") or {}
+                    for bk, bv in inv_bank.items():
+                        if bv and not fb.get(bk):
+                            fb[bk] = bv
+                    db_doc.final_extraction["bank_details"] = fb
+                if db_doc.ocr_result and isinstance(db_doc.ocr_result, dict):
+                    ext = db_doc.ocr_result.get("extraction")
+                    if isinstance(ext, dict):
+                        ob = ext.get("bank_details") or {}
+                        for bk, bv in inv_bank.items():
+                            if bv and not ob.get(bk):
+                                ob[bk] = bv
+                        ext["bank_details"] = ob
         else:
             if db_doc.saved or db_doc.status == "Saved":
                 import os
@@ -111,6 +136,8 @@ class QueueService:
             "saved": db_doc.saved,
             "ocr_result": db_doc.ocr_result,
             "final_extraction": db_doc.final_extraction,
+            "template_id": db_doc.template_id,
+            "template_config": db_doc.template_config,
             "error": db_doc.error,
             "verification_time": db_doc.verification_time,
             "created_at": db_doc.created_at.isoformat() if db_doc.created_at else datetime.utcnow().isoformat()
@@ -200,6 +227,8 @@ class QueueService:
             "saved": db_doc.saved,
             "ocr_result": db_doc.ocr_result,
             "final_extraction": db_doc.final_extraction,
+            "template_id": db_doc.template_id,
+            "template_config": db_doc.template_config,
             "error": db_doc.error,
             "verification_time": db_doc.verification_time,
             "created_at": db_doc.created_at.isoformat() if db_doc.created_at else datetime.utcnow().isoformat()
@@ -266,9 +295,9 @@ class QueueService:
                     grand_total = 0.0
 
             # Extract processing_time_ms from ocr_result metadata
-            if doc.ocr_result:
+            if doc.ocr_result and isinstance(doc.ocr_result, dict):
                 metadata = doc.ocr_result.get("metadata", {}) or {}
-                pt_val = metadata.get("processing_time_ms") or 0.0
+                pt_val = metadata.get("processing_time_ms") or doc.ocr_result.get("executionTime") or doc.ocr_result.get("inference_time_ms") or 0.0
                 if isinstance(pt_val, str):
                     pt_val = pt_val.replace(",", "").strip()
                 try:
@@ -282,6 +311,8 @@ class QueueService:
                 "file_path": doc.file_path,
                 "status": QueueService.map_status(doc.status),
                 "saved": doc.saved,
+                "template_id": doc.template_id,
+                "template_config": doc.template_config,
                 "verification_time": doc.verification_time,
                 "grand_total": grand_total,
                 "processing_time_ms": processing_time_ms,
@@ -325,6 +356,8 @@ class QueueService:
             "saved": db_doc.saved,
             "ocr_result": db_doc.ocr_result,
             "final_extraction": db_doc.final_extraction,
+            "template_id": db_doc.template_id,
+            "template_config": db_doc.template_config,
             "error": db_doc.error,
             "verification_time": db_doc.verification_time,
             "created_at": db_doc.created_at.isoformat() if db_doc.created_at else datetime.utcnow().isoformat()

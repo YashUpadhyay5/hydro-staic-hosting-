@@ -6,6 +6,7 @@ import DocumentPreview from "../components/DocumentPreview";
 import ExtractionEditor from "../components/ExtractionEditor";
 import ActionButtons from "../components/ActionButtons";
 import ExcelDateRangeModal from "../components/ExcelDateRangeModal";
+import { downloadInvoiceFile } from "../utils/constants";
 
 const formatToInputDate = (dateStr) => {
   if (!dateStr) return "";
@@ -19,8 +20,13 @@ const formatToInputDate = (dateStr) => {
 };
 
 const normalizeExtraction = (rawExtraction) => {
-  if (!rawExtraction) return null;
-  const ext = JSON.parse(JSON.stringify(rawExtraction));
+  if (!rawExtraction || typeof rawExtraction !== "object") return null;
+  let ext;
+  try {
+    ext = JSON.parse(JSON.stringify(rawExtraction));
+  } catch {
+    return null;
+  }
 
   // Autofill PAN from GSTIN if present
   ["vendor_details", "consumer_details", "consignee_details"].forEach(party => {
@@ -38,10 +44,104 @@ const normalizeExtraction = (rawExtraction) => {
   if (!ext.consumer_details) ext.consumer_details = {};
   if (!ext.consignee_details) ext.consignee_details = {};
   if (!ext.transport_details) ext.transport_details = {};
+  if (!ext.bank_details) ext.bank_details = {};
   if (!ext.items) ext.items = [];
   if (!ext.additional_charges) ext.additional_charges = [];
   if (!ext.tax_summary) {
     ext.tax_summary = { subtotal: 0, taxable_amount: 0, cgst: 0, sgst: 0, igst: 0, cess: 0, round_off: 0, total_tax: 0, grand_total: 0 };
+  }
+
+  // Ensure bank_details is properly populated from all candidate objects
+  const vBank = ext.vendor_details?.bank_details || ext.supplier_details?.bank_details || ext.payment_details?.bank_details || {};
+  ext.bank_details = {
+    ...vBank,
+    ...ext.bank_details,
+    bank_name: ext.bank_details?.bank_name || vBank.bank_name || ext.bank_name || ext.vendor_details?.bank_name || "",
+    account_number: ext.bank_details?.account_number || ext.bank_details?.account_no || vBank.account_number || vBank.account_no || ext.account_number || ext.account_no || "",
+    ifsc_code: ext.bank_details?.ifsc_code || ext.bank_details?.ifsc || vBank.ifsc_code || vBank.ifsc || ext.ifsc_code || ext.ifsc || "",
+    branch: ext.bank_details?.branch || ext.bank_details?.branch_name || vBank.branch || vBank.branch_name || ext.branch || "",
+  };
+
+  // Normalize bank details and IFSC code
+  if (ext.bank_details && typeof ext.bank_details === "object") {
+    const ifscVal = ext.bank_details.ifsc_code || ext.bank_details.ifsc || ext.bank_details.ifscCode || ext.bank_details.bank_ifsc || ext.bank_details.ifs_code || ext.bank_details.rtgs_ifsc || "";
+    if (ifscVal) {
+      let ifscStr = String(ifscVal).trim().replace(/\s+/g, "").toUpperCase();
+      if (ifscStr.length === 11 && /^[A-Z]{4}[O0Qq][A-Z0-9]{6}$/.test(ifscStr)) {
+        ifscStr = ifscStr.substring(0, 4) + '0' + ifscStr.substring(5);
+      }
+      ext.bank_details.ifsc_code = ifscStr;
+      ext.bank_details.ifsc = ifscStr;
+    }
+    const accVal = ext.bank_details.account_number || ext.bank_details.account_no || ext.bank_details.acc_no || ext.bank_details.account || ext.bank_details.bank_account || "";
+    if (accVal) {
+      const accStr = String(accVal).trim().replace(/\s+/g, "");
+      ext.bank_details.account_number = accStr;
+      ext.bank_details.account_no = accStr;
+    }
+    const bankNameVal = ext.bank_details.bank_name || ext.bank_details.bank || ext.bank_details.name_of_bank || "";
+    if (bankNameVal) {
+      ext.bank_details.bank_name = String(bankNameVal).trim();
+    }
+    const branchVal = ext.bank_details.branch || ext.bank_details.branch_name || "";
+    if (branchVal) {
+      ext.bank_details.branch = String(branchVal).trim();
+    }
+
+    // Auto-derive bank name from IFSC prefix if bank_name is generic/missing
+    const IFSC_BANK_MAP = {
+      "SBIN": "State Bank of India",
+      "HDFC": "HDFC Bank",
+      "ICIC": "ICICI Bank",
+      "UTIB": "Axis Bank",
+      "PUNB": "Punjab National Bank",
+      "BARB": "Bank of Baroda",
+      "CNRB": "Canara Bank",
+      "UBIN": "Union Bank of India",
+      "KKBK": "Kotak Mahindra Bank",
+      "INDB": "IndusInd Bank",
+      "YESB": "Yes Bank",
+      "IDFB": "IDFC FIRST Bank",
+      "FDRL": "Federal Bank",
+      "IOBA": "Indian Overseas Bank",
+      "IDIB": "Indian Bank",
+      "MAHB": "Bank of Maharashtra",
+      "PSIB": "Punjab & Sind Bank",
+      "UCBA": "UCO Bank",
+      "CBIN": "Central Bank of India",
+      "SCBL": "Standard Chartered Bank",
+      "HSBC": "HSBC Bank",
+      "CITI": "Citibank",
+      "RBLN": "RBL Bank",
+      "BDBL": "Bandhan Bank",
+      "AUBL": "AU Small Finance Bank",
+      "ESFB": "Equitas Small Finance Bank",
+      "UJJV": "Ujjivan Small Finance Bank",
+      "KVBL": "Karur Vysya Bank",
+      "SIBL": "South Indian Bank",
+      "CSBK": "CSB Bank",
+      "TMBL": "Tamilnad Mercantile Bank",
+      "DCBL": "DCB Bank",
+      "DLXB": "Dhanlaxmi Bank",
+      "JAKA": "Jammu & Kashmir Bank",
+      "KBLX": "Karnataka Bank",
+      "COSB": "Cosmos Co-operative Bank",
+      "SVCB": "SVC Co-operative Bank",
+      "TNSC": "Tamil Nadu State Apex Co-op Bank",
+      "SARB": "Saraswat Bank",
+      "DEUT": "Deutsche Bank",
+      "DBSS": "DBS Bank India"
+    };
+
+    const bName = String(ext.bank_details.bank_name || "").toLowerCase().trim();
+    if (!bName || ["bank", "bank details", "null", "none", "n/a"].includes(bName)) {
+      if (ext.bank_details.ifsc_code && ext.bank_details.ifsc_code.length >= 4) {
+        const prefix = ext.bank_details.ifsc_code.substring(0, 4).toUpperCase();
+        if (IFSC_BANK_MAP[prefix]) {
+          ext.bank_details.bank_name = IFSC_BANK_MAP[prefix];
+        }
+      }
+    }
   }
 
   // Format dates for HTML date input compatibility if present
@@ -50,7 +150,7 @@ const normalizeExtraction = (rawExtraction) => {
   }
 
   return ext;
-};;
+};
 
 const getStatusBadgeStyle = (status = "") => {
   switch (status.toUpperCase()) {
@@ -420,40 +520,7 @@ export default function ValidationPage() {
       setTimerActive(false);
       showToast("✓ Invoice verified & saved to database!");
       await loadDocuments();
-      const res = await API.get("/documents");
-      const updatedDocs = res.data || [];
-
-      // 1. First search for next pending document after currentIndex in current view
-      let nextDoc = null;
-      if (currentIndex !== -1 && currentList.length > 0) {
-        for (let i = currentIndex + 1; i < currentList.length; i++) {
-          const cand = updatedDocs.find(d => d.document_id === currentList[i].document_id);
-          if (cand && cand.status === "PENDING_VALIDATION" && cand.document_id !== savedDocId) {
-            nextDoc = cand;
-            break;
-          }
-        }
-        if (!nextDoc) {
-          for (let i = 0; i < currentIndex; i++) {
-            const cand = updatedDocs.find(d => d.document_id === currentList[i].document_id);
-            if (cand && cand.status === "PENDING_VALIDATION" && cand.document_id !== savedDocId) {
-              nextDoc = cand;
-              break;
-            }
-          }
-        }
-      }
-
-      // 2. Fallback: find any other pending validation document in entire list
-      if (!nextDoc) {
-        nextDoc = updatedDocs.find(d => d.status === "PENDING_VALIDATION" && d.document_id !== savedDocId);
-      }
-
-      if (nextDoc) {
-        fetchFullDocumentDetails(nextDoc.document_id);
-      } else {
-        setSelectedDocument(null);
-      }
+      setSelectedDocument(null);
     } catch (error) {
       const errMsg = error.response?.data?.detail || "Save failed. Please check details.";
       showToast(errMsg, "error");
@@ -679,7 +746,7 @@ export default function ValidationPage() {
       </div>
 
       {/* KPI Stats */}
-      {(activeDocument !== null || activeFilter === null) && (
+      {activeFilter === null && (
         <KPICards
           selectedDocument={activeDocument}
           documents={documents}
@@ -793,9 +860,23 @@ export default function ValidationPage() {
                         <span className="badge" style={{ ...getStatusBadgeStyle(doc.status), padding: "4px 10px", borderRadius: "100px", fontSize: "11px", fontWeight: "600" }}>
                           {doc.status}
                         </span>
-                        <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
-                          {formatTime(doc.created_at)}
-                        </span>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              downloadInvoiceFile(doc);
+                            }}
+                            title="Download invoice file"
+                            className="btn btn-secondary"
+                            style={{ padding: "3px 8px", fontSize: "11px", height: "24px", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                          >
+                            📥 Download
+                          </button>
+                          <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+                            {formatTime(doc.created_at)}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   );

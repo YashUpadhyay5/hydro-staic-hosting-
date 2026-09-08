@@ -3,6 +3,8 @@ const fs = require('fs');
 const path = require('path');
 const Attendance = require('../models/Attendance');
 const Employee = require('../models/Employee');
+const Footprint = require('../models/Footprint');
+const ShiftEngine = require('./ShiftEngine');
 const HeartbeatMonitorService = require('./HeartbeatMonitorService');
 
 class CronScheduler {
@@ -23,57 +25,47 @@ class CronScheduler {
         const MM = now.getMinutes();
 
         // 0. Periodic check to auto-close any unclosed past sessions from previous dates
-        await this.autoCloseStaleSessions();
+        if (MM === 0 || MM === 30) {
+          await this.autoCloseStaleSessions();
+        }
 
         // 1. 9:00 AM Clock-In Reminder (Trigger within the first 5 minutes of the 9:00 AM hour)
-        if (HH === 9 && MM >= 0 && MM < 5 && last9AMFiredDate !== todayStr) {
+        if (HH === 9 && MM < 5 && last9AMFiredDate !== todayStr) {
           last9AMFiredDate = todayStr;
-          await this.trigger9AMReminders(todayStr);
+          await this.run9AMClockInReminder(todayStr);
         }
 
         // 2. 6:00 PM Clock-Out Alert (Trigger within the first 5 minutes of the 6:00 PM hour)
-        if (HH === 18 && MM >= 0 && MM < 5 && last6PMFiredDate !== todayStr) {
+        if (HH === 18 && MM < 5 && last6PMFiredDate !== todayStr) {
           last6PMFiredDate = todayStr;
-          await this.trigger6PMAlarms(todayStr);
+          await this.run6PMClockOutAlert(todayStr);
         }
 
-        // 3. Monthly Leave Auto-Increment (+1 allowed leaves on the 1st of every month)
-        const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-        const dayOfMonth = now.getDate();
-        if (dayOfMonth === 1) {
-          const stateFilePath = path.join(__dirname, '..', '..', '..', 'storage', 'cron_state.json');
-          let cronState = {};
-          if (fs.existsSync(stateFilePath)) {
-            try {
-              cronState = JSON.parse(fs.readFileSync(stateFilePath, 'utf8'));
-            } catch (e) {
-              cronState = {};
-            }
-          }
-          if (cronState.lastMonthlyLeaveIncrementMonth !== currentMonthStr) {
-            cronState.lastMonthlyLeaveIncrementMonth = currentMonthStr;
-            const storageDir = path.dirname(stateFilePath);
-            if (!fs.existsSync(storageDir)) {
-              fs.mkdirSync(storageDir, { recursive: true });
-            }
-            fs.writeFileSync(stateFilePath, JSON.stringify(cronState, null, 2), 'utf8');
+        // 3. 1st of the month: Auto-increment allowed leaves
+        if (now.getDate() === 1 && HH === 0 && MM < 5) {
+          const leaveFlagFile = path.join(__dirname, `../../../../storage/leaves_incremented_${todayStr.slice(0, 7)}.flag`);
+          if (!fs.existsSync(leaveFlagFile)) {
             await this.incrementMonthlyLeaves();
+            try {
+              fs.writeFileSync(leaveFlagFile, new Date().toISOString(), 'utf8');
+            } catch (e) {}
           }
         }
-      } catch (err) {
-        console.error('[CronScheduler Error]:', err.message);
+      } catch (cronErr) {
+        console.error('[CronScheduler Loop Error]:', cronErr.message);
       }
-    }, 300000); // Check every 5 minutes (300,000 ms)
+    }, 60 * 1000);
   }
 
-  static async trigger9AMReminders(dateStr) {
-    console.log(`[CronScheduler] Triggering 9:00 AM clock-in verification for date: ${dateStr}...`);
+  static async run9AMClockInReminder(dateStr) {
     try {
+      console.log(`[CronScheduler] Triggering 9:00 AM clock-in verification for date: ${dateStr}...`);
+      
       // Find all employees who have clocked in today
       const clockedInSessions = await Attendance.findAll({
-        where: { date: dateStr },
-        attributes: ['userId']
+        where: { date: dateStr }
       });
+
       const clockedInUserIds = clockedInSessions.map(s => s.userId);
 
       // Find all active employees who haven't clocked in
@@ -89,9 +81,9 @@ class CronScheduler {
 
       for (const emp of missingEmployees) {
         if (emp.fcmToken) {
-          const success = await HeartbeatMonitorService.sendPush(
+          const success = await HeartbeatMonitorService.sendPushNotification(
             emp.fcmToken,
-            'Action Required',
+            'Clock-In Reminder',
             "You haven't clocked in yet. Please clock in now.",
             { action: 'open_attendance' }
           );
@@ -105,30 +97,29 @@ class CronScheduler {
     }
   }
 
-  static async trigger6PMAlarms(dateStr) {
-    console.log(`[CronScheduler] Triggering 6:00 PM clock-out alarm for date: ${dateStr}...`);
+  static async run6PMClockOutAlert(dateStr) {
     try {
-      // Find all active check-in sessions that are in 'office' mode
-      // Strict rule: skip active field workers!
+      console.log(`[CronScheduler] Triggering 6:00 PM clock-out alarm for date: ${dateStr}...`);
+
+      // Find all active unclosed office sessions
       const activeOfficeSessions = await Attendance.findAll({
         where: {
+          date: dateStr,
           checkOut: null,
           workMode: 'office'
         }
       });
 
-      console.log(`[CronScheduler] Found ${activeOfficeSessions.length} active office sessions to notify.`);
-
       for (const session of activeOfficeSessions) {
         const emp = await Employee.findByPk(session.userId);
         if (emp && emp.fcmToken) {
-          const success = await HeartbeatMonitorService.sendPush(
+          const success = await HeartbeatMonitorService.sendPushNotification(
             emp.fcmToken,
-            'Shift Ended',
+            'Clock-Out Reminder',
             'Your working hours are complete. Please clock-out.',
             {
-              triggerAlarm: true,
-              sessionId: session.id,
+              type: 'ALARM',
+              sound: 'alarm_loud',
               action: 'clock_out'
             }
           );
@@ -147,16 +138,38 @@ class CronScheduler {
       const todayStr = new Date().toISOString().split('T')[0];
       const staleSessions = await Attendance.findAll({
         where: {
-          checkOut: null,
-          date: { [Op.ne]: todayStr }
+          date: { [Op.ne]: todayStr },
+          [Op.or]: [
+            { checkOut: null },
+            { checkOut: '' },
+            { checkOut: 'null' },
+            { checkOut: 'undefined' }
+          ]
         }
       });
 
       if (staleSessions.length > 0) {
-        console.log(`[CronScheduler] Found ${staleSessions.length} stale unclosed sessions from previous dates. Auto-closing...`);
+        console.log(`[CronScheduler] Found ${staleSessions.length} stale unclosed sessions from previous dates. Auto-closing with dynamic shift schedules...`);
+        const employees = await Employee.findAll({ raw: true });
+        const empMap = new Map();
+        employees.forEach(e => {
+          if (e.id) empMap.set(String(e.id).toLowerCase(), e);
+          if (e.empCode) empMap.set(String(e.empCode).toLowerCase(), e);
+          if (e.emp_code) empMap.set(String(e.emp_code).toLowerCase(), e);
+          if (e.name) empMap.set(String(e.name).toLowerCase(), e);
+        });
+
         for (const session of staleSessions) {
-          session.checkOut = '19:00:00';
-          session.workingHours = '08:00';
+          const emp = empMap.get(String(session.userId || '').toLowerCase()) || 
+                      empMap.get(String(session.userName || '').toLowerCase());
+          const shift = ShiftEngine.resolveEmployeeShift(emp);
+          const possibleIds = emp ? [emp.id, emp.empCode, emp.emp_code, session.userId].filter(Boolean) : [session.userId].filter(Boolean);
+          
+          const autoRes = await ShiftEngine.resolveAutoCheckOutTime(possibleIds, session.date, shift, Footprint);
+          session.checkOut = autoRes.checkOutTime;
+          session.clockOutMethod = autoRes.method || 'AUTO_SHIFT_END';
+          session.shiftCode = shift.code;
+          session.workingHours = ShiftEngine.calculateWorkingHours(session.checkIn, session.checkOut);
           await session.save();
         }
         console.log(`[CronScheduler] Successfully auto-closed ${staleSessions.length} stale past sessions.`);

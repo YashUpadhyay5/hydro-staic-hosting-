@@ -5,6 +5,7 @@ const Employee = require('../../../../shared/models/Employee');
 const sequelize = require('../../../../config/database');
 const { Op } = require('sequelize');
 const { calculateEarnedLeaves } = require('../../../../core/utils/leaveCalculator');
+const { getCachedEmployees } = require('../../../../core/utils/employeeCache');
 
 // Helper to reliably find an employee by id, emp_code, or name
 async function findEmployee(identifier, name) {
@@ -37,13 +38,7 @@ router.get('/', async (req, res) => {
       order: [['appliedAt', 'DESC']]
     });
 
-    const employees = await Employee.findAll();
-    const empMap = new Map();
-    employees.forEach(emp => {
-      if (emp.id) empMap.set(String(emp.id).toLowerCase(), emp);
-      if (emp.empCode) empMap.set(String(emp.empCode).toLowerCase(), emp);
-      if (emp.name) empMap.set(String(emp.name).toLowerCase(), emp);
-    });
+    const { employees, empMap } = await getCachedEmployees();
 
     const leavesWithBalances = leaves.map((leave) => {
       const leaveObj = leave.toJSON();

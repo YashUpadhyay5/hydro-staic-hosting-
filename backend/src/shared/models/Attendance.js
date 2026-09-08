@@ -114,6 +114,18 @@ const Attendance = sequelize.define('Attendance', {
     type: DataTypes.BOOLEAN,
     allowNull: false,
     defaultValue: false,
+  },
+  checkInMethod: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  clockOutMethod: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  shiftCode: {
+    type: DataTypes.STRING,
+    allowNull: true,
   }
 }, {
   timestamps: true,

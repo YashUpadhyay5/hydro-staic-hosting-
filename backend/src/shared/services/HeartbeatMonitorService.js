@@ -5,11 +5,20 @@ const AuditLog = require('../models/AuditLog');
 const Rule = require('../models/Rule');
 const axios = require('axios');
 const admin = require('../../config/firebase');
+const { getCachedEmployees } = require('../../core/utils/employeeCache');
+
+let cachedConfig = null;
+let lastConfigTime = 0;
 
 class HeartbeatMonitorService {
     
-    // Fetch configuration from Rule table with fallbacks
+    // Fetch configuration from Rule table with fallbacks (cached for 60s)
     static async getConfig() {
+        const now = Date.now();
+        if (cachedConfig && (now - lastConfigTime < 60000)) {
+            return cachedConfig;
+        }
+
         try {
             const rules = await Rule.findAll({
                 where: {
@@ -44,6 +53,8 @@ class HeartbeatMonitorService {
                 if (rule.key === 'enableAdminAlert') config.enableAdminAlert = rule.value === 'true';
             });
 
+            cachedConfig = config;
+            lastConfigTime = now;
             return config;
         } catch (err) {
             console.error('[HeartbeatService] Error reading config rules:', err.message);
@@ -247,9 +258,10 @@ class HeartbeatMonitorService {
 
         // Fetch user token
         try {
-            const employee = await Employee.findByPk(session.userId);
+            const { empMap } = await getCachedEmployees();
+            const employee = empMap.get(String(session.userId || '').toLowerCase());
             if (!employee || !employee.fcmToken) {
-                console.log(`[HeartbeatService] Cannot send push recovery: User ${session.userId} has no registered push token.`);
+                // console.log(`[HeartbeatService] Cannot send push recovery: User ${session.userId} has no registered push token.`);
                 return;
             }
 

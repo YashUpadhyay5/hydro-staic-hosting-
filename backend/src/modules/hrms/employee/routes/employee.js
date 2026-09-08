@@ -11,6 +11,7 @@ const { profileUpload } = require('../../../../core/middleware/upload');
 const requireRole = require('../../../../core/middleware/requireRole');
 const verifyToken = require('../../../../core/middleware/verifyToken');
 const { Op } = require('sequelize');
+const { invalidateEmployeeCache } = require('../../../../core/utils/employeeCache');
 
 // Helper to format holiday countdowns
 const formatHolidayList = (rawHolidays = []) => {
@@ -384,6 +385,7 @@ router.post('/', requireRole(['ADMIN']), async (req, res) => {
       customFields: customFields || {}
     });
 
+    invalidateEmployeeCache();
     return res.status(201).json(newEmp);
   } catch (error) {
     console.error('Error creating employee:', error);
@@ -530,6 +532,7 @@ router.put('/:id', requireRole(['ADMIN']), async (req, res) => {
       }
     }
 
+    invalidateEmployeeCache();
     return res.status(200).json(employee);
   } catch (error) {
     console.error('Error updating employee:', error);
@@ -546,6 +549,7 @@ router.delete('/:id', requireRole(['ADMIN']), async (req, res) => {
       return res.status(404).json({ error: 'Employee not found.' });
     }
     await employee.destroy();
+    invalidateEmployeeCache();
     return res.status(200).json({ message: 'Employee deleted successfully.' });
   } catch (error) {
     console.error('Error deleting employee:', error);

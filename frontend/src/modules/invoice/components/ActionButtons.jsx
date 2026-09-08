@@ -1,3 +1,5 @@
+import { downloadInvoiceFile } from "../utils/constants";
+
 function ActionButtons({
   onSave,
   onDownloadExcel,
@@ -14,21 +16,7 @@ function ActionButtons({
   timerActive = false,
 }) {
   return (
-    <div className="action-bar-wrapper">
-      {timerActive ? (
-        <div className="timer-badge active" style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", fontWeight: "600", color: "#d97706", marginRight: "auto", background: "rgba(245, 158, 11, 0.1)", padding: "6px 12px", borderRadius: "16px", border: "1px solid rgba(245, 158, 11, 0.3)" }}>
-          <span className="pulse-dot" style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#d97706", display: "inline-block", animation: "pulse 1.5s infinite" }}></span>
-          ⏱️ Verifying: {verificationTime}s
-        </div>
-      ) : verificationTime > 0 ? (
-        <div className="timer-badge paused" style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", fontWeight: "600", color: "var(--text-secondary)", marginRight: "auto", background: "var(--bg-card-highlight)", padding: "6px 12px", borderRadius: "16px", border: "1px solid var(--border-color)" }}>
-          ⏱️ Time: {verificationTime}s (Paused)
-        </div>
-      ) : (
-        <div className="timer-badge inactive" style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", fontWeight: "500", color: "var(--text-muted)", marginRight: "auto" }}>
-          ⏱️ Click preview to start timer
-        </div>
-      )}
+    <div className="action-bar-wrapper" style={{ justifyContent: "flex-end" }}>
 
       {/* Retry button — only visible for Failed documents */}
       {isFailed && (
@@ -76,6 +64,22 @@ function ActionButtons({
         </svg>
         Print Summary
       </button>
+
+      {selectedDocument && (
+        <button
+          className="btn btn-secondary"
+          onClick={() => downloadInvoiceFile(selectedDocument)}
+          title="Download original invoice document directly to your device"
+          style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+        >
+          <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          Download Invoice
+        </button>
+      )}
 
       <button
         className="btn btn-secondary"

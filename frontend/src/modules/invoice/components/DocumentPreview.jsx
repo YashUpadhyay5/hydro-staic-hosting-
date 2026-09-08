@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { downloadInvoiceFile } from "../utils/constants";
 
 function DocumentPreview({ document, verificationTime = 0, timerActive = false, documents = [], onSelect }) {
   const [zoom, setZoom] = useState(1.0);
@@ -23,7 +24,7 @@ function DocumentPreview({ document, verificationTime = 0, timerActive = false, 
   const isUploading = document.document_id === "temp-uploading";
   const isPdf = !isUploading && (filename.toLowerCase().endsWith(".pdf") || filePath.toLowerCase().endsWith(".pdf"));
 
-  const token = localStorage.getItem("token") || "";
+  const token = localStorage.getItem("token") || localStorage.getItem("adminToken") || "";
   const docId = document.document_id || document.id || "";
   const apiBaseUrl = (import.meta.env && import.meta.env.VITE_API_URL)
     ? import.meta.env.VITE_API_URL.replace(/\/$/, '')
@@ -34,15 +35,16 @@ function DocumentPreview({ document, verificationTime = 0, timerActive = false, 
   const zoomOut = () => setZoom((z) => Math.max(z - 0.1, 0.5));
   const zoomFit = () => setZoom(1.0);
 
-  const handleDownload = () => {
-    if (!fileUrl) return;
-    const link = document.createElement("a");
-    link.href = fileUrl;
-    link.download = filename || "invoice";
-    link.target = "_blank";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const [downloading, setDownloading] = useState(false);
+
+  const handleDownload = async () => {
+    if (!document || isUploading) return;
+    setDownloading(true);
+    try {
+      await downloadInvoiceFile(document, filename);
+    } finally {
+      setDownloading(false);
+    }
   };
 
   return (
@@ -55,7 +57,7 @@ function DocumentPreview({ document, verificationTime = 0, timerActive = false, 
         }
       `}</style>
       <div className="preview-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px" }}>
-        <span className="preview-title" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+        <span className="preview-title" style={{ display: "flex", alignItems: "center", gap: "10px", fontWeight: "600", fontSize: "13px" }}>
           {(() => {
             const extraction = document.final_extraction || document.ocr_result?.extraction || document.extracted_data;
             const vendorName = extraction?.vendor_details?.name;
@@ -69,16 +71,6 @@ function DocumentPreview({ document, verificationTime = 0, timerActive = false, 
             }
             return `Invoice Preview: ${filename}`;
           })()}
-          {timerActive ? (
-            <span className="timer-badge active" style={{ fontSize: "12px", color: "#d97706", background: "rgba(245, 158, 11, 0.1)", border: "1px solid rgba(245, 158, 11, 0.2)", padding: "2px 8px", borderRadius: "12px", display: "inline-flex", alignItems: "center", gap: "4px" }}>
-              <span className="pulse-dot" style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#d97706", display: "inline-block", animation: "pulse 1.5s infinite" }}></span>
-              Stopwatch: {verificationTime}s
-            </span>
-          ) : verificationTime > 0 ? (
-            <span style={{ fontSize: "12px", color: "var(--text-secondary)", background: "var(--bg-card-highlight)", border: "1px solid var(--border-color)", padding: "2px 8px", borderRadius: "12px" }}>
-              ⏱️ Stopwatch: {verificationTime}s (Paused)
-            </span>
-          ) : null}
         </span>
 
         {/* Toolbar Action Buttons */}
@@ -92,8 +84,14 @@ function DocumentPreview({ document, verificationTime = 0, timerActive = false, 
           <button className="btn btn-secondary" onClick={zoomIn} title="Zoom In" style={{ padding: "4px 8px", fontSize: "12px", height: "28px" }}>
             🔍+
           </button>
-          <button className="btn btn-secondary" onClick={handleDownload} title="Download Original File" style={{ padding: "4px 10px", fontSize: "11px", fontWeight: "600", height: "28px", display: "flex", alignItems: "center", gap: "4px" }}>
-            📥 Download
+          <button 
+            className="btn btn-secondary" 
+            onClick={handleDownload} 
+            disabled={downloading || !fileUrl}
+            title="Download Original File" 
+            style={{ padding: "4px 10px", fontSize: "11px", fontWeight: "600", height: "28px", display: "flex", alignItems: "center", gap: "4px" }}
+          >
+            {downloading ? "⏳ Downloading..." : "📥 Download"}
           </button>
         </div>
       </div>

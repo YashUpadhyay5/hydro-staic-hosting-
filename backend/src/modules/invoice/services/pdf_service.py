@@ -196,7 +196,31 @@ class PDFService:
             ('RIGHTPADDING', (0,0), (-1,-1), 0),
         ]))
         elements.append(consignee_grid)
-        elements.append(Spacer(1, 16))
+        elements.append(Spacer(1, 12))
+
+        # 3.5 Bank Details
+        bank = extraction.get("bank_details", {}) or extraction.get("vendor_details", {}).get("bank_details", {}) or {}
+        bank_name = bank.get("bank_name") or bank.get("bank") or "N/A"
+        account_no = bank.get("account_number") or bank.get("account_no") or bank.get("acc_no") or "N/A"
+        ifsc = bank.get("ifsc_code") or bank.get("ifsc") or "N/A"
+        branch = bank.get("branch") or bank.get("branch_name") or "N/A"
+
+        bank_info = [
+            [Paragraph("SUPPLIER BANK DETAILS", section_style), Paragraph("", section_style)],
+            [Paragraph("Bank Name:", meta_label_style), Paragraph(bank_name, meta_val_style)],
+            [Paragraph("Account No:", meta_label_style), Paragraph(account_no, meta_val_style)],
+            [Paragraph("IFSC Code:", meta_label_style), Paragraph(ifsc, meta_val_style)],
+            [Paragraph("Branch:", meta_label_style), Paragraph(branch, meta_val_style)]
+        ]
+        bank_table = Table(bank_info, colWidths=[100, 440])
+        bank_table.setStyle(TableStyle([
+            ('SPAN', (0,0), (1,0)),
+            ('VALIGN', (0,0), (-1,-1), 'TOP'),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 3),
+            ('TOPPADDING', (0,0), (-1,-1), 3),
+        ]))
+        elements.append(bank_table)
+        elements.append(Spacer(1, 14))
 
         # 4. Line Items Table
         elements.append(Paragraph("LINE ITEMS", section_style))

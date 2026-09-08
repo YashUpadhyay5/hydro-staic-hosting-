@@ -118,25 +118,43 @@ export default function DashboardView({ totalEmployees, onViewChange }) {
         }
     };
 
+    const normalizeToIsoDate = (dStr) => {
+        if (!dStr) return '';
+        const clean = String(dStr).split('T')[0].split(' ')[0].trim();
+        if (clean.includes('-')) {
+            const parts = clean.split('-');
+            if (parts[0].length === 4) return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+            if (parts[2].length === 4) return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+        } else if (clean.includes('/')) {
+            const parts = clean.split('/');
+            if (parts[2].length === 4) return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+            if (parts[0].length === 4) return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+        }
+        return clean;
+    };
+
     const fetchDashboardData = async () => {
         const today = getAuthoritativeISTDate();
         const results = await Promise.allSettled([
             api.getLeaves(),
             api.getExpenses(),
-            api.getAttendance ? api.getAttendance({ date: today, limit: 500 }) : Promise.resolve([]),
-            api.getEmployees ? api.getEmployees() : Promise.resolve([])
+            api.getAttendance ? api.getAttendance({ limit: 1000 }) : Promise.resolve([]),
+            api.getEmployees ? api.getEmployees() : Promise.resolve([]),
+            api.getLatestAllFootprints ? api.getLatestAllFootprints() : Promise.resolve([])
         ]);
 
         const leaves = results[0].status === 'fulfilled' ? results[0].value : [];
         const expenses = results[1].status === 'fulfilled' ? results[1].value : [];
         const attendanceRes = results[2].status === 'fulfilled' ? results[2].value : [];
         const empsRes = results[3].status === 'fulfilled' ? results[3].value : [];
+        const footprintsRes = results[4].status === 'fulfilled' ? results[4].value : [];
 
         const pendingL = Array.isArray(leaves) ? leaves.filter(l => l && l.status === 'pending') : [];
         const pendingE = Array.isArray(expenses) ? expenses.filter(e => e && e.status === 'pending') : [];
         
         const attendance = Array.isArray(attendanceRes) ? attendanceRes : (attendanceRes && attendanceRes.data ? attendanceRes.data : []);
         const emps = Array.isArray(empsRes) ? empsRes : (empsRes && empsRes.data ? empsRes.data : []);
+        const footprints = Array.isArray(footprintsRes) ? footprintsRes : (footprintsRes && footprintsRes.data ? footprintsRes.data : []);
 
         setPendingLeaves(pendingL);
         setPendingExpenses(pendingE);
@@ -147,32 +165,40 @@ export default function DashboardView({ totalEmployees, onViewChange }) {
 
         const todaysRecords = attendance.filter(a => {
             if (!a) return false;
-            const aDate = a.date ? (a.date.length === 10 ? a.date : getAuthoritativeISTDate(a.date)) : null;
-            if (aDate === today) return true;
-            if (a.createdAt && String(a.createdAt).startsWith(today)) return true;
-            if (a.createdAt && getAuthoritativeISTDate(a.createdAt) === today) return true;
+            const normDate = normalizeToIsoDate(a.date);
+            if (normDate === today) return true;
+            if (a.date && getAuthoritativeISTDate(a.date) === today) return true;
+            if (a.createdAt && (normalizeToIsoDate(a.createdAt) === today || getAuthoritativeISTDate(a.createdAt) === today)) return true;
             return false;
         });
 
         const uniqueAttendance = [];
         const seenUsers = new Set();
+
         todaysRecords.forEach(record => {
-            const userIdKey = String(record.userId || record.userName || record.empCode || '').trim().toLowerCase();
-            if (userIdKey && !seenUsers.has(userIdKey)) {
-                seenUsers.add(userIdKey);
+            const rId = String(record.userId || '').trim().toLowerCase();
+            const rName = String(record.userName || '').trim().toLowerCase();
+            const rCode = String(record.empCode || record.employeeId || '').trim().toLowerCase();
 
-                const matchedEmp = emps.find(e => {
-                    const eId = String(e.id || '').trim().toLowerCase();
-                    const eCode = String(e.empCode || e.emp_code || '').trim().toLowerCase();
-                    const eName = String(e.name || '').trim().toLowerCase();
-                    const rId = String(record.userId || '').trim().toLowerCase();
-                    const rName = String(record.userName || '').trim().toLowerCase();
-                    const rCode = String(record.empCode || '').trim().toLowerCase();
+            const matchedEmp = record.employee || emps.find(e => {
+                if (!e) return false;
+                const eId = String(e.id || '').trim().toLowerCase();
+                const eCode = String(e.empCode || e.emp_code || e.employeeId || e.empId || '').trim().toLowerCase();
+                const eName = String(e.name || '').trim().toLowerCase();
 
-                    return (eId && (eId === rId || eId === rName || eId === rCode)) || 
-                           (eCode && (eCode === rId || eCode === rName || eCode === rCode)) || 
-                           (eName && (eName === rName || eName === rId || eName === rCode));
-                });
+                return (eId && (eId === rId || eId === rName || eId === rCode)) || 
+                       (eCode && (eCode === rId || eCode === rName || eCode === rCode)) || 
+                       (eName && (eName === rName || eName === rId || eName === rCode));
+            });
+
+            const canonicalKey = matchedEmp?.id || matchedEmp?.empCode || record.empCode || record.userId || record.userName;
+            const canonicalLower = String(canonicalKey).trim().toLowerCase();
+
+            if (canonicalLower && !seenUsers.has(canonicalLower)) {
+                seenUsers.add(canonicalLower);
+                if (rId) seenUsers.add(rId);
+                if (rName) seenUsers.add(rName);
+                if (rCode) seenUsers.add(rCode);
 
                 if (matchedEmp) {
                     if (matchedEmp.id) seenUsers.add(String(matchedEmp.id).trim().toLowerCase());
@@ -183,8 +209,60 @@ export default function DashboardView({ totalEmployees, onViewChange }) {
 
                 uniqueAttendance.push({
                     ...record,
-                    matchedEmp
+                    matchedEmp: matchedEmp || record.employee
                 });
+            }
+        });
+
+        // Fallback: Also include any actively transmitting employees from footprints today
+        footprints.forEach(f => {
+            if (!f) return;
+            const fId = String(f.userId || '').trim().toLowerCase();
+            const fName = String(f.userName || '').trim().toLowerCase();
+            const fCode = String(f.empCode || '').trim().toLowerCase();
+
+            const isAlreadyIncluded = (fId && seenUsers.has(fId)) || (fName && seenUsers.has(fName)) || (fCode && seenUsers.has(fCode));
+            if (!isAlreadyIncluded) {
+                const matchedEmp = f.employee || emps.find(e => {
+                    if (!e) return false;
+                    const eId = String(e.id || '').trim().toLowerCase();
+                    const eCode = String(e.empCode || e.emp_code || e.employeeId || e.empId || '').trim().toLowerCase();
+                    const eName = String(e.name || '').trim().toLowerCase();
+                    return (eId && (eId === fId || eId === fCode || eId === fName)) ||
+                           (eCode && (eCode === fId || eCode === fCode || eCode === fName)) ||
+                           (eName && (eName === fName || eName === fId || eName === fCode));
+                });
+
+                const canonicalKey = matchedEmp?.id || matchedEmp?.empCode || f.empCode || f.userId || f.userName;
+                const canonicalLower = String(canonicalKey).trim().toLowerCase();
+
+                if (canonicalLower && !seenUsers.has(canonicalLower)) {
+                    seenUsers.add(canonicalLower);
+                    if (fId) seenUsers.add(fId);
+                    if (fName) seenUsers.add(fName);
+                    if (fCode) seenUsers.add(fCode);
+
+                    if (matchedEmp) {
+                        if (matchedEmp.id) seenUsers.add(String(matchedEmp.id).trim().toLowerCase());
+                        if (matchedEmp.empCode) seenUsers.add(String(matchedEmp.empCode).trim().toLowerCase());
+                        if (matchedEmp.emp_code) seenUsers.add(String(matchedEmp.emp_code).trim().toLowerCase());
+                        if (matchedEmp.name) seenUsers.add(String(matchedEmp.name).trim().toLowerCase());
+                    }
+
+                    uniqueAttendance.push({
+                        id: f.id,
+                        userId: matchedEmp?.empCode || matchedEmp?.id || f.empCode || f.userId,
+                        userName: matchedEmp?.name || f.userName,
+                        empCode: matchedEmp?.empCode || matchedEmp?.emp_code || f.empCode || f.userId,
+                        date: f.date || today,
+                        checkIn: f.checkIn || (f.timestamp ? new Date(Number(f.timestamp)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Active Today'),
+                        checkOut: null,
+                        workMode: (f.workMode || matchedEmp?.workMode || matchedEmp?.primaryWorkMode || matchedEmp?.designation || 'OFFICE').toUpperCase(),
+                        matchedEmp: matchedEmp || f.employee,
+                        employee: matchedEmp || f.employee,
+                        address: f.address
+                    });
+                }
             }
         });
         
@@ -1146,8 +1224,9 @@ export default function DashboardView({ totalEmployees, onViewChange }) {
                                 }
 
                                 return filtered.map((item, index) => {
-                                    const emp = item.matchedEmp || {};
-                                    const empName = emp.name || item.userName || item.name || item.userId || `Employee #${index + 1}`;
+                                    const emp = item.matchedEmp || item.employee || {};
+                                    const empName = emp.name || item.userName || item.name || item.employeeName || item.userId || `Employee #${index + 1}`;
+                                    const empCode = emp.empCode || emp.emp_code || emp.employeeId || item.empCode || (item.userId && !String(item.userId).startsWith('EMP0') ? item.userId : '');
                                     const checkInTime = item.checkIn || item.time || item.createdAt ? (item.checkIn || new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })) : 'Checked In';
                                     
                                     // Official duty mode determination: prioritize today's active punch workMode
@@ -1158,6 +1237,8 @@ export default function DashboardView({ totalEmployees, onViewChange }) {
                                     const jobTitleText = (emp.jobTitle && emp.jobTitle !== 'OFFICE' && emp.jobTitle !== 'FIELD') 
                                         ? emp.jobTitle 
                                         : (emp.department || (item.designation && item.designation !== 'OFFICE' && item.designation !== 'FIELD' ? item.designation : 'Team Member'));
+
+                                    const photoUrl = emp.profilePhotoUrl || emp.avatar || item.profilePhotoUrl;
 
                                     return (
                                         <div 
@@ -1175,11 +1256,26 @@ export default function DashboardView({ totalEmployees, onViewChange }) {
                                             }}
                                         >
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                                                <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: '#2563eb', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '15px', flexShrink: 0 }}>
-                                                    {empName.charAt(0).toUpperCase()}
-                                                </div>
+                                                {photoUrl ? (
+                                                    <img 
+                                                        src={photoUrl} 
+                                                        alt={empName}
+                                                        style={{ width: '40px', height: '40px', borderRadius: '50%', objectFit: 'cover', border: '2px solid #2563eb', flexShrink: 0 }}
+                                                    />
+                                                ) : (
+                                                    <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: '#2563eb', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '15px', flexShrink: 0 }}>
+                                                        {empName.charAt(0).toUpperCase()}
+                                                    </div>
+                                                )}
                                                 <div>
-                                                    <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>{empName}</h4>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                        <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>{empName}</h4>
+                                                        {empCode && (
+                                                            <span style={{ fontSize: '11px', color: '#2563eb', fontWeight: 600, background: 'rgba(37, 99, 235, 0.1)', padding: '1px 6px', borderRadius: '4px', border: '1px solid rgba(37, 99, 235, 0.2)' }}>
+                                                                {empCode}
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                     <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 500 }}>{jobTitleText}</span>
                                                 </div>
                                             </div>

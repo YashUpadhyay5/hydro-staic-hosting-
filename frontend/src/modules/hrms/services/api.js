@@ -2,7 +2,7 @@ const getApiBaseUrl = () => {
     if (import.meta.env && import.meta.env.VITE_API_URL) {
         return import.meta.env.VITE_API_URL;
     }
-    const hostname = window.location.hostname;
+    const hostname = window.location.hostname || '127.0.0.1';
     return `http://${hostname}:8000/api`;
 };
 

@@ -43,14 +43,21 @@ class BackupService {
             const targetPath = path.join(this.backupDir, fileName);
             const latestPath = path.join(this.backupDir, 'database_backup_LATEST.sqlite');
 
-            fs.copyFileSync(this.dbPath, targetPath);
-            fs.copyFileSync(this.dbPath, latestPath);
+            // Asynchronous non-blocking file copy to prevent event loop freezes
+            fs.promises.copyFile(this.dbPath, targetPath).then(async () => {
+                try {
+                    await fs.promises.copyFile(this.dbPath, latestPath);
+                    const stats = await fs.promises.stat(targetPath);
+                    console.log(`[BACKUP SUCCESS] Created async backup: ${fileName} (${(stats.size / (1024 * 1024)).toFixed(2)} MB)`);
+                    this.cleanupOldBackups(30);
+                } catch (e) {
+                    console.warn('[BACKUP WARNING] Error in secondary latest backup:', e.message);
+                }
+            }).catch(copyErr => {
+                console.error('[BACKUP ERROR] Failed async backup copy:', copyErr.message);
+            });
 
-            const stats = fs.statSync(targetPath);
-            console.log(`[BACKUP SUCCESS] Created backup: ${fileName} (${(stats.size / (1024 * 1024)).toFixed(2)} MB)`);
-
-            this.cleanupOldBackups(30);
-            return { fileName, sizeMB: (stats.size / (1024 * 1024)).toFixed(2), timestamp: new Date() };
+            return { fileName, timestamp: new Date() };
         } catch (err) {
             console.error('[BACKUP ERROR] Failed to create backup:', err);
             return null;

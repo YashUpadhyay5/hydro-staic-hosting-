@@ -3,6 +3,14 @@ import React, { useEffect, useRef, useState } from 'react';
 import { api } from '../../services/api';
 import { formatDate } from '../../utils/helpers';
 
+const getAuthoritativeISTDate = (d = new Date()) => {
+    try {
+        return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date(d));
+    } catch {
+        return new Date().toISOString().split('T')[0];
+    }
+};
+
 export default function LiveTrackingView({ employees }) {
     const [loading, setLoading] = useState(true);
     const [selectedEmp, setSelectedEmp] = useState('all');
@@ -38,11 +46,14 @@ export default function LiveTrackingView({ employees }) {
         markersRef.current = {};
 
         try {
-            const todayDate = new Date().toISOString().split('T')[0];
-            const [footprints, todayAttendance] = await Promise.all([
+            const todayDate = getAuthoritativeISTDate();
+            const [footprintsRes, todayAttendanceRes] = await Promise.all([
                 api.getLatestAllFootprints(),
                 api.getAttendance ? api.getAttendance({ date: todayDate, limit: 500 }).catch(() => []) : Promise.resolve([])
             ]);
+
+            const footprints = Array.isArray(footprintsRes) ? footprintsRes : (footprintsRes?.data || []);
+            const todayAttendance = Array.isArray(todayAttendanceRes) ? todayAttendanceRes : (todayAttendanceRes?.data || []);
             
             // Build set of User IDs for employees who are currently actively clocked in today (checkIn present, no checkOut)
             const isAttActive = (att) => {
@@ -52,94 +63,168 @@ export default function LiveTrackingView({ employees }) {
             };
 
             const clockedInUserIds = new Set();
+            const activeAttMap = new Map();
+
             (todayAttendance || []).forEach(att => {
                 if (isAttActive(att)) {
-                    if (att.userId) clockedInUserIds.add(String(att.userId).trim().toLowerCase());
-                    if (att.userName) clockedInUserIds.add(String(att.userName).trim().toLowerCase());
-                    if (att.empCode) clockedInUserIds.add(String(att.empCode).trim().toLowerCase());
+                    const uid = String(att.userId || '').trim().toLowerCase();
+                    const uname = String(att.userName || '').trim().toLowerCase();
+                    const ucode = String(att.empCode || att.employeeId || '').trim().toLowerCase();
+
+                    if (uid) { clockedInUserIds.add(uid); activeAttMap.set(uid, att); }
+                    if (uname) { clockedInUserIds.add(uname); activeAttMap.set(uname, att); }
+                    if (ucode) { clockedInUserIds.add(ucode); activeAttMap.set(ucode, att); }
 
                     // Cross-reference with roster to add all aliases
-                    const emp = (employees || []).find(e => {
-                        const rId = String(att.userId || '').trim().toLowerCase();
-                        const rName = String(att.userName || '').trim().toLowerCase();
-                        const rCode = String(att.empCode || '').trim().toLowerCase();
-                        return (e.id && (String(e.id).trim().toLowerCase() === rId || String(e.id).trim().toLowerCase() === rCode)) ||
-                               (e.empCode && (String(e.empCode).trim().toLowerCase() === rId || String(e.empCode).trim().toLowerCase() === rCode)) ||
-                               (e.emp_code && (String(e.emp_code).trim().toLowerCase() === rId || String(e.emp_code).trim().toLowerCase() === rCode)) ||
-                               (e.name && String(e.name).trim().toLowerCase() === rName);
+                    const emp = att.employee || (employees || []).find(e => {
+                        const rId = String(e.id || '').trim().toLowerCase();
+                        const rCode = String(e.empCode || e.emp_code || e.employeeId || e.empId || '').trim().toLowerCase();
+                        const rName = String(e.name || '').trim().toLowerCase();
+                        return (rId && (rId === uid || rId === ucode || rId === uname)) ||
+                               (rCode && (rCode === uid || rCode === ucode || rCode === uname)) ||
+                               (rName && (rName === uname || rName === uid || rName === ucode));
                     });
 
                     if (emp) {
-                        if (emp.id) clockedInUserIds.add(String(emp.id).trim().toLowerCase());
-                        if (emp.empCode) clockedInUserIds.add(String(emp.empCode).trim().toLowerCase());
-                        if (emp.emp_code) clockedInUserIds.add(String(emp.emp_code).trim().toLowerCase());
-                        if (emp.name) clockedInUserIds.add(String(emp.name).trim().toLowerCase());
+                        const eId = String(emp.id || '').trim().toLowerCase();
+                        const eCode = String(emp.empCode || emp.emp_code || '').trim().toLowerCase();
+                        const eName = String(emp.name || '').trim().toLowerCase();
+                        if (eId) { clockedInUserIds.add(eId); activeAttMap.set(eId, att); }
+                        if (eCode) { clockedInUserIds.add(eCode); activeAttMap.set(eCode, att); }
+                        if (eName) { clockedInUserIds.add(eName); activeAttMap.set(eName, att); }
                     }
                 }
             });
 
-            // Build active employee ID set
-            const activeEmpIds = new Set(
-                (employees || []).flatMap(e => [
-                    e.id ? String(e.id).trim().toLowerCase() : null,
-                    e.empId ? String(e.empId).trim().toLowerCase() : null,
-                    e.employeeId ? String(e.employeeId).trim().toLowerCase() : null,
-                    e.emp_id ? String(e.emp_id).trim().toLowerCase() : null,
-                    e.empCode ? String(e.empCode).trim().toLowerCase() : null,
-                    e.emp_code ? String(e.emp_code).trim().toLowerCase() : null,
-                    e.code ? String(e.code).trim().toLowerCase() : null,
-                    e.userId ? String(e.userId).trim().toLowerCase() : null,
-                    e.name ? String(e.name).trim().toLowerCase() : null
-                ].filter(Boolean))
-            );
-
-            // Keep footprints belonging ONLY to employees who strictly clocked in today and are currently active
-            let activeFootprints = (footprints || []).filter(f => {
-                if (!f || !f.userId) return false;
-                const uid = String(f.userId).trim().toLowerCase();
-
-                // Match active employee roster
-                const isRosterActive = activeEmpIds.has(uid) || (f.userName && activeEmpIds.has(String(f.userName).trim().toLowerCase()));
-                if (!isRosterActive) return false;
-
-                // Match today's active attendance clock-in record
-                const empObj = (employees || []).find(e => 
-                    (e.id && String(e.id).trim().toLowerCase() === uid) ||
-                    (e.empId && String(e.empId).trim().toLowerCase() === uid) ||
-                    (e.employeeId && String(e.employeeId).trim().toLowerCase() === uid) ||
-                    (e.empCode && String(e.empCode).trim().toLowerCase() === uid) ||
-                    (e.emp_code && String(e.emp_code).trim().toLowerCase() === uid) ||
-                    (e.code && String(e.code).trim().toLowerCase() === uid) ||
-                    (e.userId && String(e.userId).trim().toLowerCase() === uid)
-                );
-                const empName = empObj ? String(empObj.name).trim().toLowerCase() : (f.userName ? String(f.userName).trim().toLowerCase() : '');
-                
-                const hasClockedIn = clockedInUserIds.has(uid) || (empName && clockedInUserIds.has(empName));
-                if (!hasClockedIn) return false;
-
-                return true;
+            // Also add all footprints from /latest-all (authoritative for live footprints)
+            (footprints || []).forEach(f => {
+                if (f.userId) clockedInUserIds.add(String(f.userId).trim().toLowerCase());
+                if (f.userName) clockedInUserIds.add(String(f.userName).trim().toLowerCase());
+                if (f.empCode) clockedInUserIds.add(String(f.empCode).trim().toLowerCase());
+                if (f.employee?.id) clockedInUserIds.add(String(f.employee.id).trim().toLowerCase());
+                if (f.employee?.empCode) clockedInUserIds.add(String(f.employee.empCode).trim().toLowerCase());
+                if (f.employee?.name) clockedInUserIds.add(String(f.employee.name).trim().toLowerCase());
             });
 
-            let filteredFootprints = activeFootprints.filter(f => {
+            // Track covered canonical IDs to prevent duplicate cards
+            const coveredCanonical = new Set();
+            const combinedList = [];
+
+            // 1. Add footprints belonging to actively clocked-in staff
+            (footprints || []).forEach(f => {
+                if (!f || !f.userId) return;
+                const uid = String(f.userId).trim().toLowerCase();
+                const uname = String(f.userName || '').trim().toLowerCase();
+                const ucode = String(f.empCode || '').trim().toLowerCase();
+
+                const isClockedIn = clockedInUserIds.has(uid) || (uname && clockedInUserIds.has(uname)) || (ucode && clockedInUserIds.has(ucode));
+                if (isClockedIn) {
+                    const emp = f.employee || (employees || []).find(e => {
+                        const eId = String(e.id || '').trim().toLowerCase();
+                        const eCode = String(e.empCode || e.emp_code || e.employeeId || e.empId || '').trim().toLowerCase();
+                        const eName = String(e.name || '').trim().toLowerCase();
+                        return (eId && (eId === uid || eId === ucode || eId === uname)) ||
+                               (eCode && (eCode === uid || eCode === ucode || eCode === uname)) ||
+                               (eName && (eName === uname || eName === uid || eName === ucode));
+                    });
+
+                    const canonicalKey = String(emp?.id || emp?.empCode || f.empCode || f.userId).trim().toLowerCase();
+                    if (!coveredCanonical.has(canonicalKey)) {
+                        coveredCanonical.add(canonicalKey);
+                        if (uid) coveredCanonical.add(uid);
+                        if (uname) coveredCanonical.add(uname);
+                        if (ucode) coveredCanonical.add(ucode);
+
+                        const att = activeAttMap.get(uid) || activeAttMap.get(uname) || activeAttMap.get(ucode) || {};
+                        combinedList.push({
+                            ...f,
+                            checkIn: f.checkIn || att.checkIn,
+                            employee: emp || f.employee
+                        });
+                    }
+                }
+            });
+
+            // 2. Fallback: Add any actively clocked-in staff from todayAttendance who don't have a footprint yet
+            (todayAttendance || []).forEach(att => {
+                if (isAttActive(att)) {
+                    const uid = String(att.userId || '').trim().toLowerCase();
+                    const uname = String(att.userName || '').trim().toLowerCase();
+                    const ucode = String(att.empCode || att.employeeId || '').trim().toLowerCase();
+
+                    const emp = att.employee || (employees || []).find(e => {
+                        const eId = String(e.id || '').trim().toLowerCase();
+                        const eCode = String(e.empCode || e.emp_code || e.employeeId || e.empId || '').trim().toLowerCase();
+                        const eName = String(e.name || '').trim().toLowerCase();
+                        return (eId && (eId === uid || eId === ucode || eId === uname)) ||
+                               (eCode && (eCode === uid || eCode === ucode || eCode === uname)) ||
+                               (eName && (eName === uname || eName === uid || eName === ucode));
+                    });
+
+                    const canonicalKey = String(emp?.id || emp?.empCode || att.empCode || att.userId || att.userName).trim().toLowerCase();
+                    if (canonicalKey && !coveredCanonical.has(canonicalKey)) {
+                        coveredCanonical.add(canonicalKey);
+                        if (uid) coveredCanonical.add(uid);
+                        if (uname) coveredCanonical.add(uname);
+                        if (ucode) coveredCanonical.add(ucode);
+
+                        let parsedCoords = null;
+                        if (att.coords) {
+                            try {
+                                parsedCoords = typeof att.coords === 'string' ? JSON.parse(att.coords) : att.coords;
+                            } catch (e) {}
+                        }
+                        const lat = parsedCoords ? (parsedCoords.lat || parsedCoords.latitude) : 28.5098;
+                        const lng = parsedCoords ? (parsedCoords.lon || parsedCoords.lng || parsedCoords.longitude) : 77.3807;
+
+                        combinedList.push({
+                            id: att.id,
+                            userId: emp?.empCode || emp?.id || att.empCode || att.userId,
+                            userName: emp?.name || att.userName,
+                            empCode: emp?.empCode || emp?.emp_code || att.empCode || att.userId,
+                            designation: emp?.designation || emp?.jobTitle || emp?.department,
+                            department: emp?.department,
+                            jobTitle: emp?.jobTitle || emp?.designation,
+                            employee: emp || att.employee,
+                            workMode: (att.workMode || emp?.workMode || emp?.primaryWorkMode || emp?.designation || 'OFFICE').toUpperCase(),
+                            checkIn: att.checkIn,
+                            timestamp: new Date(att.updatedAt || att.createdAt).getTime() || Date.now(),
+                            date: att.date || todayDate,
+                            trackingMethod: 'GPS',
+                            latitude: Number(lat),
+                            longitude: Number(lng),
+                            address: att.address || 'Office Location Anchor, Noida',
+                            locationEnabled: true,
+                            batteryLevel: att.batteryLevel != null ? Number(att.batteryLevel) : 85
+                        });
+                    }
+                }
+            });
+
+            let filteredFootprints = combinedList.filter(f => {
                 const uid = String(f.userId || '').trim().toLowerCase();
-                const emp = (employees || []).find(e => 
+                const uname = String(f.userName || '').trim().toLowerCase();
+                const ucode = String(f.empCode || '').trim().toLowerCase();
+
+                const emp = f.employee || (employees || []).find(e => 
                     (e.id && String(e.id).trim().toLowerCase() === uid) ||
                     (e.empId && String(e.empId).trim().toLowerCase() === uid) ||
                     (e.employeeId && String(e.employeeId).trim().toLowerCase() === uid) ||
                     (e.empCode && String(e.empCode).trim().toLowerCase() === uid) ||
                     (e.emp_code && String(e.emp_code).trim().toLowerCase() === uid) ||
                     (e.userId && String(e.userId).trim().toLowerCase() === uid) ||
-                    (f.userName && e.name && String(e.name).trim().toLowerCase() === String(f.userName).trim().toLowerCase())
+                    (uname && e.name && String(e.name).trim().toLowerCase() === uname) ||
+                    (ucode && e.empCode && String(e.empCode).trim().toLowerCase() === ucode)
                 );
-                if (!emp) return false;
 
                 // 1. Work Mode Filter
-                const rawMode = (f.workMode || emp.workMode || emp.roleType || emp.employeeType || emp.designation || 'OFFICE').toUpperCase();
-                const matchesMode = workMode === 'ALL' || rawMode.includes(workMode);
+                const rawMode = (f.workMode || emp?.workMode || emp?.primaryWorkMode || emp?.roleType || emp?.employeeType || emp?.designation || 'OFFICE').toUpperCase();
+                const isField = rawMode.includes('FIELD');
+                const matchesMode = workMode === 'ALL' || (workMode === 'FIELD' && isField) || (workMode === 'OFFICE' && !isField);
                 if (!matchesMode) return false;
 
                 // 2. State Filter
-                if (selectedState !== 'ALL') {
+                if (selectedState !== 'ALL' && emp) {
                     const empState = resolveEmpOnboardingState(emp).toLowerCase();
                     const targetState = selectedState.toLowerCase();
                     if (!empState.includes(targetState) && !targetState.includes(empState)) {
@@ -149,7 +234,7 @@ export default function LiveTrackingView({ employees }) {
 
                 // 3. Individual Employee Filter
                 if (selectedEmp !== 'all' && selectedEmp !== 'all_field' && selectedEmp !== 'all_office') {
-                    return String(f.userId) === String(selectedEmp) || String(emp.id) === String(selectedEmp);
+                    return String(f.userId) === String(selectedEmp) || String(emp?.id) === String(selectedEmp) || String(emp?.empCode) === String(selectedEmp);
                 }
 
                 return true;
@@ -195,22 +280,15 @@ export default function LiveTrackingView({ employees }) {
 
             processedFootprints.forEach(f => {
                 if (f.latJittered && f.lngJittered) {
-                    const emp = employees ? employees.find(e => {
-                        if (!e || !f.userId) return false;
-                        const target = String(f.userId).trim().toLowerCase();
-                        if (loading) return <LoadingSpinner message="Initializing Live GPS Telemetry Map..." minHeight="400px" />;
-
-    return (
-                            (e.id && String(e.id).trim().toLowerCase() === target) ||
-                            (e.empId && String(e.empId).trim().toLowerCase() === target) ||
-                            (e.employeeId && String(e.employeeId).trim().toLowerCase() === target) ||
-                            (e.emp_id && String(e.emp_id).trim().toLowerCase() === target) ||
-                            (e.code && String(e.code).trim().toLowerCase() === target) ||
-                            (e.userId && String(e.userId).trim().toLowerCase() === target) ||
-                            (e.name && String(e.name).trim().toLowerCase() === target)
-                        );
-                    }) : null;
-                    const name = emp?.name || emp?.employeeName || f.userName || f.name || f.userId || f.user_id || 'Employee';
+                    const target = String(f.userId || f.userName || '').trim().toLowerCase();
+                    const emp = (employees || []).find(e => {
+                        if (!e) return false;
+                        const eId = String(e.id || '').trim().toLowerCase();
+                        const eCode = String(e.empCode || e.emp_code || e.employeeId || e.empId || '').trim().toLowerCase();
+                        const eName = String(e.name || '').trim().toLowerCase();
+                        return (eId && eId === target) || (eCode && eCode === target) || (eName && eName === target);
+                    });
+                    const name = emp?.name || emp?.employeeName || f.userName || f.name || f.userId || 'Employee';
                     const level = f.batteryLevel !== null ? (Number(f.batteryLevel) > 1.0 ? Number(f.batteryLevel) / 100 : Number(f.batteryLevel)) : null;
                     const batInfo = level !== null ? `${Math.round(level * 100)}%` : 'Unknown';
                     const addressInfo = f.address || 'Address Unknown';
@@ -325,7 +403,9 @@ export default function LiveTrackingView({ employees }) {
     )).sort();
 
     const filteredEmployees = (employees || []).filter(emp => {
-        const matchesMode = (emp.designation || 'OFFICE').toUpperCase() === workMode;
+        const rawMode = (emp.designation || emp.roleType || emp.workMode || emp.primaryWorkMode || 'OFFICE').toUpperCase();
+        const isField = rawMode.includes('FIELD');
+        const matchesMode = workMode === 'ALL' || (workMode === 'FIELD' && isField) || (workMode === 'OFFICE' && !isField);
         const isNotAdmin = emp.role !== 'ADMIN';
         if (!matchesMode || !isNotAdmin) return false;
 
@@ -337,11 +417,20 @@ export default function LiveTrackingView({ employees }) {
         return empState.includes(targetState) || targetState.includes(empState);
     });
 
-    // Filter live logs by search query (employee name)
+    // Filter live logs by search query (employee name, emp code, or id)
     const filteredLogs = liveLogs.filter(log => {
-        const emp = employees.find(e => e.id === log.userId);
-        const name = emp ? emp.name.toLowerCase() : log.userId.toLowerCase();
-        return name.includes(searchQuery.toLowerCase());
+        const target = String(log.userId || log.userName || '').trim().toLowerCase();
+        const emp = log.employee || (employees || []).find(e => {
+            if (!e) return false;
+            const eId = String(e.id || '').trim().toLowerCase();
+            const eCode = String(e.empCode || e.emp_code || e.employeeId || e.empId || '').trim().toLowerCase();
+            const eName = String(e.name || '').trim().toLowerCase();
+            return (target && (target === eId || target === eCode || target === eName));
+        });
+        const name = (emp?.name || emp?.employeeName || log.userName || log.name || log.userId || '').toLowerCase();
+        const empCode = (emp?.empCode || emp?.emp_code || emp?.employeeId || log.empCode || log.userId || '').toLowerCase();
+        const q = searchQuery.toLowerCase();
+        return name.includes(q) || empCode.includes(q);
     });
 
     return (
@@ -355,12 +444,16 @@ export default function LiveTrackingView({ employees }) {
                         <label style={{ fontWeight: 600, fontSize: '0.85rem' }}>Work Mode</label>
                         <div style={{ display: 'flex', gap: '12px', alignItems: 'center', height: '39px' }}>
                             <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' }}>
+                                <input type="radio" name="liveWorkMode" value="ALL" checked={workMode === 'ALL'} onChange={() => { setWorkMode('ALL'); setSelectedEmp('all'); }} style={{ accentColor: '#2563eb' }} />
+                                All Staff
+                            </label>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' }}>
                                 <input type="radio" name="liveWorkMode" value="OFFICE" checked={workMode === 'OFFICE'} onChange={() => { setWorkMode('OFFICE'); setSelectedEmp('all'); }} style={{ accentColor: '#2563eb' }} />
-                                Office Person
+                                Office Staff
                             </label>
                             <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' }}>
                                 <input type="radio" name="liveWorkMode" value="FIELD" checked={workMode === 'FIELD'} onChange={() => { setWorkMode('FIELD'); setSelectedEmp('all'); }} style={{ accentColor: '#2563eb' }} />
-                                Field Person
+                                Field Staff
                             </label>
                         </div>
                     </div>
@@ -414,10 +507,10 @@ export default function LiveTrackingView({ employees }) {
                                 alignItems: 'center', 
                                 gap: '8px', 
                                 fontSize: '0.85rem', 
-                                fontWeight: 600,
-                                borderRadius: '8px',
-                                whiteSpace: 'nowrap',
-                                cursor: 'pointer'
+                                fontWeight: 600, 
+                                borderRadius: '8px', 
+                                whiteSpace: 'nowrap', 
+                                cursor: 'pointer' 
                             }}
                         >
                             <i className="fa-solid fa-arrows-rotate"></i>
@@ -435,7 +528,7 @@ export default function LiveTrackingView({ employees }) {
                         <h3 style={{ margin: 0, marginBottom: '8px' }}>Active Employees</h3>
                         <input 
                             type="text" 
-                            placeholder="Filter by employee name..." 
+                            placeholder="Filter by name or code..." 
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             style={{
@@ -456,20 +549,18 @@ export default function LiveTrackingView({ employees }) {
                             </div>
                         ) : (
                             filteredLogs.map((log, index) => {
-                                const emp = employees ? employees.find(e => {
-                                    if (!e || !log.userId) return false;
-                                    const target = String(log.userId).trim().toLowerCase();
-                                    return (
-                                        (e.id && String(e.id).trim().toLowerCase() === target) ||
-                                        (e.empId && String(e.empId).trim().toLowerCase() === target) ||
-                                        (e.employeeId && String(e.employeeId).trim().toLowerCase() === target) ||
-                                        (e.emp_id && String(e.emp_id).trim().toLowerCase() === target) ||
-                                        (e.code && String(e.code).trim().toLowerCase() === target) ||
-                                        (e.userId && String(e.userId).trim().toLowerCase() === target) ||
-                                        (e.name && String(e.name).trim().toLowerCase() === target)
-                                    );
-                                }) : null;
+                                const target = String(log.userId || log.userName || '').trim().toLowerCase();
+                                const emp = log.employee || (employees ? employees.find(e => {
+                                    if (!e) return false;
+                                    const eId = String(e.id || '').trim().toLowerCase();
+                                    const eCode = String(e.empCode || e.emp_code || e.employeeId || e.empId || '').trim().toLowerCase();
+                                    const eName = String(e.name || '').trim().toLowerCase();
+                                    return (target && (target === eId || target === eCode || target === eName));
+                                }) : null);
                                 const name = emp?.name || emp?.employeeName || log.userName || log.name || log.userId || log.user_id || 'Employee';
+                                const empCode = emp?.empCode || emp?.emp_code || emp?.employeeId || log.empCode || (log.userId && !String(log.userId).startsWith('EMP0') ? log.userId : '');
+                                const designation = emp?.designation || emp?.jobTitle || emp?.department || log.workMode || 'Field Staff';
+
                                 return (
                                     <div 
                                         key={log.id || index}
@@ -497,11 +588,23 @@ export default function LiveTrackingView({ employees }) {
                                             e.currentTarget.style.borderColor = '#e5e7eb';
                                         }}
                                     >
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600 }}>
-                                            <span style={{ color: 'var(--text-primary)' }}>👤 {name}</span>
-                                            <span style={{ color: 'var(--text-secondary)' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                            <div>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                    <span style={{ color: 'var(--text-primary)', fontWeight: 700, fontSize: '0.9rem' }}>👤 {name}</span>
+                                                    {empCode && (
+                                                        <span style={{ fontSize: '0.72rem', color: '#2563eb', fontWeight: 600, background: 'rgba(37, 99, 235, 0.1)', padding: '1px 6px', borderRadius: '4px', border: '1px solid rgba(37, 99, 235, 0.2)' }}>
+                                                            {empCode}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '2px', fontWeight: 500 }}>
+                                                    {designation}
+                                                </div>
+                                            </div>
+                                            <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>
                                                 🔋 {(() => {
-                                                    if (log.batteryLevel === null) return 'N/A';
+                                                    if (log.batteryLevel === null || log.batteryLevel === undefined) return 'N/A';
                                                     let val = Number(log.batteryLevel);
                                                     if (val > 1.0) val = val / 100;
                                                     return Math.round(val * 100) + '%';
@@ -512,8 +615,13 @@ export default function LiveTrackingView({ employees }) {
                                             <span><b>Lat:</b> {parseFloat(log.latitude).toFixed(6)}</span>
                                             <span><b>Lng:</b> {parseFloat(log.longitude).toFixed(6)}</span>
                                         </div>
-                                        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                                            <b>Last Seen:</b> {formatDate(log.timestamp, true)}
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                                            <span><b>Last Seen:</b> {formatDate(log.timestamp, true)}</span>
+                                            {log.checkIn && (
+                                                <span style={{ color: '#10b981', fontWeight: 700, background: 'rgba(16, 185, 129, 0.1)', padding: '1px 6px', borderRadius: '4px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                                                    🟢 In: {log.checkIn}
+                                                </span>
+                                            )}
                                         </div>
                                         {log.address && (
                                             <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', borderTop: '1px dashed var(--border-glass)', paddingTop: '4px' }}>

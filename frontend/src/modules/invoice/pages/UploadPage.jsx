@@ -6,6 +6,7 @@ import DocumentPreview from "../components/DocumentPreview";
 import ExtractionEditor from "../components/ExtractionEditor";
 import ActionButtons from "../components/ActionButtons";
 import TemplateWizard from "../components/TemplateWizard";
+import { downloadInvoiceFile } from "../utils/constants";
 
 const formatToInputDate = (dateStr) => {
   if (!dateStr) return "";
@@ -19,8 +20,13 @@ const formatToInputDate = (dateStr) => {
 };
 
 const normalizeExtraction = (rawExtraction) => {
-  if (!rawExtraction) return null;
-  const ext = JSON.parse(JSON.stringify(rawExtraction));
+  if (!rawExtraction || typeof rawExtraction !== "object") return null;
+  let ext;
+  try {
+    ext = JSON.parse(JSON.stringify(rawExtraction));
+  } catch {
+    return null;
+  }
 
   if (ext.invoice_details?.invoice_date) {
     ext.invoice_details.invoice_date = formatToInputDate(ext.invoice_details.invoice_date);
@@ -58,6 +64,99 @@ const normalizeExtraction = (rawExtraction) => {
       weight: tSource.weight || tInvoice.weight || "",
       mode_of_transport: tSource.mode_of_transport || tInvoice.mode_of_transport || tInvoice.transporter_name || "",
     };
+  }
+
+  // Ensure bank_details is properly populated from all candidate objects
+  const vBank = ext.vendor_details?.bank_details || ext.supplier_details?.bank_details || ext.payment_details?.bank_details || {};
+  ext.bank_details = {
+    ...vBank,
+    ...ext.bank_details,
+    bank_name: ext.bank_details?.bank_name || vBank.bank_name || ext.bank_name || ext.vendor_details?.bank_name || "",
+    account_number: ext.bank_details?.account_number || ext.bank_details?.account_no || vBank.account_number || vBank.account_no || ext.account_number || ext.account_no || "",
+    ifsc_code: ext.bank_details?.ifsc_code || ext.bank_details?.ifsc || vBank.ifsc_code || vBank.ifsc || ext.ifsc_code || ext.ifsc || "",
+    branch: ext.bank_details?.branch || ext.bank_details?.branch_name || vBank.branch || vBank.branch_name || ext.branch || "",
+  };
+
+  // Normalize bank details and IFSC code
+  if (ext.bank_details && typeof ext.bank_details === "object") {
+    const ifscVal = ext.bank_details.ifsc_code || ext.bank_details.ifsc || ext.bank_details.ifscCode || ext.bank_details.bank_ifsc || ext.bank_details.ifs_code || ext.bank_details.rtgs_ifsc || "";
+    if (ifscVal) {
+      let ifscStr = String(ifscVal).trim().replace(/\s+/g, "").toUpperCase();
+      if (ifscStr.length === 11 && /^[A-Z]{4}[O0Qq][A-Z0-9]{6}$/.test(ifscStr)) {
+        ifscStr = ifscStr.substring(0, 4) + '0' + ifscStr.substring(5);
+      }
+      ext.bank_details.ifsc_code = ifscStr;
+      ext.bank_details.ifsc = ifscStr;
+    }
+    const accVal = ext.bank_details.account_number || ext.bank_details.account_no || ext.bank_details.acc_no || ext.bank_details.account || ext.bank_details.bank_account || "";
+    if (accVal) {
+      const accStr = String(accVal).trim().replace(/\s+/g, "");
+      ext.bank_details.account_number = accStr;
+      ext.bank_details.account_no = accStr;
+    }
+    const bankNameVal = ext.bank_details.bank_name || ext.bank_details.bank || ext.bank_details.name_of_bank || "";
+    if (bankNameVal) {
+      ext.bank_details.bank_name = String(bankNameVal).trim();
+    }
+    const branchVal = ext.bank_details.branch || ext.bank_details.branch_name || "";
+    if (branchVal) {
+      ext.bank_details.branch = String(branchVal).trim();
+    }
+
+    // Auto-derive bank name from IFSC prefix if bank_name is generic/missing
+    const IFSC_BANK_MAP = {
+      "SBIN": "State Bank of India",
+      "HDFC": "HDFC Bank",
+      "ICIC": "ICICI Bank",
+      "UTIB": "Axis Bank",
+      "PUNB": "Punjab National Bank",
+      "BARB": "Bank of Baroda",
+      "CNRB": "Canara Bank",
+      "UBIN": "Union Bank of India",
+      "KKBK": "Kotak Mahindra Bank",
+      "INDB": "IndusInd Bank",
+      "YESB": "Yes Bank",
+      "IDFB": "IDFC FIRST Bank",
+      "FDRL": "Federal Bank",
+      "IOBA": "Indian Overseas Bank",
+      "IDIB": "Indian Bank",
+      "MAHB": "Bank of Maharashtra",
+      "PSIB": "Punjab & Sind Bank",
+      "UCBA": "UCO Bank",
+      "CBIN": "Central Bank of India",
+      "SCBL": "Standard Chartered Bank",
+      "HSBC": "HSBC Bank",
+      "CITI": "Citibank",
+      "RBLN": "RBL Bank",
+      "BDBL": "Bandhan Bank",
+      "AUBL": "AU Small Finance Bank",
+      "ESFB": "Equitas Small Finance Bank",
+      "UJJV": "Ujjivan Small Finance Bank",
+      "KVBL": "Karur Vysya Bank",
+      "SIBL": "South Indian Bank",
+      "CSBK": "CSB Bank",
+      "TMBL": "Tamilnad Mercantile Bank",
+      "DCBL": "DCB Bank",
+      "DLXB": "Dhanlaxmi Bank",
+      "JAKA": "Jammu & Kashmir Bank",
+      "KBLX": "Karnataka Bank",
+      "COSB": "Cosmos Co-operative Bank",
+      "SVCB": "SVC Co-operative Bank",
+      "TNSC": "Tamil Nadu State Apex Co-op Bank",
+      "SARB": "Saraswat Bank",
+      "DEUT": "Deutsche Bank",
+      "DBSS": "DBS Bank India"
+    };
+    const bName = String(ext.bank_details.bank_name || "").trim().toLowerCase();
+    if (!bName || ["bank", "bank details", "details", "null", "none", "n/a", ""].includes(bName)) {
+      const ifsc = ext.bank_details.ifsc_code || "";
+      if (ifsc.length >= 4) {
+        const pfx = ifsc.substring(0, 4).toUpperCase();
+        if (IFSC_BANK_MAP[pfx]) {
+          ext.bank_details.bank_name = IFSC_BANK_MAP[pfx];
+        }
+      }
+    }
   }
 
   if (ext.tax_summary) {
@@ -313,12 +412,18 @@ export default function UploadPage() {
     if (!selectedDocument || !editableExtraction) return;
     setIsSaving(true);
     try {
-      await API.post(`/documents/${selectedDocument.document_id}/save`, {
+      await API.post("/inventory/save", {
+        document_id: selectedDocument.document_id,
         extraction: editableExtraction,
-        db_fields: dbFields,
-        verification_time: verificationTime
+        msid: dbFields.msid ? parseInt(dbFields.msid) || 1001 : 1001,
+        scheme_name: dbFields.scheme_name || "All Scheme",
+        req_qty: dbFields.req_qty || "",
+        location: dbFields.location || "",
+        added_by: dbFields.added_by || "System Agent",
+        verification_time: verificationTime,
+        additional_charges: parseFloat(dbFields.additional_charges) || 0.0,
       });
-      showToast("✓ Verification data saved to database successfully.");
+      showToast("✓ Invoice verified & saved to database!");
       await loadDocuments();
       setSelectedDocument(null);
     } catch {
@@ -504,10 +609,22 @@ export default function UploadPage() {
                       </span>
                     </td>
                     <td style={{ padding: "12px 16px", color: "var(--text-secondary)" }}>
-                      {doc.processing_time_ms ? `${(doc.processing_time_ms / 1000).toFixed(1)}s` : "-"}
+                      {doc.processing_time_ms ? `${(parseFloat(doc.processing_time_ms) / 1000).toFixed(1)}s` : "-"}
                     </td>
                     <td style={{ padding: "12px 16px", textAlign: "right" }}>
                       <div style={{ display: "inline-flex", gap: "8px" }}>
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            showToast(`Downloading "${doc.filename}"...`);
+                            await downloadInvoiceFile(doc);
+                          }}
+                          className="btn btn-secondary"
+                          style={{ padding: "4px 10px", fontSize: "11px", borderRadius: "var(--radius-sm)", height: "auto", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                          title="Download original invoice file"
+                        >
+                          📥 Download
+                        </button>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();

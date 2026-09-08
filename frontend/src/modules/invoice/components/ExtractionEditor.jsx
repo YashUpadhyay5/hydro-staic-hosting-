@@ -108,6 +108,17 @@ function ExtractionEditor({
       ]
     },
     {
+      id: "transport_details",
+      name: "Transport Details",
+      icon: "🚚",
+      enabled: true,
+      fields: [
+        { key: "mode_of_transport", label: "Transport Mode", type: "Text" },
+        { key: "vehicle_number", label: "Vehicle Number", type: "Text" },
+        { key: "destination", label: "Destination", type: "Text" }
+      ]
+    },
+    {
       id: "bank_details",
       name: "Bank Details",
       icon: "🏦",
@@ -115,7 +126,8 @@ function ExtractionEditor({
       fields: [
         { key: "bank_name", label: "Bank Name", type: "Text" },
         { key: "account_number", label: "Account Number", type: "Text" },
-        { key: "ifsc_code", label: "IFSC", type: "IFSC" }
+        { key: "ifsc_code", label: "IFSC", type: "IFSC" },
+        { key: "branch", label: "Branch", type: "Text" }
       ]
     },
     {
@@ -155,9 +167,32 @@ function ExtractionEditor({
     }
   ];
 
-  const sections = (doc.template_config && doc.template_config.length > 0)
+  const rawSections = (doc.template_config && doc.template_config.length > 0)
     ? doc.template_config
     : defaultSections;
+
+  const allowedOrder = [
+    "invoice_details",
+    "vendor_details",
+    "consumer_details",
+    "transport_details",
+    "bank_details",
+    "item_details",
+    "items",
+    "tax_summary",
+    "tax_details"
+  ];
+
+  const sections = rawSections
+    .filter(sec => sec && sec.id !== "metadata" && sec.id !== "notes")
+    .sort((a, b) => {
+      const idxA = allowedOrder.indexOf(a.id);
+      const idxB = allowedOrder.indexOf(b.id);
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+      return 0;
+    });
 
   return (
     <div className="editor-panel">
@@ -186,7 +221,7 @@ function ExtractionEditor({
                     return (
                       <div key={sec.id}>
                         <div className="ocr-section-header" style={{ marginBottom: "10px" }}>
-                          {sec.icon || "📊"} {sec.name}
+                          {sec.name}
                         </div>
                         <LineItemsTable
                           items={extraction.items || extraction.item_details || []}
@@ -224,27 +259,74 @@ function ExtractionEditor({
                   return (
                     <div key={sec.id} className="ocr-section">
                       <div className="ocr-section-header">
-                        {sec.icon || "⚙️"} {sec.name}
+                        {sec.name}
                       </div>
                       <div className="ocr-section-content">
                         <div className="inputs-grid">
                           {sec.fields.filter(f => !f.hidden).map(field => {
-                            const isFullWidth = ["address", "description", "remarks", "notes", "internal_notes", "specification"].includes(field.key) || field.type === "Long Text";
+                            const isIfsc = ["ifsc_code", "ifsc", "ifscCode", "bank_ifsc"].includes(field.key) || field.type === "IFSC";
+                            const rawVal = (() => {
+                              if (sec.id === "bank_details") {
+                                const b = extraction.bank_details || {};
+                                if (isIfsc) {
+                                  return b.ifsc_code ?? b.ifsc ?? b.ifscCode ?? b.bank_ifsc ?? field.default_value ?? "";
+                                }
+                                if (["account_number", "account_no", "acc_no", "account", "bank_account"].includes(field.key)) {
+                                  return b.account_number ?? b.account_no ?? b.acc_no ?? b.account ?? b.bank_account ?? field.default_value ?? "";
+                                }
+                                if (["bank_name", "bank", "name_of_bank"].includes(field.key)) {
+                                  return b.bank_name ?? b.bank ?? b.name_of_bank ?? field.default_value ?? "";
+                                }
+                                if (["branch", "branch_name", "branch_address"].includes(field.key)) {
+                                  return b.branch ?? b.branch_name ?? b.branch_address ?? field.default_value ?? "";
+                                }
+                                if (["account_name", "account_holder", "beneficiary_name"].includes(field.key)) {
+                                  return b.account_name ?? b.account_holder ?? b.beneficiary_name ?? field.default_value ?? "";
+                                }
+                              }
+                              return extraction[sec.id]?.[field.key] ?? field.default_value ?? "";
+                            })();
+                            const strVal = String(rawVal).trim();
+                            
+                            // Check if this is a GSTIN / GST Number field
+                            const isGstin = (() => {
+                              const k = String(field.key || '').toLowerCase();
+                              const t = String(field.type || '').toUpperCase();
+                              const l = String(field.label || '').toLowerCase();
+                              if (k.includes('cgst') || k.includes('sgst') || k.includes('igst') || k.includes('gst_rate') || k.includes('gst_amount')) return false;
+                              return k === 'gstin' || t === 'GSTIN' || l.includes('gstin') || l.includes('gst number') || l.includes('gst no');
+                            })();
+
+                            const isGstinInvalid = isGstin && strVal.length > 0 && strVal.length !== 15;
+                            const isGstinValid = isGstin && strVal.length === 15;
+                            const isFullWidth = field.type === "Long Text" || field.type === "Address" || Boolean(field.full_width || field.fullWidth);
+
                             return (
                               <div key={field.key} className={`form-group ${isFullWidth ? "full-width" : ""}`}>
                                 <label className="form-label" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
-                                  <span>
-                                    {field.label}
-                                    {field.required && <span style={{ color: "#b91c1c" }}> *</span>}
+                                  <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                                    <span>
+                                      {field.label}
+                                      {field.required && <span style={{ color: "#b91c1c" }}> *</span>}
+                                    </span>
+                                    {isGstinInvalid && (
+                                      <span style={{ fontSize: "11px", color: "#d97706", backgroundColor: "rgba(245, 158, 11, 0.12)", border: "1px solid rgba(245, 158, 11, 0.35)", padding: "1px 6px", borderRadius: "4px", fontWeight: 700 }}>
+                                        ⚠️ {strVal.length}/15
+                                      </span>
+                                    )}
+                                    {isGstinValid && (
+                                      <span style={{ fontSize: "11px", color: "#059669", backgroundColor: "rgba(16, 185, 129, 0.12)", border: "1px solid rgba(16, 185, 129, 0.35)", padding: "1px 6px", borderRadius: "4px", fontWeight: 700 }}>
+                                        ✓ 15/15
+                                      </span>
+                                    )}
                                   </span>
-                                  {renderConfidenceBadge(getFieldConfidence(sec.id, field.key, extraction[sec.id]?.[field.key]))}
                                 </label>
                                 {field.type === "Long Text" || field.type === "Address" ? (
                                   <textarea
                                     className="form-input"
                                     rows="2"
                                     style={{ resize: "vertical", fontFamily: "inherit" }}
-                                    value={extraction[sec.id]?.[field.key] ?? field.default_value ?? ""}
+                                    value={rawVal}
                                     disabled={field.read_only}
                                     onChange={(e) => {
                                       const secData = extraction[sec.id] || {};
@@ -269,13 +351,38 @@ function ExtractionEditor({
                                   <input
                                     type={["Number", "Currency", "Percentage"].includes(field.type) ? "number" : "text"}
                                     className="form-input"
-                                    value={extraction[sec.id]?.[field.key] ?? field.default_value ?? ""}
+                                    style={isGstinInvalid ? {
+                                      borderColor: "#f59e0b",
+                                      backgroundColor: "rgba(245, 158, 11, 0.04)",
+                                      boxShadow: "0 0 0 2px rgba(245, 158, 11, 0.2)"
+                                    } : isGstinValid ? {
+                                      borderColor: "#10b981"
+                                    } : {}}
+                                    value={rawVal}
                                     disabled={field.read_only}
                                     onChange={(e) => {
+                                      let val = e.target.value;
+                                      if (isGstin || isIfsc) {
+                                        val = val.toUpperCase();
+                                      }
                                       const secData = extraction[sec.id] || {};
-                                      handleSectionChange(sec.id, { ...secData, [field.key]: e.target.value });
+                                      const updatedSec = { ...secData, [field.key]: val };
+                                      if (isIfsc) {
+                                        updatedSec.ifsc_code = val;
+                                        updatedSec.ifsc = val;
+                                      } else if (["account_number", "account_no", "acc_no", "account"].includes(field.key)) {
+                                        updatedSec.account_number = val;
+                                        updatedSec.account_no = val;
+                                      } else if (["bank_name", "bank"].includes(field.key)) {
+                                        updatedSec.bank_name = val;
+                                        updatedSec.bank = val;
+                                      } else if (["branch", "branch_name"].includes(field.key)) {
+                                        updatedSec.branch = val;
+                                        updatedSec.branch_name = val;
+                                      }
+                                      handleSectionChange(sec.id, updatedSec);
                                     }}
-                                    placeholder={field.placeholder || `Enter ${field.label}`}
+                                    placeholder={field.placeholder || (isGstin ? "15-digit GSTIN (e.g. 09AAFCG9846E1Z9)" : isIfsc ? "11-digit IFSC (e.g. HDFC0000263)" : `Enter ${field.label}`)}
                                   />
                                 )}
                               </div>

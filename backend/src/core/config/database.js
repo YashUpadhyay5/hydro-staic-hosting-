@@ -38,7 +38,7 @@ if (process.env.DATABASE_URL) {
     storage: dbPath,
     logging: false,
     pool: {
-      max: 10,
+      max: 5,
       min: 1,
       acquire: 30000,
       idle: 10000

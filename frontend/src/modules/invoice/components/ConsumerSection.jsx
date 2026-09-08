@@ -28,17 +28,41 @@ function ConsumerSection({ data, onChange }) {
           </div>
 
           <div className="form-group">
-            <label className="form-label">
-              GSTIN
+            <label className="form-label" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                <span>GSTIN</span>
+                {data.gstin && String(data.gstin).trim().length > 0 && String(data.gstin).trim().length !== 15 && (
+                  <span style={{ fontSize: "11px", color: "#d97706", backgroundColor: "rgba(245, 158, 11, 0.12)", border: "1px solid rgba(245, 158, 11, 0.35)", padding: "1px 6px", borderRadius: "4px", fontWeight: 700 }}>
+                    ⚠️ {String(data.gstin).trim().length}/15
+                  </span>
+                )}
+                {data.gstin && String(data.gstin).trim().length === 15 && (
+                  <span style={{ fontSize: "11px", color: "#059669", backgroundColor: "rgba(16, 185, 129, 0.12)", border: "1px solid rgba(16, 185, 129, 0.35)", padding: "1px 6px", borderRadius: "4px", fontWeight: 700 }}>
+                    ✓ 15/15
+                  </span>
+                )}
+              </span>
               <ConfidenceIndicator value={data.gstin} fieldName="gstin" />
             </label>
             <input
               type="text"
               className="form-input"
+              style={data.gstin && String(data.gstin).trim().length > 0 && String(data.gstin).trim().length !== 15 ? {
+                borderColor: "#f59e0b",
+                backgroundColor: "rgba(245, 158, 11, 0.04)",
+                boxShadow: "0 0 0 2px rgba(245, 158, 11, 0.2)"
+              } : data.gstin && String(data.gstin).trim().length === 15 ? {
+                borderColor: "#10b981"
+              } : {}}
               value={data.gstin || ""}
-              onChange={(e) => handleChange("gstin", e.target.value)}
-              placeholder="15-digit GSTIN"
+              onChange={(e) => handleChange("gstin", e.target.value.toUpperCase())}
+              placeholder="15-digit GSTIN (e.g. 09AAFCG9846E1Z9)"
             />
+            {data.gstin && String(data.gstin).trim().length > 0 && String(data.gstin).trim().length !== 15 && (
+              <div style={{ display: "flex", alignItems: "center", gap: "5px", fontSize: "11px", color: "#d97706", marginTop: "4px", fontWeight: "600" }}>
+                <span>⚠️ GST number must be exactly 15 characters (currently {String(data.gstin).trim().length} chars)</span>
+              </div>
+            )}
           </div>
 
           <div className="form-group">

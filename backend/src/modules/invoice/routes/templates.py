@@ -135,6 +135,18 @@ def get_default_template_sections() -> List[Dict[str, Any]]:
             ]
         },
         {
+            "id": "transport_details",
+            "name": "Transport Details",
+            "icon": "transport",
+            "description": "Shipment information",
+            "enabled": True,
+            "fields": [
+                {"key": "mode_of_transport", "label": "Transport Mode", "type": "Text", "required": False, "editable": True, "read_only": False, "hidden": False, "searchable": False, "filterable": True, "sortable": False, "exportable": True, "api_visible": True, "dashboard_visible": True, "confidence_threshold": 60, "default_value": "", "validation_rule": "", "placeholder": "Road", "tooltip": "Transport mode", "display_order": 1, "ai_prompt": "Extract transport mode (e.g. road/rail/air)."},
+                {"key": "vehicle_number", "label": "Vehicle Number", "type": "Text", "required": False, "editable": True, "read_only": False, "hidden": False, "searchable": True, "filterable": True, "sortable": True, "exportable": True, "api_visible": True, "dashboard_visible": True, "confidence_threshold": 70, "default_value": "", "validation_rule": "", "placeholder": "PB-08-AB-1234", "tooltip": "Shipment vehicle license number", "display_order": 2, "ai_prompt": "Extract transporter vehicle number."},
+                {"key": "destination", "label": "Destination", "type": "Text", "required": False, "editable": True, "read_only": False, "hidden": False, "searchable": True, "filterable": True, "sortable": False, "exportable": True, "api_visible": True, "dashboard_visible": True, "confidence_threshold": 65, "default_value": "", "validation_rule": "", "placeholder": "Jalandhar", "tooltip": "Delivery destination location", "display_order": 3, "ai_prompt": "Extract shipment destination location."}
+            ]
+        },
+        {
             "id": "bank_details",
             "name": "Bank Details",
             "icon": "bank",
@@ -178,39 +190,6 @@ def get_default_template_sections() -> List[Dict[str, Any]]:
                 {"key": "sgst", "label": "SGST", "type": "Currency", "required": False, "editable": True, "read_only": False, "hidden": False, "searchable": False, "filterable": False, "sortable": False, "exportable": True, "api_visible": True, "dashboard_visible": True, "confidence_threshold": 80, "default_value": 0.0, "validation_rule": "", "placeholder": "900.00", "tooltip": "State GST amount", "display_order": 3, "ai_prompt": "Extract SGST total amount."},
                 {"key": "igst", "label": "IGST", "type": "Currency", "required": False, "editable": True, "read_only": False, "hidden": False, "searchable": False, "filterable": False, "sortable": False, "exportable": True, "api_visible": True, "dashboard_visible": True, "confidence_threshold": 80, "default_value": 0.0, "validation_rule": "", "placeholder": "0.00", "tooltip": "Integrated GST amount", "display_order": 4, "ai_prompt": "Extract IGST total amount."},
                 {"key": "grand_total", "label": "Grand Total", "type": "Currency", "required": True, "editable": True, "read_only": False, "hidden": False, "searchable": True, "filterable": False, "sortable": True, "exportable": True, "api_visible": True, "dashboard_visible": True, "confidence_threshold": 90, "default_value": 0.0, "validation_rule": "", "placeholder": "11800.00", "tooltip": "Invoice Grand Total", "display_order": 5, "ai_prompt": "Extract grand total amount of invoice."}
-            ]
-        },
-        {
-            "id": "transport_details",
-            "name": "Transport Details",
-            "icon": "transport",
-            "description": "Shipment information",
-            "enabled": True,
-            "fields": [
-                {"key": "mode_of_transport", "label": "Transport Mode", "type": "Text", "required": False, "editable": True, "read_only": False, "hidden": False, "searchable": False, "filterable": True, "sortable": False, "exportable": True, "api_visible": True, "dashboard_visible": True, "confidence_threshold": 60, "default_value": "", "validation_rule": "", "placeholder": "Road", "tooltip": "Transport mode", "display_order": 1, "ai_prompt": "Extract transport mode (e.g. road/rail/air)."},
-                {"key": "vehicle_number", "label": "Vehicle Number", "type": "Text", "required": False, "editable": True, "read_only": False, "hidden": False, "searchable": True, "filterable": True, "sortable": True, "exportable": True, "api_visible": True, "dashboard_visible": True, "confidence_threshold": 70, "default_value": "", "validation_rule": "", "placeholder": "PB-08-AB-1234", "tooltip": "Shipment vehicle license number", "display_order": 2, "ai_prompt": "Extract transporter vehicle number."},
-                {"key": "destination", "label": "Destination", "type": "Text", "required": False, "editable": True, "read_only": False, "hidden": False, "searchable": True, "filterable": True, "sortable": False, "exportable": True, "api_visible": True, "dashboard_visible": True, "confidence_threshold": 65, "default_value": "", "validation_rule": "", "placeholder": "Jalandhar", "tooltip": "Delivery destination location", "display_order": 3, "ai_prompt": "Extract shipment destination location."}
-            ]
-        },
-        {
-            "id": "metadata",
-            "name": "Metadata",
-            "icon": "metadata",
-            "description": "Business specific information",
-            "enabled": True,
-            "fields": [
-                {"key": "project", "label": "Project", "type": "Text", "required": False, "editable": True, "read_only": False, "hidden": False, "searchable": True, "filterable": True, "sortable": True, "exportable": True, "api_visible": True, "dashboard_visible": True, "confidence_threshold": 50, "default_value": "", "validation_rule": "", "placeholder": "SmartCity Project", "tooltip": "Project associated with document", "display_order": 1, "ai_prompt": "Extract project name or reference from the document metadata."},
-                {"key": "department", "label": "Department", "type": "Text", "required": False, "editable": True, "read_only": False, "hidden": False, "searchable": True, "filterable": True, "sortable": True, "exportable": True, "api_visible": True, "dashboard_visible": True, "confidence_threshold": 50, "default_value": "", "validation_rule": "", "placeholder": "Procurement", "tooltip": "Buying department", "display_order": 2, "ai_prompt": "Extract internal department reference."}
-            ]
-        },
-        {
-            "id": "notes",
-            "name": "Notes",
-            "icon": "notes",
-            "description": "Remarks and additional information",
-            "enabled": True,
-            "fields": [
-                {"key": "remarks", "label": "Remarks", "type": "Long Text", "required": False, "editable": True, "read_only": False, "hidden": False, "searchable": True, "filterable": False, "sortable": False, "exportable": True, "api_visible": True, "dashboard_visible": True, "confidence_threshold": 50, "default_value": "", "validation_rule": "", "placeholder": "Terms and conditions/disclaimer", "tooltip": "General remarks or comments", "display_order": 1, "ai_prompt": "Extract any extra notes, disclaimers or terms."}
             ]
         }
     ]

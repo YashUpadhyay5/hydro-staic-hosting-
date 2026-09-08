@@ -2,9 +2,12 @@ const express = require('express');
 const router = express.Router();
 const Attendance = require('../../../../shared/models/Attendance');
 const Employee = require('../../../../shared/models/Employee');
+const Footprint = require('../../../../shared/models/Footprint');
+const ShiftEngine = require('../../../../shared/services/ShiftEngine');
 const sequelize = require('../../../../config/database');
 const { Op } = require('sequelize');
 const { getAddressFromCoords } = require('../../../../core/utils/geocoder');
+const { getCachedEmployees } = require('../../../../core/utils/employeeCache');
 
 const LEGACY_ALIASES = {
   'emp0128': 'HMPL39',
@@ -56,34 +59,238 @@ async function findEmployee(identifier, name) {
   return emp;
 }
 
+// Helper to enrich a batch of attendance records with employee details and session battery telemetry
+async function enrichRecordsBatch(records, empMap, empAliasesMap) {
+  if (!records || records.length === 0) return [];
+
+  const plainRecords = records.map(r => (r && r.toJSON ? r.toJSON() : { ...r }));
+  const dates = new Set();
+  const queryUserIds = new Set();
+  const needsBattery = plainRecords.some(r => r.batteryLevel == null);
+
+  if (needsBattery) {
+    plainRecords.forEach(r => {
+      if (!r || r.batteryLevel != null) return;
+      if (r.date) {
+        const d = String(r.date).trim();
+        dates.add(d);
+        if (d.includes('-')) {
+          const parts = d.split('-');
+          if (parts.length === 3) dates.add(`${parts[2]}-${parts[1]}-${parts[0]}`);
+        }
+      }
+      if (r.createdAt) {
+        try {
+          const cd = new Date(r.createdAt);
+          if (!isNaN(cd.getTime())) {
+            dates.add(cd.toISOString().split('T')[0]);
+          }
+        } catch (e) {}
+      }
+      const u1 = r.userId ? String(r.userId).trim() : null;
+      const u2 = r.userName ? String(r.userName).trim() : null;
+      if (u1) {
+        queryUserIds.add(u1);
+        queryUserIds.add(u1.toLowerCase());
+        queryUserIds.add(u1.toUpperCase());
+        if (empAliasesMap && empAliasesMap.has(u1.toLowerCase())) {
+          empAliasesMap.get(u1.toLowerCase()).forEach(a => queryUserIds.add(a));
+        }
+      }
+      if (u2) {
+        queryUserIds.add(u2);
+        queryUserIds.add(u2.toLowerCase());
+        queryUserIds.add(u2.toUpperCase());
+        if (empAliasesMap && empAliasesMap.has(u2.toLowerCase())) {
+          empAliasesMap.get(u2.toLowerCase()).forEach(a => queryUserIds.add(a));
+        }
+      }
+    });
+  }
+
+  const fpMap = new Map();
+  if (needsBattery && queryUserIds.size > 0) {
+    try {
+      const todayStartMs = Date.now() - (48 * 60 * 60 * 1000);
+      const fps = await sequelize.query(`
+        SELECT user_id as userId, date, battery_level as batteryLevel, battery_temp as batteryTemp, timestamp
+        FROM location_footprints INDEXED BY idx_footprints_ts_user
+        WHERE timestamp >= ${todayStartMs}
+          AND battery_level IS NOT NULL
+        ORDER BY timestamp DESC
+        LIMIT 200
+      `, { type: sequelize.QueryTypes.SELECT }).catch(() => []);
+
+      fps.forEach(f => {
+        const u = String(f.userId || '').trim().toLowerCase();
+        const d = String(f.date || '').trim();
+        const key = `${u}_${d}`;
+        if (!fpMap.has(key)) {
+          fpMap.set(key, f);
+        }
+        if (!fpMap.has(u)) {
+          fpMap.set(u, f);
+        }
+      });
+    } catch (fpErr) {
+      console.warn('Warning fetching footprints for attendance enrichment:', fpErr.message);
+    }
+  }
+
+  return plainRecords.map(rec => {
+    try {
+      const plain = { ...rec };
+      const uKey1 = String(plain.userId || '').trim().toLowerCase();
+      const uKey2 = String(plain.userName || '').trim().toLowerCase();
+      const uKey3 = String(plain.empCode || '').trim().toLowerCase();
+      
+      const emp = empMap ? (
+        empMap.get(uKey1) || 
+        empMap.get(uKey2) || 
+        empMap.get(uKey3) ||
+        (LEGACY_ALIASES[uKey1] && empMap.get(LEGACY_ALIASES[uKey1].toLowerCase())) ||
+        (LEGACY_ALIASES[uKey2] && empMap.get(LEGACY_ALIASES[uKey2].toLowerCase()))
+      ) : null;
+
+      if (emp) {
+        plain.userId = emp.empCode || emp.emp_code || emp.id;
+        plain.empCode = emp.empCode || emp.emp_code || emp.id;
+        plain.userName = emp.name || plain.userName;
+        plain.employeeName = emp.name || plain.userName;
+        plain.employeeId = emp.id;
+        plain.jobTitle = emp.jobTitle || emp.designation || 'Team Member';
+        plain.designation = emp.designation || emp.jobTitle || 'Team Member';
+        plain.department = emp.department || 'Company';
+        plain.email = emp.email || '';
+        plain.phone = emp.phone || emp.mobile || '';
+        plain.profilePhotoUrl = emp.profilePhotoUrl || emp.avatar || null;
+        plain.employee = {
+          id: emp.id,
+          empCode: emp.empCode || emp.emp_code || emp.id,
+          name: emp.name,
+          jobTitle: emp.jobTitle || emp.designation || 'Team Member',
+          designation: emp.designation || emp.jobTitle || 'Team Member',
+          department: emp.department || 'Company',
+          email: emp.email || '',
+          phone: emp.phone || emp.mobile || '',
+          profilePhotoUrl: emp.profilePhotoUrl || emp.avatar || null,
+          workMode: emp.workMode || emp.primaryWorkMode || plain.workMode || 'office'
+        };
+      } else {
+        plain.empCode = plain.empCode || plain.userId;
+        plain.employeeName = plain.userName || plain.userId;
+        plain.jobTitle = plain.jobTitle || plain.designation || 'Team Member';
+        plain.designation = plain.designation || plain.jobTitle || 'Team Member';
+        plain.department = plain.department || 'Company';
+      }
+      plain.checkIn = cleanTimestamp(plain.checkIn);
+      plain.checkOut = cleanTimestamp(plain.checkOut);
+
+      // Resolve Shift details
+      const shift = ShiftEngine.resolveEmployeeShift(emp);
+      plain.shiftCode = plain.shiftCode || shift.code;
+      plain.shiftLabel = shift.label;
+
+      // Inverted Punch Sanitization (where checkOut <= checkIn on a completed past day):
+      if (plain.checkIn && plain.checkOut) {
+        const inMins = ShiftEngine.parseTimeToMinutes(plain.checkIn);
+        const outMins = ShiftEngine.parseTimeToMinutes(plain.checkOut);
+        if (inMins != null && outMins != null && outMins <= inMins) {
+          // Inverted / invalid punch: auto-heal with shift end
+          plain.checkOut = shift.end;
+          plain.clockOutMethod = 'AUTO_SHIFT_END';
+          plain.workingHours = ShiftEngine.calculateWorkingHours(plain.checkIn, plain.checkOut);
+        }
+      }
+
+      // Resolve Punch Method & Source
+      if (plain.checkIn && !plain.checkInMethod) {
+        plain.checkInMethod = plain.coords ? 'MANUAL_APP' : 'MANUAL_WEB';
+      }
+
+      if (plain.checkOut && !plain.clockOutMethod) {
+        if (plain.checkOut === '19:00:00' || plain.checkOut === '19:00') {
+          plain.clockOutMethod = 'AUTO_STALE_CLEANUP';
+        } else if (plain.checkOut === shift.end) {
+          plain.clockOutMethod = 'AUTO_SHIFT_END';
+        } else {
+          plain.clockOutMethod = plain.coords ? 'MANUAL_APP' : 'MANUAL_WEB';
+        }
+      }
+
+      // Dynamic Working Hours Calculation if missing
+      if (!plain.workingHours && plain.checkIn && plain.checkOut) {
+        plain.workingHours = ShiftEngine.calculateWorkingHours(plain.checkIn, plain.checkOut);
+      }
+
+      if (plain.batteryLevel == null) {
+        const uLower = String(plain.userId || '').toLowerCase();
+        const unLower = String(plain.userName || '').toLowerCase();
+        const aliases = new Set([uLower, unLower]);
+        if (empAliasesMap && empAliasesMap.has(uLower)) empAliasesMap.get(uLower).forEach(a => aliases.add(String(a).toLowerCase()));
+        if (empAliasesMap && empAliasesMap.has(unLower)) empAliasesMap.get(unLower).forEach(a => aliases.add(String(a).toLowerCase()));
+
+        let safeCreatedDate = null;
+        if (plain.createdAt) {
+          try {
+            const cd = new Date(plain.createdAt);
+            if (!isNaN(cd.getTime())) {
+              safeCreatedDate = cd.toISOString().split('T')[0];
+            }
+          } catch (e) {}
+        }
+
+        const candidateDates = [
+          plain.date ? String(plain.date).trim() : null,
+          safeCreatedDate
+        ].filter(Boolean);
+
+        for (const d of candidateDates) {
+          for (const a of aliases) {
+            const key = `${a}_${d}`;
+            if (fpMap.has(key)) {
+              const matched = fpMap.get(key);
+              plain.batteryLevel = matched.batteryLevel;
+              plain.batteryTemp = matched.batteryTemp;
+              plain.lastBatteryTime = matched.timestamp;
+              break;
+            }
+          }
+          if (plain.batteryLevel != null) break;
+        }
+      }
+
+      return plain;
+    } catch (recErr) {
+      console.warn('Error processing individual attendance record in batch:', recErr.message);
+      return rec;
+    }
+  });
+}
+
 router.get('/', async (req, res) => {
   try {
     const { userId, date, page, limit, chunked } = req.query;
     const whereClause = {};
     if (date) {
       const istTargetDate = getAuthoritativeISTDate(date);
-      let altDate = date;
-      if (date.includes('-')) {
-        const parts = date.split('-');
-        if (parts.length === 3) {
-          altDate = `${parts[2]}-${parts[1]}-${parts[0]}`;
+      const dateVariants = new Set([date, istTargetDate]);
+      [date, istTargetDate].forEach(d => {
+        if (d && d.includes('-')) {
+          const parts = d.split('-');
+          if (parts.length === 3) {
+            dateVariants.add(`${parts[2]}-${parts[1]}-${parts[0]}`); // DD-MM-YYYY
+            dateVariants.add(`${parseInt(parts[0], 10)}-${parseInt(parts[1], 10)}-${parseInt(parts[2], 10)}`);
+            dateVariants.add(`${parseInt(parts[2], 10)}-${parseInt(parts[1], 10)}-${parseInt(parts[0], 10)}`);
+          }
         }
-      }
-      whereClause[Op.or] = [
-        { date: { [Op.in]: Array.from(new Set([date, altDate, istTargetDate].filter(Boolean))) } },
-        sequelize.where(sequelize.fn('date', sequelize.col('createdAt')), istTargetDate)
-      ];
+      });
+
+      whereClause.date = { [Op.in]: Array.from(dateVariants) };
     }
 
-    // Fetch employee mapping for enrichment
-    const employees = await Employee.findAll();
-    const empMap = new Map();
-    employees.forEach(emp => {
-      if (emp.id) empMap.set(String(emp.id).toLowerCase(), emp);
-      if (emp.empCode) empMap.set(String(emp.empCode).toLowerCase(), emp);
-      if (emp.emp_code) empMap.set(String(emp.emp_code).toLowerCase(), emp);
-      if (emp.name) empMap.set(String(emp.name).toLowerCase(), emp);
-    });
+    // Fetch employee mapping for enrichment from high-speed in-memory cache
+    const { employees, empMap, empAliasesMap } = await getCachedEmployees();
 
     if (userId) {
       const rawUserStr = String(userId).trim();
@@ -119,22 +326,6 @@ router.get('/', async (req, res) => {
       }
     }
 
-    const enrichRecord = (rec) => {
-      const plain = rec.toJSON ? rec.toJSON() : rec;
-      const emp = empMap.get(String(plain.userId || '').toLowerCase()) || 
-                  empMap.get(String(plain.userName || '').toLowerCase());
-      if (emp) {
-        plain.userId = emp.empCode || emp.emp_code || emp.id;
-        plain.empCode = emp.empCode || emp.emp_code || emp.id;
-        plain.userName = emp.name || plain.userName;
-      } else {
-        plain.empCode = plain.userId;
-      }
-      plain.checkIn = cleanTimestamp(plain.checkIn);
-      plain.checkOut = cleanTimestamp(plain.checkOut);
-      return plain;
-    };
-
     if (chunked === 'true' || (page && !date)) {
       const p = Math.max(1, parseInt(page || 1, 10));
       const l = Math.min(500, Math.max(1, parseInt(limit || 20, 10)));
@@ -147,8 +338,10 @@ router.get('/', async (req, res) => {
         order: [['createdAt', 'DESC']]
       });
 
+      const enrichedRows = await enrichRecordsBatch(rows, empMap, empAliasesMap);
+
       return res.status(200).json({
-        data: rows.map(enrichRecord),
+        data: enrichedRows,
         page: p,
         limit: l,
         totalRecords: count,
@@ -162,7 +355,8 @@ router.get('/', async (req, res) => {
       order: [['createdAt', 'DESC']],
       limit: limit ? parseInt(limit, 10) : undefined
     });
-    return res.status(200).json(history.map(enrichRecord));
+    const enrichedHistory = await enrichRecordsBatch(history, empMap, empAliasesMap);
+    return res.status(200).json(enrichedHistory);
   } catch (error) {
     console.error('Error fetching attendance:', error);
     return res.status(500).json({ error: error.message });
@@ -195,10 +389,9 @@ router.post('/', async (req, res) => {
 
     const todayDate = date ? (date.length === 10 ? date : getAuthoritativeISTDate(date)) : getAuthoritativeISTDate();
 
-    // Safeguard 0: Auto-close any dangling unclosed sessions from previous dates for this employee
-    await Attendance.update(
-      { checkOut: '19:00:00', workingHours: '08:00' },
-      {
+    // Safeguard 0: Auto-close any dangling unclosed sessions from previous dates for this employee dynamically
+    try {
+      const stalePastRecords = await Attendance.findAll({
         where: {
           userId: { [Op.in]: possibleUserIds },
           date: { [Op.ne]: todayDate },
@@ -209,8 +402,22 @@ router.post('/', async (req, res) => {
             { checkOut: 'undefined' }
           ]
         }
+      });
+
+      if (stalePastRecords.length > 0) {
+        const empShift = ShiftEngine.resolveEmployeeShift(emp);
+        for (const staleRec of stalePastRecords) {
+          const autoRes = await ShiftEngine.resolveAutoCheckOutTime(possibleUserIds, staleRec.date, empShift, Footprint);
+          staleRec.checkOut = autoRes.checkOutTime;
+          staleRec.clockOutMethod = autoRes.method || 'AUTO_STALE_CLEANUP';
+          staleRec.shiftCode = empShift.code;
+          staleRec.workingHours = ShiftEngine.calculateWorkingHours(staleRec.checkIn, autoRes.checkOutTime);
+          await staleRec.save().catch(e => console.warn('[Auto-Close Past Session Save Warning]:', e.message));
+        }
       }
-    ).catch(err => console.warn('[Auto-Close Past Sessions Warning]:', err.message));
+    } catch (staleErr) {
+      console.warn('[Auto-Close Past Sessions Warning]:', staleErr.message);
+    }
 
     // Check if this is a clock-out update (since valid cleanCheckOut is provided)
     if (cleanCheckOut) {
@@ -233,17 +440,19 @@ router.post('/', async (req, res) => {
       });
 
       if (activeRecord) {
+        const empShift = ShiftEngine.resolveEmployeeShift(emp);
         activeRecord.userId = activeUserId;
         activeRecord.userName = activeUserName;
         activeRecord.checkOut = cleanCheckOut;
-        if (workingHours) activeRecord.workingHours = workingHours;
+        activeRecord.clockOutMethod = req.body.clockOutMethod || (latVal != null && lonVal != null ? 'MANUAL_APP' : 'MANUAL_WEB');
+        activeRecord.shiftCode = activeRecord.shiftCode || empShift.code;
+        activeRecord.workingHours = workingHours || ShiftEngine.calculateWorkingHours(activeRecord.checkIn, cleanCheckOut);
         if (coords) activeRecord.coords = typeof coords === 'string' ? coords : JSON.stringify(coords);
         await activeRecord.save();
 
         // Create Clock-Out GPS End Anchor Footprint
         if (latVal != null && lonVal != null) {
           try {
-            const Footprint = require('../../../../shared/models/Footprint');
             const clockOutTs = new Date(cleanCheckOut).getTime();
             await Footprint.create({
               userId: String(activeUserId),
@@ -270,7 +479,7 @@ router.post('/', async (req, res) => {
           }).catch(err => console.warn(err.message));
         }
 
-        console.log(`[Attendance Clock-Out] Successfully updated session ${activeRecord.id} for user ${activeUserId} to clocked-out at ${cleanCheckOut}.`);
+        console.log(`[Attendance Clock-Out] Successfully updated session ${activeRecord.id} for user ${activeUserId} to clocked-out at ${cleanCheckOut} (${activeRecord.clockOutMethod}).`);
 
         const io = req.app ? req.app.get('io') : null;
         if (io) {
@@ -362,16 +571,23 @@ router.post('/', async (req, res) => {
     }
 
     // Create record (Clock In)
+    const resolvedShift = ShiftEngine.resolveEmployeeShift(emp);
+    const inMethod = req.body.checkInMethod || (latVal != null && lonVal != null ? 'MANUAL_APP' : 'MANUAL_WEB');
+    const outMethod = cleanCheckOut ? (req.body.clockOutMethod || (latVal != null && lonVal != null ? 'MANUAL_APP' : 'MANUAL_WEB')) : null;
+
     const newRecord = await Attendance.create({ 
       userId: activeUserId, 
       userName: activeUserName, 
       date: todayDate, 
       checkIn: cleanCheckIn, 
       checkOut: cleanCheckOut, 
-      workingHours: workingHours || null, 
+      workingHours: workingHours || (cleanCheckIn && cleanCheckOut ? ShiftEngine.calculateWorkingHours(cleanCheckIn, cleanCheckOut) : null), 
       coords: coords ? (typeof coords === 'string' ? coords : JSON.stringify(coords)) : null,
       workMode: workMode || 'office',
-      isSwitched: false
+      isSwitched: false,
+      checkInMethod: inMethod,
+      clockOutMethod: outMethod,
+      shiftCode: resolvedShift.code
     });
 
     if (latVal != null && lonVal != null) {
