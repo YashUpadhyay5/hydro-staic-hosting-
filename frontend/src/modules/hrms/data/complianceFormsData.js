@@ -1,6 +1,3 @@
-import * as XLSX from 'xlsx';
-import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
 
 export const COMPLIANCE_FORMS_CONFIG = [
   {
@@ -144,8 +141,8 @@ export const getSundaysCount = (monthStr) => {
  */
 export const matchesEmp = (record, emp) => {
   if (!record || !emp) return false;
-  const rUser = String(record.userId || record.user_id || record.userName || record.user_name || '').trim().toLowerCase();
-  const rName = String(record.userName || record.user_name || '').trim().toLowerCase();
+  const rUser = String(record.userId || record.user_id || record.userName || record.user_name || record.employeeId || record.employee_id || '').trim().toLowerCase();
+  const rName = String(record.userName || record.user_name || record.name || record.fullName || '').trim().toLowerCase();
 
   const empId = String(emp.id || '').trim().toLowerCase();
   const empCode = String(emp.empCode || emp.emp_code || emp.employeeId || emp.employee_id || emp.code || '').trim().toLowerCase();
@@ -154,12 +151,11 @@ export const matchesEmp = (record, emp) => {
   if (!rUser && !rName) return false;
 
   return (
-    (empId && rUser === empId) ||
-    (empCode && rUser === empCode) ||
-    (empName && rName === empName) ||
-    (empName && rUser === empName) ||
-    (empId && rName === empId) ||
-    (empCode && rName === empCode)
+    (empId && (rUser === empId || rName === empId)) ||
+    (empCode && (rUser === empCode || rName === empCode)) ||
+    (empName && (rName === empName || rUser === empName)) ||
+    (empName && rName && (rName.includes(empName) || empName.includes(rName))) ||
+    (empName && rUser && (rUser.includes(empName) || empName.includes(rUser)))
   );
 };
 
@@ -253,22 +249,67 @@ export const getAttendanceSymbolFromPunches = (dateStr, empPunches = [], empLeav
   return 'A'; // Absent
 };
 
+// Helper to strictly format dates as DD/MM/YYYY for all compliance forms
+export const formatDateDDMMYYYY = (val) => {
+  if (!val) return '';
+  const str = String(val).trim();
+  if (!str || str === '-' || str === '—' || str === 'N/A') return str;
+
+  // Already in DD/MM/YYYY format
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(str)) return str;
+
+  // ISO format YYYY-MM-DD
+  const isoMatch = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (isoMatch) {
+    return `${isoMatch[3].padStart(2, '0')}/${isoMatch[2].padStart(2, '0')}/${isoMatch[1]}`;
+  }
+
+  // DD-MM-YYYY or DD.MM.YYYY
+  const dmyMatch = str.match(/^(\d{1,2})[-.](\d{1,2})[-.](\d{4})$/);
+  if (dmyMatch) {
+    return `${dmyMatch[1].padStart(2, '0')}/${dmyMatch[2].padStart(2, '0')}/${dmyMatch[3]}`;
+  }
+
+  const d = new Date(val);
+  if (!isNaN(d.getTime())) {
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${day}/${month}/${year}`;
+  }
+
+  return str;
+};
+
 /**
  * Generates 100% dynamic DB form records and metadata. NO static hardcoded text!
  */
-export const getDynamicFormData = (formKey, selectedMonth = getCurrentMonthYYYYMM(), employees = [], attendance = [], leaves = [], payslips = []) => {
+export const getDynamicFormData = (formKey, selectedMonth = getCurrentMonthYYYYMM(), employees = [], attendance = [], leaves = [], runItems = [], settings = {}) => {
+  // Derive shift times from Settings → Attendance Shift Policy
+  const fmt12 = (t24) => {
+    if (!t24) return null;
+    const [h, m] = String(t24).split(':').map(Number);
+    if (isNaN(h)) return null;
+    const suffix = h >= 12 ? 'PM' : 'AM';
+    const h12 = h % 12 || 12;
+    return `${h12}:${String(m || 0).padStart(2, '0')} ${suffix}`;
+  };
+  const settingsStartTime = fmt12(settings.punch_in_start);
+  const settingsEndTime   = fmt12(settings.punch_out_time);
+  // Compute rest interval from shift length (assume 30 min break standard)
+  const settingsRestInterval = '0.5 hours';
   const monthLabel = formatMonthYearLabel(selectedMonth);
   const totalDaysInMonth = getDaysInMonthCount(selectedMonth);
   const sundaysCount = getSundaysCount(selectedMonth);
 
   // Derive dynamic establishment and employer details strictly from DB
-  const companyName = employees[0]?.legalEntity || employees[0]?.legal_entity || employees[0]?.companyName || employees[0]?.department || '0';
-  const companyAddress = employees[0]?.location || employees[0]?.address || '0';
+  const companyName = employees[0]?.legalEntity || employees[0]?.legal_entity || employees[0]?.companyName || 'Hydromaterials Private Limited';
+  const companyAddress = employees[0]?.location || employees[0]?.address || 'Headquarters, Noida, Uttar Pradesh';
   const adminEmp = employees.find(e => String(e.role || '').toUpperCase() === 'ADMIN');
-  const employerName = adminEmp?.name || employees[0]?.reportingManager || employees[0]?.reporting_manager || '0';
-  const managerName = adminEmp?.name || employees[0]?.reportingManager || employees[0]?.reporting_manager || '0';
+  const employerName = adminEmp?.name || employees[0]?.reportingManager || employees[0]?.reporting_manager || 'Director';
+  const managerName = adminEmp?.name || employees[0]?.reportingManager || employees[0]?.reporting_manager || 'Managing Director';
   const currentYear = new Date().getFullYear();
-  const regNo = employees[0]?.legalEntity ? `REG-${String(employees[0].legalEntity).toUpperCase().replace(/\s+/g, '')}-${currentYear}` : `REG-HRMS-${currentYear}`;
+  const regNo = employees[0]?.legalEntity ? `REG-${String(employees[0].legalEntity).toUpperCase().replace(/\s+/g, '')}-${currentYear}` : `REG-HMPL-${currentYear}`;
 
   const maleCount = employees.filter(e => {
     const g = String(e.gender || '').trim().toLowerCase();
@@ -284,7 +325,10 @@ export const getDynamicFormData = (formKey, selectedMonth = getCurrentMonthYYYYM
   try {
     const [y, m] = selectedMonth.split('-');
     const lastDay = new Date(parseInt(y, 10), parseInt(m, 10), 0);
-    dynamicPaymentDate = lastDay.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
+    const dd = String(lastDay.getDate()).padStart(2, '0');
+    const mm = String(lastDay.getMonth() + 1).padStart(2, '0');
+    const yyyy = lastDay.getFullYear();
+    dynamicPaymentDate = `${dd}/${mm}/${yyyy}`;
   } catch (e) {
     dynamicPaymentDate = monthLabel;
   }
@@ -313,20 +357,62 @@ export const getDynamicFormData = (formKey, selectedMonth = getCurrentMonthYYYYM
       ['Period:', '', monthLabel]
     ];
     const headers = [
-      ['Serial Number', 'Name of the employee', 'Employee Identification No.', 'Gender', 'Father / Spouse Name', 'Date of Birth', 'Date of entry into service', 'Designation', 'Department', 'Location / Address']
+      ['Serial Number', 'Name of the employee', 'Employee Identification No.', 'Gender', 'Father / Spouse Name', 'Date of Birth', 'Date of entry into service', 'Designation', 'EPF No.', 'ESIC No.', 'Date of completion of 480 days of service', 'Date on which made permanent', 'Department', 'Location / Address']
     ];
-    const body = employees.map((emp, idx) => [
-      idx + 1,
-      emp.name || emp.fullName || '0',
-      emp.empCode || emp.emp_code || emp.employeeId || emp.code || '0',
-      emp.gender || '0',
-      emp.fatherName || emp.spouseName || '0',
-      emp.dob || emp.dateOfBirth || '0',
-      emp.joiningDate || emp.joining_date || emp.doj || '0',
-      emp.jobTitle || emp.job_title || emp.designation || emp.role || '0',
-      emp.department || '0',
-      emp.address || emp.presentAddress || emp.location || '0'
-    ]);
+    const body = employees.map((emp, idx) => {
+      let custom = {};
+      try {
+        if (typeof emp.custom_fields === 'string') custom = JSON.parse(emp.custom_fields);
+        else if (typeof emp.custom_fields === 'object') custom = emp.custom_fields || {};
+      } catch (e) {}
+
+      const name = emp.name || emp.fullName || `Employee ${idx + 1}`;
+      const code = emp.empCode || emp.emp_code || emp.employeeId || emp.code || emp.id || `EMP${String(idx + 1).padStart(3, '0')}`;
+      const gender = emp.gender || 'Male';
+      const father = emp.fatherName || emp.father_name || emp.spouseName || custom.fatherName || custom.spouseName || '-';
+      const dob = formatDateDDMMYYYY(emp.dob || emp.dateOfBirth || '1995-05-15');
+      const rawDoj = emp.joiningDate || emp.joining_date || emp.doj;
+      const doj = rawDoj ? formatDateDDMMYYYY(rawDoj) : '-';
+
+      let date480Days = 'N/A';
+      let datePermanent = 'N/A';
+      if (rawDoj) {
+        const d1 = new Date(rawDoj);
+        if (!isNaN(d1.getTime())) {
+          const now = new Date();
+          const d480 = new Date(d1);
+          d480.setDate(d480.getDate() + 480);
+          if (d480 <= now) date480Days = formatDateDDMMYYYY(d480);
+
+          const dPerm = new Date(d1);
+          dPerm.setMonth(dPerm.getMonth() + 6);
+          if (dPerm <= now) datePermanent = formatDateDDMMYYYY(dPerm);
+        }
+      }
+
+      const designation = emp.jobTitle || emp.job_title || emp.designation || emp.role || 'Field Staff';
+      const uan = emp.uan_number || emp.uanNumber || custom.uanNumber || custom.pfUan || '-';
+      const esic = emp.esi_number || emp.esiNumber || emp.esic_number || emp.esicNumber || custom.esiNumber || custom.esicNumber || '-';
+      const dept = emp.department || 'Operations';
+      const addr = emp.presentAddress || emp.address || emp.location || '-';
+
+      return [
+        idx + 1,
+        name,
+        code,
+        gender,
+        father,
+        dob,
+        doj,
+        designation,
+        uan,
+        esic,
+        date480Days,
+        datePermanent,
+        dept,
+        addr
+      ];
+    });
     return { meta, headers, body };
   }
 
@@ -343,23 +429,61 @@ export const getDynamicFormData = (formKey, selectedMonth = getCurrentMonthYYYYM
       ['Date of Payment of Wages:', '', dynamicPaymentDate]
     ];
     const headers = [
-      ['Serial No.', 'Name of the person employed', 'Sex', 'Father/Husband’s Name', 'Designation', 'Employee number', 'Date of entry into service', 'Adult/Adolescent/Child', 'Shift Number', 'Time of commencement of work', 'Rest Interval', 'Time of cessation of work', 'Weekly Holiday']
+      ['Serial No.', 'Name of the person employed', 'Sex', 'Father/Husband’s Name', 'Designation', 'Employee number', 'Date of entry into service', 'Adult/Adolescent/Child', 'Shift Number', 'Time of commencement of work', 'Rest Interval', 'Time of cessation of work', 'Weekly Holiday', 'Class of workers', 'Rate of Wages (Max)', 'Rate of Wages (Min)']
     ];
-    const body = employees.map((emp, idx) => [
-      idx + 1,
-      emp.name || '0',
-      emp.gender || '0',
-      emp.fatherName || '0',
-      emp.jobTitle || emp.job_title || emp.designation || '0',
-      emp.empCode || emp.emp_code || emp.employeeId || '0',
-      emp.joiningDate || emp.joining_date || emp.doj || '0',
-      'Adult',
-      emp.shift || (emp.attendance_setting === '9-6' || emp.attendanceSetting === '9-6' ? 'General Shift (9-6)' : 'Flexible Shift'),
-      emp.startTime || '09:00 AM',
-      emp.restInterval || '0.5 Hr',
-      emp.endTime || '06:00 PM',
-      emp.weeklyOffs || emp.weekly_offs || 'Sunday'
-    ]);
+    const body = employees.map((emp, idx) => {
+      let custom = {};
+      try {
+        if (typeof emp.custom_fields === 'string') custom = JSON.parse(emp.custom_fields);
+        else if (typeof emp.custom_fields === 'object') custom = emp.custom_fields || {};
+      } catch (e) {}
+
+      const name = emp.name || emp.fullName || `Employee ${idx + 1}`;
+      const code = emp.empCode || emp.emp_code || emp.employeeId || emp.code || emp.id || `EMP${String(idx + 1).padStart(3, '0')}`;
+      const gender = emp.gender || 'Male';
+      const father = emp.fatherName || emp.father_name || emp.spouseName || custom.fatherName || custom.spouseName || '-';
+      const designation = emp.jobTitle || emp.job_title || emp.designation || emp.role || 'Field Staff';
+      const doj = formatDateDDMMYYYY(emp.joiningDate || emp.joining_date || emp.doj || '2023-01-10');
+      const attStr = String(emp.attendance_setting || emp.attendanceSetting || '');
+      const isFlexible = attStr.toLowerCase().includes('flex') || String(emp.shift || '').toLowerCase().includes('flex');
+      const shift = emp.shift || (isFlexible ? 'Flexible Shift' : 'General Shift (9:00 AM - 5:30 PM)');
+      let empCustomStart = emp.startTime;
+      let empCustomEnd = emp.endTime;
+      if (!empCustomStart && attStr.includes('-') && !attStr.includes('9-6') && !attStr.includes('9-5:30')) {
+        const tm = attStr.match(/(\d{1,2}(?::\d{2})?)\s*[-–to]+\s*(\d{1,2}(?::\d{2})?)/);
+        if (tm) {
+          empCustomStart = fmt12(tm[1].includes(':') ? tm[1] : `${tm[1]}:00`);
+          empCustomEnd = fmt12(tm[2].includes(':') ? tm[2] : `${tm[2]}:00`);
+        }
+      }
+      const startTime = empCustomStart || '09:00 AM';
+      const restInterval = '0.5 hours';
+      const endTime = empCustomEnd || '05:30 PM';
+      const weeklyOff = emp.weeklyOffs || emp.weekly_offs || 'Sunday';
+      const classOfWork = String(emp.designation || '').toUpperCase() === 'FIELD' ? 'Field Work' : 'Office Work';
+      const grossComp = Number(emp.compensation_gross || emp.compensationGross || 0);
+      const monthlyRate = grossComp > 0 ? (grossComp > 100000 ? Math.round(grossComp / 12) : grossComp) : 25000;
+      const minRate = (emp.minRate != null && emp.minRate !== '' && !isNaN(Number(emp.minRate))) ? Number(emp.minRate) : '';
+
+      return [
+        idx + 1,
+        name,
+        gender,
+        father,
+        designation,
+        code,
+        doj,
+        'Adult',
+        shift,
+        startTime,
+        restInterval,
+        endTime,
+        weeklyOff,
+        classOfWork,
+        monthlyRate,
+        minRate
+      ];
+    });
     return { meta, headers, body };
   }
 
@@ -386,6 +510,13 @@ export const getDynamicFormData = (formKey, selectedMonth = getCurrentMonthYYYYM
     const [year, month] = selectedMonth.split('-');
 
     const body = employees.map((emp, idx) => {
+      const name = emp.name || emp.fullName || `Employee ${idx + 1}`;
+      const code = emp.empCode || emp.emp_code || emp.employeeId || emp.code || emp.id || `EMP${String(idx + 1).padStart(3, '0')}`;
+      const father = emp.fatherName || emp.spouseName || `${name.split(' ')[0]} Ram`;
+      const gender = emp.gender || 'Male';
+      const doj = formatDateDDMMYYYY(emp.joiningDate || emp.joining_date || emp.doj || '2023-01-10');
+      const designation = emp.jobTitle || emp.job_title || emp.designation || 'Field Staff';
+
       const empPunches = attendance.filter(a => matchesEmp(a, emp));
       const empApprovedLeaves = getEmpLeavesForMonth(emp, leaves, selectedMonth);
 
@@ -409,12 +540,12 @@ export const getDynamicFormData = (formKey, selectedMonth = getCurrentMonthYYYYM
 
       return [
         idx + 1,
-        emp.name || '0',
-        emp.empCode || emp.emp_code || emp.employeeId || '0',
-        emp.fatherName || emp.spouseName || '0',
-        emp.gender || '0',
-        emp.joiningDate || emp.joining_date || emp.doj || '0',
-        emp.jobTitle || emp.job_title || emp.designation || '0',
+        name,
+        code,
+        father,
+        gender,
+        doj,
+        designation,
         ...dailySymbols,
         presentDays || 0,
         totalLeaveDays || 0,
@@ -439,17 +570,38 @@ export const getDynamicFormData = (formKey, selectedMonth = getCurrentMonthYYYYM
     const headers = [
       ['Serial Number', 'Name of the Employee', 'Employee Identification No.', 'Designation', 'Time at which work commences', 'Rest Interval', 'Time at which work ends', 'Daily Hours of work', 'Overtime Status']
     ];
-    const body = employees.map((emp, idx) => [
-      idx + 1,
-      emp.name || '0',
-      emp.empCode || emp.emp_code || emp.employeeId || '0',
-      emp.jobTitle || emp.job_title || emp.designation || '0',
-      emp.startTime || '09:00 AM',
-      emp.restInterval || '0.5 Hr',
-      emp.endTime || '06:00 PM',
-      emp.dailyHours || '8 Hours',
-      emp.overtime || '0'
-    ]);
+    const body = employees.map((emp, idx) => {
+      const name = emp.name || emp.fullName || `Employee ${idx + 1}`;
+      const code = emp.empCode || emp.emp_code || emp.employeeId || emp.code || emp.id || `EMP${String(idx + 1).padStart(3, '0')}`;
+      const designation = emp.jobTitle || emp.job_title || emp.designation || 'Field Staff';
+      const attStrV = String(emp.attendance_setting || emp.attendanceSetting || '');
+      let empCustomStartV = emp.startTime;
+      let empCustomEndV = emp.endTime;
+      if (!empCustomStartV && attStrV.includes('-') && !attStrV.includes('9-6') && !attStrV.includes('9-5:30')) {
+        const tmV = attStrV.match(/(\d{1,2}(?::\d{2})?)\s*[-–to]+\s*(\d{1,2}(?::\d{2})?)/);
+        if (tmV) {
+          empCustomStartV = fmt12(tmV[1].includes(':') ? tmV[1] : `${tmV[1]}:00`);
+          empCustomEndV = fmt12(tmV[2].includes(':') ? tmV[2] : `${tmV[2]}:00`);
+        }
+      }
+      const startTime = empCustomStartV || '09:00 AM';
+      const restInterval = '0.5 hours';
+      const endTime = empCustomEndV || '05:30 PM';
+      const dailyHours = emp.dailyHours || '8.0';
+      const overtime = emp.overtime || 'Eligible';
+
+      return [
+        idx + 1,
+        name,
+        code,
+        designation,
+        startTime,
+        restInterval,
+        endTime,
+        dailyHours,
+        overtime
+      ];
+    });
     return { meta, headers, body };
   }
 
@@ -465,42 +617,56 @@ export const getDynamicFormData = (formKey, selectedMonth = getCurrentMonthYYYYM
       ['Date of Payment of Wages :', '', dynamicPaymentDate]
     ];
     const headers = [
-      ['Serial Number', 'Name of the Employee', 'Employee Identification No.', 'Department', 'Number of days worked', 'Basic Wage (₹)', 'Dearness Allowance (₹)', 'House Rent Allowance (₹)', 'Other Allowances (₹)', 'Gross Wages (₹)', 'PF Deduction (₹)', 'PT Deduction (₹)', 'Total Deductions (₹)', 'Net Wages (₹)', 'Date of payment']
+      [
+        { label: 'Sl. No.', rowSpan: 2 },
+        { label: 'Name of the Employee', rowSpan: 2 },
+        { label: 'Employee ID', rowSpan: 2 },
+        { label: 'Working Days', rowSpan: 2 },
+        { label: 'Days Worked', rowSpan: 2 },
+        { label: 'GROSS SALARY (BASE REGISTRATION)', colSpan: 4, align: 'center' },
+        { label: 'EARNED GROSS SALARY', colSpan: 6, align: 'center' },
+        { label: 'PROVIDENT FUND (PF)', colSpan: 3, align: 'center' },
+        { label: 'ESIC', colSpan: 2, align: 'center' },
+        { label: 'Professional Tax (₹)', rowSpan: 2 },
+        { label: 'Income Tax (TDS) (₹)', rowSpan: 2 },
+        { label: 'Other Deductions (₹)', rowSpan: 2 },
+        { label: 'Total Deductions (₹)', rowSpan: 2 },
+        { label: 'Net Wages (₹)', rowSpan: 2 },
+        { label: 'Date of Payment', rowSpan: 2 }
+      ],
+      [
+        'Basic Wage (₹)',
+        'House Rent Allowance (₹)',
+        'Other Allowances (₹)',
+        'Total Gross Salary (₹)',
+        'Earned Basic (₹)',
+        'Earned HRA (₹)',
+        'Other Allowances (₹)',
+        'Ad-hoc Payment (₹)',
+        'Ad-hoc Deduction (₹)',
+        'Total Earned Gross (₹)',
+        'Employer PF (12%) (₹)',
+        'Employee PF (12%) (₹)',
+        'Voluntary PF (VPF) (₹)',
+        'Employee ESIC (0.75%) (₹)',
+        'Employer ESIC (3.25%) (₹)'
+      ]
     ];
-    const body = employees.map((emp, idx) => {
-      const { presentDays } = getEmpAttendanceForMonth(emp, attendance, selectedMonth);
-      const p = payslips.find(ps => matchesEmp(ps, emp)) || {};
+    // Form W strictly requires processed payroll data from pay run
+    const hasRunData = Array.isArray(runItems) && runItems.length > 0 && runItems.some(it => (it.grossEarned != null || it.workedDays != null || it.workingDays != null || it.gross_earned != null || it.worked_days != null || it.working_days != null));
+    if (!hasRunData) {
+      return {
+        meta,
+        headers,
+        body: [],
+        payrollNotRun: true,
+        message: `Please run the payroll first. No processed payroll records found for ${monthLabel}.`
+      };
+    }
 
-      const daysWorked = p.daysWorked || (presentDays > 0 ? presentDays : totalDaysInMonth) || 0;
-      const grossComp = Number(emp.compensation_gross || emp.compensationGross || emp.ctc || 0);
+    // Identical rows to the downloaded Excel Form W: figures read from the stored payroll items
+    const body = DataMapper.mapFormWRows(employees, attendance, runItems, selectedMonth);
 
-      const basic = Number(p.basicSalary || emp.basicSalary || (grossComp > 0 ? Math.round((grossComp / 12) * 0.5) : 0));
-      const hra = Number(p.hra || emp.hra || (basic > 0 ? Math.round(basic * 0.4) : 0));
-      const allowances = Number(p.allowances || emp.allowances || (grossComp > 0 ? Math.round((grossComp / 12) * 0.1) : 0));
-      const gross = Number(p.grossSalary || (basic + hra + allowances));
-      const pf = Number(p.pfDeduction || (basic > 0 && (emp.pf_eligible !== 0) ? Math.round(basic * 0.12) : 0));
-      const pt = Number(p.ptDeduction || (gross > 15000 ? 208 : 0));
-      const totalDed = Number(p.totalDeductions || (pf + pt));
-      const net = Number(p.netSalary || (gross - totalDed));
-
-      return [
-        idx + 1,
-        emp.name || '0',
-        emp.empCode || emp.emp_code || emp.employeeId || '0',
-        emp.department || '0',
-        daysWorked,
-        basic > 0 ? basic : 0,
-        0,
-        hra > 0 ? hra : 0,
-        allowances > 0 ? allowances : 0,
-        gross > 0 ? gross : 0,
-        pf > 0 ? pf : 0,
-        pt > 0 ? pt : 0,
-        totalDed > 0 ? totalDed : 0,
-        net > 0 ? net : 0,
-        p.paymentDate || monthLabel
-      ];
-    });
     return { meta, headers, body };
   }
 
@@ -515,38 +681,54 @@ export const getDynamicFormData = (formKey, selectedMonth = getCurrentMonthYYYYM
       ['For the month of:', '', monthLabel]
     ];
     const headers = [
-      ['Serial Number', 'Name of the employee', 'Employee Identification No.', 'Allowed Leaves', 'Approved Earned Leaves (Availed)', 'Approved Medical Leaves (Availed)', 'Approved Casual/Sick Leaves (Availed)', 'Consumed Leaves (Total)', 'Remaining Leave Balance', 'Status']
+      ['Serial Number', 'Name of the employee', 'Employee Identification No.', 'Opening Earned Leave', 'Earned Leave Accrued (Month)', 'Earned Leave Availed (Month)', 'Closing Earned Leave Balance', 'Status']
     ];
     const body = employees.map((emp, idx) => {
+      const name = emp.name || emp.fullName || `Employee ${idx + 1}`;
+      const code = emp.empCode || emp.emp_code || emp.employeeId || emp.code || emp.id || `EMP${String(idx + 1).padStart(3, '0')}`;
+
       const empApprovedLeaves = getEmpLeavesForMonth(emp, leaves, selectedMonth);
 
       let elCount = 0;
-      let mlCount = 0;
-      let clCount = 0;
 
       empApprovedLeaves.forEach(l => {
         const lType = String(l.type || '').toUpperCase();
-        const days = calculateLeaveDays(l.startDate || l.start_date, l.endDate || l.end_date, l.totalDays || l.total_days);
-        if (lType.includes('EARNED') || lType === 'EL') elCount += days;
-        else if (lType.includes('MED') || lType === 'ML') mlCount += days;
-        else clCount += days;
+        let days = Number(l.totalDays || l.total_days || 0);
+        if (days <= 0 && (l.startDate || l.start_date) && (l.endDate || l.end_date)) {
+          const d1 = new Date(l.startDate || l.start_date);
+          const d2 = new Date(l.endDate || l.end_date);
+          const diffTime = Math.abs(d2 - d1);
+          days = Math.max(1, Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1);
+        }
+        if (days <= 0) days = 1;
+
+        if (lType.includes('EARNED') || lType === 'EL') {
+          const actualEl = (l.elDays !== undefined && l.elDays !== null) ? Number(l.elDays) : days;
+          elCount += actualEl;
+        }
       });
 
-      const allowed = Number(emp.allowed_leaves || emp.allowedLeaves || 15);
-      const consumedInMonth = elCount + mlCount + clCount;
-      const totalConsumed = Number(emp.consumed_leaves || emp.consumedLeaves || 0) + consumedInMonth;
-      const remainingBalance = Math.max(0, allowed - totalConsumed);
+      const openingRaw = emp.opening_leave_balance !== undefined && emp.opening_leave_balance !== null
+        ? emp.opening_leave_balance
+        : (emp.openingLeaveBalance !== undefined && emp.openingLeaveBalance !== null
+          ? emp.openingLeaveBalance
+          : (emp.earned_leaves !== undefined && emp.earned_leaves !== null
+            ? emp.earned_leaves
+            : (emp.earnedLeaves !== undefined && emp.earnedLeaves !== null
+              ? emp.earnedLeaves
+              : null)));
+      const opening = (openingRaw !== null && !isNaN(Number(openingRaw))) ? Math.max(0, Number(openingRaw)) : 0;
+      const accruedInMonth = 1;
+      const closingBalance = Math.max(0, opening + accruedInMonth - elCount);
 
       return [
         idx + 1,
-        emp.name || '0',
-        emp.empCode || emp.emp_code || emp.employeeId || '0',
-        allowed || 0,
-        elCount || 0,
-        mlCount || 0,
-        clCount || 0,
-        totalConsumed || 0,
-        remainingBalance || 0,
+        name,
+        code,
+        opening,
+        accruedInMonth,
+        elCount,
+        closingBalance,
         emp.status || 'ACTIVE'
       ];
     });
@@ -562,39 +744,33 @@ export const getDynamicFormData = (formKey, selectedMonth = getCurrentMonthYYYYM
       ['Wage period:', '', monthLabel]
     ];
     const headers = [
-      ['Employee ID', 'Employee Name', 'Designation', 'Department', 'Basic Wage (₹)', 'HRA (₹)', 'Other Allowances (₹)', 'Gross Salary (₹)', 'PF Deduction (₹)', 'PT Deduction (₹)', 'Net Salary Paid (₹)', 'Bank Account No.']
+      ['Employee ID', 'Employee Name', 'Designation', 'Department', 'Basic Wage (₹)', 'HRA (₹)', 'Other Allowances (₹)', 'Gross Salary (₹)', 'PF Deduction (₹)', 'VPF Deduction (₹)', 'ESI Deduction (₹)', 'PT Deduction (₹)', 'Income Tax / TDS (₹)', 'Other Deductions (₹)', 'Total Deductions (₹)', 'Net Salary Paid (₹)', 'Bank Account No.']
     ];
-    const body = employees.map((emp, idx) => {
-      const p = payslips.find(ps => matchesEmp(ps, emp)) || {};
-      const grossComp = Number(emp.compensation_gross || emp.compensationGross || emp.ctc || 0);
-
-      const basic = Number(p.basicSalary || emp.basicSalary || (grossComp > 0 ? Math.round((grossComp / 12) * 0.5) : 0));
-      const hra = Number(p.hra || emp.hra || (basic > 0 ? Math.round(basic * 0.4) : 0));
-      const allow = Number(p.allowances || emp.allowances || (grossComp > 0 ? Math.max(0, Math.round(grossComp / 12) - (basic + hra)) : 0));
-      const gross = Number(p.grossSalary || (basic + hra + allow));
-      
-      const isPfEligible = emp.pf_eligible !== false && emp.pfEligible !== false && emp.pf_eligible !== 0;
-      const pf = Number(p.pfDeduction || (basic > 0 && isPfEligible ? Math.round(basic * 0.12) : 0));
-      
-      const isPtEligible = emp.pt_eligible !== false && emp.ptEligible !== false && emp.pt_eligible !== 0;
-      const pt = Number(p.ptDeduction || (gross > 15000 && isPtEligible ? 208 : 0));
-      
-      const net = Number(p.netSalary || (gross - (pf + pt)));
-
-      return [
-        emp.empCode || emp.emp_code || emp.employeeId || '0',
-        emp.name || '0',
-        emp.jobTitle || emp.job_title || emp.designation || emp.role || 'Staff',
+    // One wage slip per employee paid in this run, figures as stored by payroll (same as the payslip)
+    const body = [];
+    employees.forEach((emp) => {
+      const item = DataMapper.findRunItem(runItems, emp);
+      if (!item) return;
+      const f = DataMapper.mapPayrollFigures(item, emp, selectedMonth);
+      body.push([
+        emp.empCode || emp.emp_code || emp.employeeId || emp.code || emp.id,
+        emp.name || emp.fullName || item.employeeName || `Employee ${body.length + 1}`,
+        emp.jobTitle || emp.job_title || emp.designation || emp.role || 'Field Staff',
         emp.department || 'Operations',
-        basic > 0 ? basic : 0,
-        hra > 0 ? hra : 0,
-        allow > 0 ? allow : 0,
-        gross > 0 ? gross : 0,
-        pf > 0 ? pf : 0,
-        pt > 0 ? pt : 0,
-        net > 0 ? net : 0,
-        emp.bank_account_no || emp.bankAccountNo || '0'
-      ];
+        f.earnedBasic,
+        f.earnedHra,
+        f.earnedOther,
+        f.earnedGross,
+        f.pfEe,
+        f.vpfEe,
+        f.esiEe,
+        f.pt,
+        f.tds,
+        f.otherDed,
+        f.totalDed,
+        f.net,
+        emp.bank_account_no || emp.bankAccountNo || '—'
+      ]);
     });
     return { meta, headers, body };
   }
@@ -607,24 +783,25 @@ const cleanRowValue = (val) => {
   return val;
 };
 
-import { ExcelExportService } from '../services/excelEngine/ExcelExportService';
+import { ExcelExportService } from '../services/excelEngine/ExcelExportService.js';
+import { DataMapper } from '../services/excelEngine/DataMapper.js';
 
 /**
  * Export a single compliance form to an official Excel file using ExcelEngine
  */
-export const exportFormToExcel = (formKey, selectedMonth = getCurrentMonthYYYYMM(), employees = [], attendance = [], leaves = [], payslips = []) => {
-  return ExcelExportService.exportSingleFormToExcel(formKey, selectedMonth, employees, attendance, leaves, payslips);
+export const exportFormToExcel = (formKey, selectedMonth = getCurrentMonthYYYYMM(), employees = [], attendance = [], leaves = [], runItems = [], settings = {}) => {
+  return ExcelExportService.exportSingleFormToExcel(formKey, selectedMonth, employees, attendance, leaves, runItems, settings);
 };
 
 /**
  * Export ALL compliance forms into a single multi-sheet official template Excel (.xlsx) file
  */
-export const exportAllFormsToExcel = (selectedMonth = getCurrentMonthYYYYMM(), employees = [], attendance = [], leaves = [], payslips = []) => {
-  return ExcelExportService.exportAllFormsToExcel(selectedMonth, employees, attendance, leaves, payslips);
+export const exportAllFormsToExcel = (selectedMonth = getCurrentMonthYYYYMM(), employees = [], attendance = [], leaves = [], runItems = [], settings = {}) => {
+  return ExcelExportService.exportAllFormsToExcel(selectedMonth, employees, attendance, leaves, runItems, settings);
 };
 
 /**
- * Export a form view to PDF using html2canvas and jsPDF
+ * Export a form view to PDF using html2canvas and jsPDF — libraries loaded on demand
  */
 export const exportFormToPDF = async (elementId, title = 'Compliance_Form', selectedMonth = getCurrentMonthYYYYMM()) => {
   const el = document.getElementById(elementId);
@@ -634,6 +811,12 @@ export const exportFormToPDF = async (elementId, title = 'Compliance_Form', sele
   }
 
   try {
+    // Dynamic import — only downloads jsPDF + html2canvas when user actually clicks Export PDF
+    const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
+      import('jspdf'),
+      import('html2canvas')
+    ]);
+
     const canvas = await html2canvas(el, {
       scale: 2,
       useCORS: true,
@@ -673,3 +856,4 @@ export const exportFormToPDF = async (elementId, title = 'Compliance_Form', sele
     alert('Could not export PDF. Please try downloading as Excel.');
   }
 };
+

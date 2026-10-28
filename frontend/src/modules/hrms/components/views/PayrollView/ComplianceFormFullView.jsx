@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { api } from '../../../services/api';
 import {
   getDynamicFormData,
   exportFormToExcel,
@@ -6,6 +7,7 @@ import {
   formatMonthYearLabel,
   getCurrentMonthYYYYMM
 } from '../../../data/complianceFormsData';
+import { resolvePayrollRunItems, resolveOverrideValue } from '../../../services/payrollItemResolver';
 
 export default function ComplianceFormFullView({
   formConfig,
@@ -20,15 +22,110 @@ export default function ComplianceFormFullView({
   employees = [],
   attendance = [],
   leaves = [],
-  payslips = []
+  runItems = [],
+  loadingPayRun = false,
+  attendanceSettings = {},
+  currentRunStep = 0,
+  setActiveTab
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [internalEmployees, setInternalEmployees] = useState([]);
+  const [internalRunStep, setInternalRunStep] = useState(currentRunStep || 0);
+
+  useEffect(() => {
+    if ((!employees || employees.length === 0) && internalEmployees.length === 0) {
+      api.getEmployees({ limit: 1000 })
+        .then(res => {
+          const list = Array.isArray(res) ? res : (res?.data || []);
+          if (list.length > 0) setInternalEmployees(list);
+        })
+        .catch(e => console.warn('Could not auto-fetch employees in ComplianceFormFullView:', e));
+    }
+  }, [employees, internalEmployees.length]);
+
+  const effectiveEmployees = employees && employees.length > 0 ? employees : internalEmployees;
+
+  const [internalSettings, setInternalSettings] = useState({});
+  useEffect(() => {
+    if (!attendanceSettings || Object.keys(attendanceSettings).length === 0) {
+      api.getSettings()
+        .then(res => {
+          const s = res?.data || res || {};
+          if (s && Object.keys(s).length > 0) setInternalSettings(s);
+        })
+        .catch(() => {});
+    }
+  }, [attendanceSettings]);
+  const effectiveSettings = (attendanceSettings && Object.keys(attendanceSettings).length > 0) ? attendanceSettings : internalSettings;
+
+  const [internalRunItems, setInternalRunItems] = useState([]);
+  const [hasRunForMonth, setHasRunForMonth] = useState(false);
+  const [internalLoadingPayRun, setInternalLoadingPayRun] = useState(false);
+  const [showErrorModal, setShowErrorModal] = useState(false);
+
+  // Auto-fetch pay run items & wizard edits strictly for selectedMonth
+  useEffect(() => {
+    let isCancelled = false;
+    setInternalLoadingPayRun(true);
+    api.getPayrollRuns()
+      .then(runs => {
+        if (isCancelled || !Array.isArray(runs)) return;
+        const targetRun = runs.find(r => r.month === selectedMonth && (r.status === 'PAID' || r.status === 'COMPLETED' || r.status === 'APPROVED'))
+          || runs.find(r => r.month === selectedMonth);
+
+        if (targetRun) {
+          return Promise.all([
+            api.getPayrollRunItems(targetRun.id).catch(() => []),
+            api.getPayRunState(targetRun.id).catch(() => null)
+          ]).then(([items, stateRes]) => {
+            if (isCancelled) return;
+            const ws = stateRes?.wizardState || targetRun.wizardState;
+            const parsedWs = typeof ws === 'string' ? JSON.parse(ws) : (ws || {});
+            const baseItems = Array.isArray(items) ? items : [];
+
+            const step = Number(parsedWs.completedStep || 0);
+            setInternalRunStep(step);
+
+            // Pay run exists for this month -> mark as active and resolve live items with all wizard state
+            setHasRunForMonth(true);
+            const resolved = resolvePayrollRunItems(targetRun, baseItems, parsedWs, effectiveEmployees, attendance, leaves);
+            setInternalRunItems(resolved);
+          });
+        } else {
+          setInternalRunStep(0);
+          setHasRunForMonth(false);
+          setInternalRunItems([]);
+        }
+      })
+      .catch(e => {
+        console.warn('Could not auto-fetch pay run items in ComplianceFormFullView:', e);
+        if (!isCancelled) {
+          setHasRunForMonth(false);
+          setInternalRunItems([]);
+        }
+      })
+      .finally(() => {
+        if (!isCancelled) {
+          setInternalLoadingPayRun(false);
+        }
+      });
+
+    return () => { isCancelled = true; };
+  }, [selectedMonth]);
+
+  const effectiveRunItems = hasRunForMonth 
+    ? ((internalRunItems && internalRunItems.length > 0) ? internalRunItems : (runItems || []))
+    : [];
+  const isWageForm = formConfig.sheetName === 'Form W' || formConfig.id === 'form-w' || formConfig.sheetName === 'Form T' || formConfig.id === 'form-t';
+  const isFormW = isWageForm;
+  const isPayrollRun = Boolean(hasRunForMonth && effectiveRunItems.length > 0);
+  const isStillLoading = (loadingPayRun || internalLoadingPayRun) && effectiveRunItems.length === 0;
 
   // Compute dynamic form data strictly from DB state & selected month & filtered employees
-  const { meta, headers, body } = useMemo(() => {
-    return getDynamicFormData(formConfig.sheetName, selectedMonth, employees, attendance, leaves, payslips);
-  }, [formConfig, selectedMonth, employees, attendance, leaves, payslips]);
+  const { meta, headers, body, payrollNotRun } = useMemo(() => {
+    return getDynamicFormData(formConfig.sheetName, selectedMonth, effectiveEmployees, attendance, leaves, effectiveRunItems, effectiveSettings);
+  }, [formConfig, selectedMonth, effectiveEmployees, attendance, leaves, effectiveRunItems, effectiveSettings]);
 
   // Filter rows by search query
   const filteredBody = useMemo(() => {
@@ -39,7 +136,19 @@ export default function ComplianceFormFullView({
     );
   }, [body, searchTerm]);
 
+  const handleDownloadExcel = () => {
+    if (isWageForm && !isPayrollRun && !isStillLoading) {
+      setShowErrorModal(true);
+      return;
+    }
+    exportFormToExcel(formConfig.sheetName, selectedMonth, effectiveEmployees, attendance, leaves, effectiveRunItems, effectiveSettings);
+  };
+
   const handleDownloadPdf = async () => {
+    if (isWageForm && !isPayrollRun && !isStillLoading) {
+      setShowErrorModal(true);
+      return;
+    }
     setDownloadingPdf(true);
     await exportFormToPDF(`printable-compliance-view-${formConfig.id}`, formConfig.title, selectedMonth);
     setDownloadingPdf(false);
@@ -224,7 +333,7 @@ export default function ComplianceFormFullView({
           )}
 
           <button
-            onClick={() => exportFormToExcel(formConfig.sheetName, selectedMonth, employees, attendance, leaves, payslips)}
+            onClick={handleDownloadExcel}
             className="btn btn-outline"
             style={{
               display: 'flex',
@@ -412,83 +521,199 @@ export default function ComplianceFormFullView({
             </div>
           )}
 
-          {/* Premium Data Table */}
-          <div
-            style={{
-              overflowX: 'auto',
-              borderRadius: '12px',
-              border: '1px solid var(--border-subtle)'
-            }}
-          >
-            <table
+          {/* Premium Data Table, Loading, or Un-Run Alert */}
+          {isFormW && isStillLoading ? (
+            <div
               style={{
-                width: '100%',
-                borderCollapse: 'collapse',
-                fontSize: '0.88rem',
-                textAlign: 'left'
+                textAlign: 'center',
+                padding: '60px 24px',
+                borderRadius: '16px',
+                background: 'rgba(99, 102, 241, 0.04)',
+                border: '1px dashed rgba(99, 102, 241, 0.25)',
+                color: 'var(--text-secondary)'
               }}
             >
-              <thead>
-                {headers.map((hRow, rIdx) => (
-                  <tr key={rIdx} style={{ background: 'var(--primary-gradient)', color: '#ffffff' }}>
-                    {hRow.map((cell, cIdx) => (
-                      <th
-                        key={cIdx}
+              <i className="fa-solid fa-spinner fa-spin" style={{ fontSize: '2.2rem', marginBottom: '16px', color: 'var(--primary-color, #6366f1)' }}></i>
+              <h3 style={{ fontSize: '1.2rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '8px' }}>
+                Loading Pay Run Records
+              </h3>
+              <p style={{ margin: 0, fontSize: '0.9rem' }}>
+                Retrieving processed salary and attendance records for <strong>{monthLabel}</strong>...
+              </p>
+            </div>
+          ) : isFormW && !isPayrollRun ? (
+            <div
+              style={{
+                textAlign: 'center',
+                padding: '60px 24px',
+                borderRadius: '16px',
+                background: 'rgba(239, 68, 68, 0.04)',
+                border: '1px dashed rgba(239, 68, 68, 0.25)'
+              }}
+            >
+              <div
+                style={{
+                  width: '72px',
+                  height: '72px',
+                  borderRadius: '50%',
+                  backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                  color: '#ef4444',
+                  fontSize: '2.2rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  margin: '0 auto 20px'
+                }}
+              >
+                <i className="fa-solid fa-triangle-exclamation"></i>
+              </div>
+              <h2 style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '10px' }}>
+                Please Run the Payroll First
+              </h2>
+              <p style={{ maxWidth: '540px', margin: '0 auto 26px', color: 'var(--text-secondary)', fontSize: '0.94rem', lineHeight: 1.6 }}>
+                <strong>{formConfig.title || formConfig.sheetName || 'This form'}</strong> requires actual working days and attendance numbers filled and calculated during the pay run.
+                {internalRunStep > 0 ? (
+                  <> Payroll for <strong>{monthLabel}</strong> is currently in draft at <strong>Step {internalRunStep} of 8</strong>.</>
+                ) : (
+                  <> No processed payroll was found for <strong>{monthLabel}</strong>.</>
+                )}
+                {" "}Please complete <strong>Step 7 (Review & Calculate)</strong> or <strong>Step 8 (Finalize & Lock)</strong> in the Pay Runs wizard before viewing or downloading this form.
+              </p>
+              <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+                {setActiveTab && (
+                  <button
+                    onClick={() => setActiveTab('payruns')}
+                    className="btn btn-primary"
+                    style={{
+                      padding: '10px 24px',
+                      borderRadius: '10px',
+                      fontSize: '0.9rem',
+                      fontWeight: 600,
+                      background: 'var(--accent-primary)',
+                      borderColor: 'var(--accent-primary)'
+                    }}
+                  >
+                    <i className="fa-solid fa-play" style={{ marginRight: '8px' }}></i>
+                    Go to Pay Runs
+                  </button>
+                )}
+                <button
+                  onClick={onBack}
+                  className="btn btn-outline"
+                  style={{
+                    padding: '10px 24px',
+                    borderRadius: '10px',
+                    fontSize: '0.9rem',
+                    fontWeight: 600
+                  }}
+                >
+                  <i className="fa-solid fa-arrow-left" style={{ marginRight: '8px' }}></i>
+                  Back to Reports
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div
+              style={{
+                overflowX: 'auto',
+                borderRadius: '12px',
+                border: '1px solid var(--border-subtle)'
+              }}
+            >
+              <table
+                style={{
+                  width: '100%',
+                  borderCollapse: 'collapse',
+                  fontSize: '0.88rem',
+                  textAlign: 'left'
+                }}
+              >
+                <thead>
+                  {headers.map((hRow, rIdx) => (
+                    <tr key={rIdx} style={{ background: rIdx === 0 ? 'var(--primary-gradient)' : 'linear-gradient(135deg, #4338ca 0%, #3730a3 100%)', color: '#ffffff' }}>
+                      {hRow.map((cell, cIdx) => {
+                        const isObj = cell && typeof cell === 'object';
+                        const label = isObj ? cell.label : (cell || '');
+                        const colSpan = isObj && cell.colSpan ? cell.colSpan : 1;
+                        const rowSpan = isObj && cell.rowSpan ? cell.rowSpan : 1;
+                        const align = isObj && cell.align ? cell.align : (colSpan > 1 ? 'center' : 'left');
+
+                        return (
+                          <th
+                            key={cIdx}
+                            colSpan={colSpan}
+                            rowSpan={rowSpan}
+                            style={{
+                              padding: rIdx === 0 ? '12px 14px' : '10px 12px',
+                              fontWeight: 700,
+                              fontSize: rIdx === 0 ? '0.82rem' : '0.78rem',
+                              letterSpacing: '0.3px',
+                              textAlign: align,
+                              borderRight: '1px solid rgba(255, 255, 255, 0.18)',
+                              borderBottom: '1px solid rgba(255, 255, 255, 0.18)',
+                              whiteSpace: 'nowrap',
+                              ...(isObj && cell.style ? cell.style : {})
+                            }}
+                          >
+                            {label}
+                          </th>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </thead>
+                <tbody>
+                  {filteredBody.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={headers[0]?.length || 22}
+                        style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.92rem' }}
+                      >
+                        No active database records found for this month query.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredBody.map((row, rIdx) => (
+                      <tr
+                        key={rIdx}
                         style={{
-                          padding: '16px 18px',
-                          fontWeight: 700,
-                          fontSize: '0.85rem',
-                          letterSpacing: '0.4px',
-                          borderRight: '1px solid rgba(255, 255, 255, 0.15)',
-                          whiteSpace: 'nowrap'
+                          backgroundColor: rIdx % 2 === 0 ? 'transparent' : 'rgba(255, 255, 255, 0.02)',
+                          borderBottom: '1px solid var(--border-subtle)',
+                          transition: 'background 0.2s ease'
                         }}
                       >
-                        {cell || ''}
-                      </th>
-                    ))}
-                  </tr>
-                ))}
-              </thead>
-              <tbody>
-                {filteredBody.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={headers[0]?.length || 10}
-                      style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.92rem' }}
-                    >
-                      No active database records found for this month query.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredBody.map((row, rIdx) => (
-                    <tr
-                      key={rIdx}
-                      style={{
-                        backgroundColor: rIdx % 2 === 0 ? 'transparent' : 'rgba(255, 255, 255, 0.02)',
-                        borderBottom: '1px solid var(--border-subtle)',
-                        transition: 'background 0.2s ease'
-                      }}
-                    >
-                      {row.map((cell, cIdx) => (
-                        <td
-                          key={cIdx}
-                          style={{
-                            padding: '14px 18px',
-                            color: 'var(--text-primary)',
-                            fontWeight: cIdx === 1 ? 600 : 400,
-                            borderRight: '1px solid var(--border-subtle)',
-                            whiteSpace: 'nowrap'
-                          }}
-                        >
-                          {cell !== null && cell !== undefined ? String(cell) : '-'}
-                        </td>
-                      ))}
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                        {row.map((cell, cIdx) => {
+                          const isNum = typeof cell === 'number';
+                          const isMoneyCol = isNum && cIdx >= 5 && cIdx <= row.length - 2;
+                          const isCenterCol = cIdx === 0 || cIdx === 2 || cIdx === 3 || cIdx === 4 || cIdx === row.length - 1;
+                          const formattedVal = isNum 
+                            ? (isMoneyCol ? `₹${cell.toLocaleString()}` : cell.toLocaleString())
+                            : (cell !== null && cell !== undefined ? String(cell) : '-');
+
+                          return (
+                            <td
+                              key={cIdx}
+                              style={{
+                                padding: '12px 14px',
+                                color: 'var(--text-primary)',
+                                fontWeight: cIdx === 1 ? 600 : (cIdx === row.length - 2 ? 700 : 400),
+                                textAlign: isMoneyCol ? 'right' : (isCenterCol ? 'center' : 'left'),
+                                borderRight: '1px solid var(--border-subtle)',
+                                whiteSpace: 'nowrap',
+                                color: cIdx === row.length - 2 ? '#10b981' : 'var(--text-primary)'
+                              }}
+                            >
+                              {formattedVal}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           {/* Form Footer Stamp */}
           <div
@@ -508,6 +733,111 @@ export default function ComplianceFormFullView({
           </div>
         </div>
       </div>
+
+      {/* Error Popup Modal: Please Run The Payroll First */}
+      {showErrorModal && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            backdropFilter: 'blur(8px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '20px'
+          }}
+          onClick={() => setShowErrorModal(false)}
+        >
+          <div
+            className="card glass"
+            style={{
+              maxWidth: '460px',
+              width: '100%',
+              borderRadius: '20px',
+              padding: '32px',
+              background: 'var(--panel-bg, #121218)',
+              border: '1px solid rgba(239, 68, 68, 0.4)',
+              boxShadow: '0 20px 40px rgba(0, 0, 0, 0.6), 0 0 30px rgba(239, 68, 68, 0.2)',
+              textAlign: 'center',
+              position: 'relative'
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div
+              style={{
+                width: '64px',
+                height: '64px',
+                borderRadius: '50%',
+                backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 20px',
+                color: '#ef4444',
+                fontSize: '1.8rem'
+              }}
+            >
+              <i className="fa-solid fa-triangle-exclamation"></i>
+            </div>
+
+            <h3 style={{ margin: '0 0 12px', fontSize: '1.3rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+              Please Run the Payroll First
+            </h3>
+
+            <p style={{ margin: '0 0 24px', fontSize: '0.92rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+              <strong>{formConfig.title || formConfig.sheetName || 'This form'}</strong> requires actual attendance and working days data from a processed pay run.
+              {internalRunStep > 0 ? (
+                <> Payroll for <strong>{monthLabel}</strong> is currently at <strong>Step {internalRunStep} of 8</strong>.</>
+              ) : (
+                <> No processed payroll records were found for <strong>{monthLabel}</strong>.</>
+              )}
+              {" "}Please complete <strong>Step 7 (Review & Calculate)</strong> or <strong>Step 8 (Finalize & Lock)</strong> in the Pay Runs wizard before downloading this form.
+            </p>
+
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+              {setActiveTab && (
+                <button
+                  className="btn btn-primary"
+                  onClick={() => {
+                    setShowErrorModal(false);
+                    setActiveTab('payruns');
+                  }}
+                  style={{
+                    padding: '10px 22px',
+                    borderRadius: '10px',
+                    fontSize: '0.9rem',
+                    fontWeight: 600,
+                    background: 'var(--accent-primary)',
+                    borderColor: 'var(--accent-primary)'
+                  }}
+                >
+                  <i className="fa-solid fa-play" style={{ marginRight: '8px' }}></i>
+                  Go to Pay Runs
+                </button>
+              )}
+              <button
+                className="btn btn-outline"
+                onClick={() => setShowErrorModal(false)}
+                style={{
+                  padding: '10px 24px',
+                  borderRadius: '10px',
+                  fontSize: '0.9rem',
+                  fontWeight: 600,
+                  borderColor: 'rgba(255, 255, 255, 0.2)'
+                }}
+              >
+                Understood
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -69,6 +69,25 @@ def export_excel(
     )
 
 
+@router.get("/export/excel/{document_id}")
+def export_excel_by_id(
+    document_id: str,
+    saved_only: Optional[bool] = False,
+    db: Session = Depends(get_db)
+):
+    file_path = ExcelService.generate_inventory_excel(
+        db,
+        document_id=document_id,
+        saved_only=saved_only
+    )
+    filename = f"invoice_{document_id}.xlsx"
+    return FileResponse(
+        path=file_path,
+        filename=filename,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+
 @router.get(
     "/export/summary/{document_id}"
 )

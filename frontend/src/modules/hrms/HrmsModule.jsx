@@ -1,28 +1,56 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { api } from './services/api';
+import { isActiveEmployee } from './utils/helpers';
 
 // Components
 import Login from './components/Login';
 import Sidebar from './components/Sidebar';
 
-// Views
-import DashboardView from './components/views/DashboardView';
-import EmployeesView from './components/views/EmployeesView';
-import AttendanceView from './components/views/AttendanceView';
-import LeavesView from './components/views/LeavesView';
-import ExpensesView from './components/views/ExpensesView';
-import PayrollView from './components/views/PayrollView/index.jsx';
-import LiveTrackingView from './components/views/LiveTrackingView';
-import RouteReplayView from './components/views/RouteReplayView';
-import GeofenceView from './components/views/GeofenceView';
-import DocumentsView from './components/views/DocumentsView';
-import MediaView from './components/views/MediaView';
-import EmployeeTrackingView from './components/views/EmployeeTrackingView';
-import NotificationCenter from './components/views/NotificationCenter/NotificationCenter';
-import SiteInfoView from './components/views/SiteInfoView';
-import SettingsView from './components/views/SettingsView';
-import WhatsAppNotificationSettingsView from './components/views/WhatsAppNotificationSettingsView';
 import LoadingSpinner from './components/LoadingSpinner';
+
+// Core High-Frequency Dashboard View (Bundled synchronously for 0ms initial render)
+import DashboardView from './components/views/DashboardView';
+
+// Code-Split Operational Views (Loaded on demand & idle preloaded to keep initial bundle tiny <65KB)
+const EmployeesView = React.lazy(() => import('./components/views/EmployeesView'));
+const AttendanceView = React.lazy(() => import('./components/views/AttendanceView'));
+const LeavesView = React.lazy(() => import('./components/views/LeavesView'));
+const LeaveBalancesView = React.lazy(() => import('./components/views/LeaveBalancesView'));
+const EmployeeLeaveLedgerView = React.lazy(() => import('./components/views/EmployeeLeaveLedgerView'));
+const ExpensesView = React.lazy(() => import('./components/views/ExpensesView'));
+const PayrollView = React.lazy(() => import('./components/views/PayrollView/index.jsx'));
+const LiveTrackingView = React.lazy(() => import('./components/views/LiveTrackingView'));
+const RouteReplayView = React.lazy(() => import('./components/views/RouteReplayView'));
+const GeofenceView = React.lazy(() => import('./components/views/GeofenceView'));
+const DocumentsView = React.lazy(() => import('./components/views/DocumentsView'));
+const MediaView = React.lazy(() => import('./components/views/MediaView'));
+const EmployeeTrackingView = React.lazy(() => import('./components/views/EmployeeTrackingView'));
+const NotificationCenter = React.lazy(() => import('./components/views/NotificationCenter/NotificationCenter'));
+const SiteInfoView = React.lazy(() => import('./components/views/SiteInfoView'));
+const SettingsView = React.lazy(() => import('./components/views/SettingsView'));
+const WhatsAppNotificationSettingsView = React.lazy(() => import('./components/views/WhatsAppNotificationSettingsView'));
+
+// Immediately kick off parallel download of the active route's chunk on cold/hard load
+if (typeof window !== 'undefined') {
+    const curPath = window.location.pathname;
+    if (curPath.includes('/attendance')) import('./components/views/AttendanceView');
+    else if (curPath.includes('/employees')) import('./components/views/EmployeesView');
+    else if (curPath.includes('/live-tracking')) import('./components/views/LiveTrackingView');
+    else if (curPath.includes('/route-replay')) import('./components/views/RouteReplayView');
+    else if (curPath.includes('/geofence')) import('./components/views/GeofenceView');
+    else if (curPath.includes('/site-info')) import('./components/views/SiteInfoView');
+    else if (curPath.includes('/documents')) import('./components/views/DocumentsView');
+    else if (curPath.includes('/payroll')) import('./components/views/PayrollView/index.jsx');
+    else if (curPath.includes('/leaves/balances/detail')) import('./components/views/EmployeeLeaveLedgerView');
+    else if (curPath.includes('/leaves/balances')) import('./components/views/LeaveBalancesView');
+    else if (curPath.includes('/leaves')) import('./components/views/LeavesView');
+    else if (curPath.includes('/expenses')) import('./components/views/ExpensesView');
+    else if (curPath.includes('/media')) import('./components/views/MediaView');
+    else if (curPath.includes('/notifications')) import('./components/views/NotificationCenter/NotificationCenter');
+    else if (curPath.includes('/settings')) import('./components/views/SettingsView');
+    else if (curPath.includes('/whatsapp')) import('./components/views/WhatsAppNotificationSettingsView');
+}
 
 import './index.css';
 
@@ -31,6 +59,8 @@ const getInitialView = () => {
     if (path === '/hrms/employees/addemp' || path === '/employees/addemp') return 'add-employee-view';
     if (path === '/hrms/employees' || path === '/employees') return 'employees-view';
     if (path === '/hrms/attendance' || path === '/hrms/attendence' || path === '/attendance' || path === '/attendence') return 'attendance-view';
+    if (path === '/hrms/leaves/balances/detail') return 'leave-balance-detail-view';
+    if (path === '/hrms/leaves/balances') return 'leave-balances-view';
     if (path === '/hrms/leaves' || path === '/leaves') return 'leaves-view';
     if (path === '/hrms/expenses' || path === '/expenses') return 'expenses-view';
     if (path === '/hrms/payroll' || path === '/payroll') return 'payroll-view';
@@ -50,11 +80,16 @@ const getInitialView = () => {
     return savedView || 'dashboard-view';
 };
 
-const getPathForView = (view, employeeId, employeeName = '', origin = null) => {
+const getPathForView = (view, employeeId, employeeName = '', origin = null, date = null) => {
     if (view === 'add-employee-view') return '/hrms/employees/addemp';
     if (view === 'employees-view') return '/hrms/employees';
     if (view === 'attendance-view') return '/hrms/attendance';
     if (view === 'leaves-view') return '/hrms/leaves';
+    if (view === 'leave-balances-view') return '/hrms/leaves/balances';
+    // For the ledger view, `date` carries the selected year.
+    if (view === 'leave-balance-detail-view') {
+        return `/hrms/leaves/balances/detail?id=${encodeURIComponent(employeeId || '')}${date ? `&year=${encodeURIComponent(date)}` : ''}`;
+    }
     if (view === 'expenses-view') return '/hrms/expenses';
     if (view === 'payroll-view') return '/hrms/payroll';
     if (view === 'live-tracking-view') return '/hrms/live-tracking';
@@ -67,8 +102,10 @@ const getPathForView = (view, employeeId, employeeName = '', origin = null) => {
         const activeName = employeeName || sessionStorage.getItem('trackingName') || '';
         const nameQuery = activeName ? `&name=${encodeURIComponent(activeName)}` : '';
         const originQuery = `&origin=${activeOrigin}`;
+        const activeDate = date || sessionStorage.getItem('trackingDate') || '';
+        const dateQuery = activeDate ? `&date=${encodeURIComponent(activeDate)}` : '';
         const basePath = activeOrigin === 'attendance-view' ? '/hrms/attendance/tracking' : '/hrms/employees/tracking';
-        return `${basePath}?id=${employeeId || ''}${nameQuery}${originQuery}`;
+        return `${basePath}?id=${employeeId || ''}${nameQuery}${originQuery}${dateQuery}`;
     }
     if (view === 'notifications-view') return '/hrms/notifications';
     if (view === 'whatsapp-settings-view') return '/hrms/whatsapp-settings';
@@ -109,6 +146,11 @@ function App() {
     const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'light');
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => localStorage.getItem('isSidebarCollapsed') === 'true');
+    const [badgeCounts, setBadgeCounts] = useState({
+        'leaves-view': 0,
+        'expenses-view': 0,
+        'notifications-view': 0
+    });
 
     useEffect(() => {
         if (theme === 'dark') {
@@ -123,10 +165,26 @@ function App() {
         setTheme(prev => prev === 'light' ? 'dark' : 'light');
     };
 
-    const navigateToView = (view, employeeId = null, employeeName = '', origin = null) => {
-        const path = getPathForView(view, employeeId, employeeName, origin);
+    const navigate = useNavigate();
+    const location = useLocation();
+
+
+
+
+    // A view with unsaved edits registers a guard; it returns false to cancel navigation.
+    const navigationGuardRef = React.useRef(null);
+    const currentPathRef = React.useRef(window.location.pathname + window.location.search);
+    const registerNavigationGuard = React.useCallback((guard) => { navigationGuardRef.current = guard; }, []);
+    const [routeSearch, setRouteSearch] = useState(() => window.location.search);
+
+    const navigateToView = (view, employeeId = null, employeeName = '', origin = null, date = null) => {
+        if (navigationGuardRef.current && !navigationGuardRef.current()) return;
+        navigationGuardRef.current = null;
+        const path = getPathForView(view, employeeId, employeeName, origin, date);
         window.history.pushState(null, '', path);
+        currentPathRef.current = path;
         localStorage.setItem('activeHrmsView', view);
+        setRouteSearch(window.location.search);
         setCurrentView(view);
     };
 
@@ -141,7 +199,9 @@ function App() {
             const params = new URLSearchParams(window.location.search);
             employeeId = params.get('id');
         }
-        const path = getPathForView(initial, employeeId);
+        const path = initial === 'leave-balance-detail-view'
+            ? window.location.pathname + window.location.search
+            : getPathForView(initial, employeeId);
         window.history.replaceState(null, '', path);
     };
 
@@ -173,12 +233,96 @@ function App() {
     useEffect(() => {
         if (adminUser && token) {
             refreshEmployees();
+            
+            // Prefetch secondary view code and data during idle time to prevent network saturation at startup
+            const prefetchIdleViews = () => {
+                import('./components/views/LeavesView');
+                api.getLeaves().catch(() => {});
+                import('./components/views/ExpensesView');
+                import('./components/views/PayrollView/index.jsx');
+                import('./components/views/DocumentsView');
+                import('./components/views/SettingsView');
+            };
+
+            if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+                const idleId = window.requestIdleCallback(prefetchIdleViews, { timeout: 4000 });
+                return () => window.cancelIdleCallback(idleId);
+            } else {
+                const timer = setTimeout(prefetchIdleViews, 2500);
+                return () => clearTimeout(timer);
+            }
+        }
+    }, [adminUser, token]);
+
+    // Optimistic local state update on employee modifications
+    useEffect(() => {
+        const handleEmployeeUpdated = (e) => {
+            const updated = e.detail;
+            if (!updated) return;
+            if (updated.action === 'delete') {
+                setEmployees(prev => prev.filter(emp => emp.id !== updated.id));
+            } else if (updated.id) {
+                setEmployees(prev => prev.map(emp => emp.id === updated.id ? { ...emp, ...updated } : emp));
+            }
+        };
+        window.addEventListener('employee-updated', handleEmployeeUpdated);
+        return () => window.removeEventListener('employee-updated', handleEmployeeUpdated);
+    }, []);
+
+    // Real-time Badge Counts Sync (Leaves, Expenses, Notifications)
+    const refreshBadgeCounts = async () => {
+        if (!adminUser || !token) return;
+        try {
+            const [summaryRes, notifRes] = await Promise.allSettled([
+                api.getDashboardSummary(true),
+                api.getNotificationStats()
+            ]);
+
+            const nextBadges = {};
+            if (summaryRes.status === 'fulfilled' && summaryRes.value) {
+                nextBadges['leaves-view'] = Number(summaryRes.value.pendingLeavesCount || 0);
+                nextBadges['expenses-view'] = Number(summaryRes.value.pendingExpensesCount || 0);
+            }
+            if (notifRes.status === 'fulfilled' && notifRes.value?.success && notifRes.value?.data) {
+                nextBadges['notifications-view'] = Number(notifRes.value.data.pendingNotifications || 0);
+            }
+
+            setBadgeCounts(prev => ({
+                ...prev,
+                ...nextBadges
+            }));
+        } catch (err) {
+            console.warn('Failed to refresh sidebar badges:', err);
+        }
+    };
+
+    useEffect(() => {
+        if (adminUser && token) {
+            refreshBadgeCounts();
+            const interval = setInterval(refreshBadgeCounts, 30000); // 30s background poll
+            const handleFocus = () => refreshBadgeCounts();
+            const handleCustomSync = () => refreshBadgeCounts();
+            window.addEventListener('focus', handleFocus);
+            window.addEventListener('hrms-badge-sync', handleCustomSync);
+
+            return () => {
+                clearInterval(interval);
+                window.removeEventListener('focus', handleFocus);
+                window.removeEventListener('hrms-badge-sync', handleCustomSync);
+            };
         }
     }, [adminUser, token]);
 
     // Handle back/forward popstate
     useEffect(() => {
         const handlePopState = () => {
+            if (navigationGuardRef.current && !navigationGuardRef.current()) {
+                window.history.pushState(null, '', currentPathRef.current);
+                return;
+            }
+            navigationGuardRef.current = null;
+            currentPathRef.current = window.location.pathname + window.location.search;
+            setRouteSearch(window.location.search);
             const initial = getInitialView();
             setCurrentView(initial);
             const params = new URLSearchParams(window.location.search);
@@ -214,6 +358,8 @@ function App() {
             'employees-view': 'Employees',
             'attendance-view': 'Attendance Logs',
             'leaves-view': 'Leave Management',
+            'leave-balances-view': 'Leave Management',
+            'leave-balance-detail-view': 'Leave Management',
             'expenses-view': 'Expenses & Claims',
             'payroll-view': 'Payroll & Salary Management',
             'live-tracking-view': 'Live Employee Tracking',
@@ -229,7 +375,7 @@ function App() {
         return titleMap[currentView] || 'Overview';
     };
 
-    const handleSelectEmployee = (id, name) => {
+    const handleSelectEmployee = (id, name, date = null) => {
         const origin = currentView === 'attendance-view' ? 'attendance-view' : 'employees-view';
         setTrackingOrigin(origin);
         setSelectedEmployeeId(id);
@@ -237,7 +383,8 @@ function App() {
         sessionStorage.setItem('trackingOrigin', origin);
         sessionStorage.setItem('trackingName', name || '');
         sessionStorage.setItem('trackingId', id || '');
-        navigateToView('employee-tracking-view', id, name, origin);
+        if (date) sessionStorage.setItem('trackingDate', date);
+        navigateToView('employee-tracking-view', id, name, origin, date);
         setIsSidebarOpen(false);
     };
 
@@ -256,6 +403,7 @@ function App() {
     }
 
     const isFullViewportView = currentView === 'live-tracking-view' || currentView === 'route-replay-view';
+    const activeEmployees = employees.filter(isActiveEmployee);
 
     return (
         <div id="dashboard-screen" className={isSidebarCollapsed ? 'sidebar-collapsed' : ''}>
@@ -264,6 +412,7 @@ function App() {
                 adminUser={adminUser} 
                 currentView={currentView}
                 trackingOrigin={trackingOrigin}
+                badgeCounts={badgeCounts}
                 onViewChange={(view) => {
                     navigateToView(view);
                     setIsSidebarOpen(false);
@@ -317,56 +466,88 @@ function App() {
                 </header>
 
                 <div className="content-wrapper custom-scrollbar" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflowY: 'auto', paddingBottom: '12px' }}>
-                    {currentView === 'dashboard-view' && (
-                        <DashboardView 
-                            totalEmployees={employees.length} 
-                            onViewChange={navigateToView}
-                        />
-                    )}
-                    {currentView === 'employees-view' && (
-                        <EmployeesView 
-                            employees={employees} 
-                            onSelectEmployee={handleSelectEmployee}
-                            refreshEmployees={refreshEmployees}
-                            navigateToView={navigateToView}
-                        />
-                    )}
-                    {currentView === 'add-employee-view' && (
-                        <EmployeesView 
-                            employees={employees} 
-                            onSelectEmployee={handleSelectEmployee}
-                            refreshEmployees={refreshEmployees}
-                            initialAddMode={true}
-                            navigateToView={navigateToView}
-                        />
-                    )}
-                    {currentView === 'attendance-view' && <AttendanceView employees={employees} onSelectEmployee={handleSelectEmployee} />}
-                    {currentView === 'leaves-view' && <LeavesView employees={employees} />}
-                    {currentView === 'expenses-view' && <ExpensesView employees={employees} />}
-                    {currentView === 'payroll-view' && <PayrollView employees={employees} adminUser={adminUser} />}
-                    {currentView === 'live-tracking-view' && <LiveTrackingView employees={employees} />}
-                    {currentView === 'route-replay-view' && <RouteReplayView employees={employees} />}
-                    {currentView === 'geofence-view' && <GeofenceView />}
-                    {currentView === 'documents-view' && (
-                        <DocumentsView 
-                            employees={employees} 
-                            adminUser={adminUser}
-                        />
-                    )}
-                    {currentView === 'media-view' && <MediaView employees={employees} />}
-                    {currentView === 'employee-tracking-view' && (
-                        <EmployeeTrackingView 
-                            userId={selectedEmployeeId}
-                            userName={selectedEmployeeName}
-                            employees={employees}
-                            onBack={handleBackToEmployees}
-                            backText={trackingOrigin === 'attendance-view' ? 'Back to Attendance' : 'Back to Employees'}
-                        />
-                    )}
-                    {currentView === 'notifications-view' && <NotificationCenter />}
-                    {currentView === 'whatsapp-settings-view' && <WhatsAppNotificationSettingsView />}
-                    {currentView === 'site-info-view' && <SiteInfoView employees={employees} />}
-                    {currentView === 'settings-view' && <SettingsView />}
+                    <React.Suspense fallback={
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '16px', height: '100%' }}>
+                            <div style={{ height: '48px', background: 'var(--panel-bg)', borderRadius: '10px', opacity: 0.5, border: '1px solid var(--border-glass)' }}></div>
+                            <div style={{ flex: 1, background: 'var(--panel-bg)', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.5, border: '1px solid var(--border-glass)' }}>
+                                <LoadingSpinner size={36} message="" minHeight="120px" />
+                            </div>
+                        </div>
+                    }>
+                        {currentView === 'dashboard-view' && (
+                            <DashboardView 
+                                employees={activeEmployees} 
+                                totalEmployees={employees.filter(e => String(e?.status || 'ACTIVE').toUpperCase() === 'ACTIVE' && !e?.isSystemAccount && !e?.is_system_account).length} 
+                                onViewChange={navigateToView}
+                            />
+                        )}
+                        {currentView === 'employees-view' && (
+                            <EmployeesView 
+                                employees={employees} 
+                                onSelectEmployee={handleSelectEmployee}
+                                refreshEmployees={refreshEmployees}
+                                navigateToView={navigateToView}
+                            />
+                        )}
+                        {currentView === 'add-employee-view' && (
+                            <EmployeesView 
+                                employees={employees} 
+                                onSelectEmployee={handleSelectEmployee}
+                                refreshEmployees={refreshEmployees}
+                                initialAddMode={true}
+                                navigateToView={navigateToView}
+                            />
+                        )}
+                        {currentView === 'attendance-view' && <AttendanceView employees={employees} activeEmployees={activeEmployees} onSelectEmployee={handleSelectEmployee} />}
+                        {currentView === 'leaves-view' && <LeavesView employees={employees} activeEmployees={activeEmployees} onOpenBalances={() => navigateToView('leave-balances-view')} />}
+                        {currentView === 'leave-balances-view' && (
+                            <LeaveBalancesView
+                                onOpenEmployee={(employeeId, year) => navigateToView('leave-balance-detail-view', employeeId, '', null, year)}
+                                onBackToRequests={() => navigateToView('leaves-view')}
+                            />
+                        )}
+                        {currentView === 'leave-balance-detail-view' && (
+                            <EmployeeLeaveLedgerView
+                                key={routeSearch}
+                                employeeId={new URLSearchParams(routeSearch).get('id')}
+                                initialYear={new URLSearchParams(routeSearch).get('year')}
+                                adminUser={adminUser}
+                                onBack={() => navigateToView('leave-balances-view')}
+                                onYearChange={(year) => {
+                                    const id = new URLSearchParams(routeSearch).get('id');
+                                    const path = getPathForView('leave-balance-detail-view', id, '', null, year);
+                                    window.history.replaceState(null, '', path);
+                                    currentPathRef.current = path;
+                                }}
+                                registerNavigationGuard={registerNavigationGuard}
+                            />
+                        )}
+                        {currentView === 'expenses-view' && <ExpensesView employees={employees} />}
+                        {currentView === 'payroll-view' && <PayrollView employees={employees} adminUser={adminUser} />}
+                        {currentView === 'live-tracking-view' && <LiveTrackingView employees={activeEmployees} />}
+                        {currentView === 'route-replay-view' && <RouteReplayView employees={activeEmployees} />}
+                        {currentView === 'geofence-view' && <GeofenceView />}
+                        {currentView === 'documents-view' && (
+                            <DocumentsView 
+                                employees={employees} 
+                                adminUser={adminUser}
+                            />
+                        )}
+                        {currentView === 'media-view' && <MediaView employees={employees} />}
+                        {currentView === 'employee-tracking-view' && (
+                            <EmployeeTrackingView 
+                                userId={selectedEmployeeId}
+                                userName={selectedEmployeeName}
+                                employees={employees}
+                                onBack={handleBackToEmployees}
+                                backText={trackingOrigin === 'attendance-view' ? 'Back to Attendance' : 'Back to Employees'}
+                            />
+                        )}
+                        {currentView === 'notifications-view' && <NotificationCenter />}
+                        {currentView === 'whatsapp-settings-view' && <WhatsAppNotificationSettingsView />}
+                        {currentView === 'site-info-view' && <SiteInfoView employees={activeEmployees} />}
+                        {currentView === 'settings-view' && <SettingsView />}
+                    </React.Suspense>
                 </div>
             </main>
         </div>

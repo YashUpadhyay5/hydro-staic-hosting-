@@ -212,6 +212,8 @@ const getStatusBadgeStyle = (status = "") => {
 
 export default function UploadPage() {
   const { documents, loadDocuments, showToast } = useOutletContext();
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 25;
   const [dragOver, setDragOver] = useState(false);
   const [localUploading, setLocalUploading] = useState(false);
   const fileInputRef = useRef(null);
@@ -435,7 +437,7 @@ export default function UploadPage() {
 
   const handleDownloadExcel = () => {
     if (!selectedDocument) return;
-    window.open(`http://${window.location.hostname}:8000/api/export/excel/${selectedDocument.document_id}`, "_blank");
+    window.open(`/api/export/excel/${selectedDocument.document_id}`, "_blank");
   };
 
   const handlePrint = () => {
@@ -578,69 +580,114 @@ export default function UploadPage() {
             Total Invoices: {documents.length}
           </span>
         </div>
-        <div className="ocr-section-content" style={{ padding: 0, overflowY: "auto", flex: 1 }}>
+        <div className="ocr-section-content" style={{ padding: 0, overflowY: "auto", flex: 1, display: "flex", flexDirection: "column" }}>
           {documents.length === 0 ? (
             <div style={{ padding: "40px", textAlign: "center", color: "var(--text-secondary)" }}>
               No uploaded documents found. Drag & drop files above to start.
             </div>
           ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px", textAlign: "left" }}>
-              <thead>
-                <tr style={{ background: "var(--bg-table-header)", borderBottom: "1px solid var(--border-color)" }}>
-                  <th style={{ padding: "12px 16px", fontWeight: "600", color: "var(--text-secondary)" }}>Invoice File</th>
-                  <th style={{ padding: "12px 16px", fontWeight: "600", color: "var(--text-secondary)" }}>Upload Time</th>
-                  <th style={{ padding: "12px 16px", fontWeight: "600", color: "var(--text-secondary)" }}>Status</th>
-                  <th style={{ padding: "12px 16px", fontWeight: "600", color: "var(--text-secondary)" }}>Processing Time</th>
-                  <th style={{ padding: "12px 16px", fontWeight: "600", color: "var(--text-secondary)", textAlign: "right" }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {documents.map((doc) => (
-                  <tr 
-                    key={doc.document_id} 
-                    style={{ borderBottom: "1px solid var(--border-color)", cursor: "pointer" }}
-                    onClick={() => handleSelectDocument(doc)}
-                  >
-                    <td style={{ padding: "12px 16px", fontWeight: "500", color: "var(--text-primary)" }}>{doc.filename}</td>
-                    <td style={{ padding: "12px 16px", color: "var(--text-secondary)" }}>{formatTime(doc.created_at)}</td>
-                    <td style={{ padding: "12px 16px" }}>
-                      <span className="status-badge" style={getStatusBadgeStyle(doc.status)}>
-                        {doc.status}
+            <>
+              <div style={{ flex: 1, overflowY: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px", textAlign: "left" }}>
+                  <thead>
+                    <tr style={{ background: "var(--bg-table-header)", borderBottom: "1px solid var(--border-color)" }}>
+                      <th style={{ padding: "12px 16px", fontWeight: "600", color: "var(--text-secondary)" }}>Invoice File</th>
+                      <th style={{ padding: "12px 16px", fontWeight: "600", color: "var(--text-secondary)" }}>Upload Time</th>
+                      <th style={{ padding: "12px 16px", fontWeight: "600", color: "var(--text-secondary)" }}>Status</th>
+                      <th style={{ padding: "12px 16px", fontWeight: "600", color: "var(--text-secondary)" }}>Processing Time</th>
+                      <th style={{ padding: "12px 16px", fontWeight: "600", color: "var(--text-secondary)", textAlign: "right" }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(() => {
+                      const totalPages = Math.ceil(documents.length / pageSize) || 1;
+                      const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+                      const paginatedDocs = documents.slice((safeCurrentPage - 1) * pageSize, safeCurrentPage * pageSize);
+                      return paginatedDocs.map((doc) => (
+                        <tr 
+                          key={doc.document_id} 
+                          style={{ borderBottom: "1px solid var(--border-color)", cursor: "pointer" }}
+                          onClick={() => handleSelectDocument(doc)}
+                        >
+                          <td style={{ padding: "12px 16px", fontWeight: "500", color: "var(--text-primary)" }}>{doc.filename}</td>
+                          <td style={{ padding: "12px 16px", color: "var(--text-secondary)" }}>{formatTime(doc.created_at)}</td>
+                          <td style={{ padding: "12px 16px" }}>
+                            <span className="status-badge" style={getStatusBadgeStyle(doc.status)}>
+                              {doc.status}
+                            </span>
+                          </td>
+                          <td style={{ padding: "12px 16px", color: "var(--text-secondary)" }}>
+                            {doc.processing_time_ms ? `${(parseFloat(doc.processing_time_ms) / 1000).toFixed(1)}s` : "-"}
+                          </td>
+                          <td style={{ padding: "12px 16px", textAlign: "right" }}>
+                            <div style={{ display: "inline-flex", gap: "8px" }}>
+                              <button
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  showToast(`Downloading "${doc.filename}"...`);
+                                  await downloadInvoiceFile(doc);
+                                }}
+                                className="btn btn-secondary"
+                                style={{ padding: "4px 10px", fontSize: "11px", borderRadius: "var(--radius-sm)", height: "auto", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                                title="Download original invoice file"
+                              >
+                                📥 Download
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleSelectDocument(doc);
+                                }}
+                                className="btn btn-ghost"
+                                style={{ padding: "4px 12px", fontSize: "11px", borderRadius: "var(--radius-sm)", height: "auto" }}
+                              >
+                                View Details
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ));
+                    })()}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* High-Performance Pagination Bar */}
+              {documents.length > pageSize && (() => {
+                const totalPages = Math.ceil(documents.length / pageSize) || 1;
+                const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+                const startIdx = (safeCurrentPage - 1) * pageSize + 1;
+                const endIdx = Math.min(safeCurrentPage * pageSize, documents.length);
+                return (
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", borderTop: "1px solid var(--border-color)", background: "var(--bg-table-header)", fontSize: "12px" }}>
+                    <span style={{ color: "var(--text-secondary)" }}>
+                      Showing <strong>{startIdx}</strong> to <strong>{endIdx}</strong> of <strong>{documents.length}</strong> invoices
+                    </span>
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                      <button
+                        disabled={safeCurrentPage <= 1}
+                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                        className="btn btn-secondary"
+                        style={{ padding: "4px 10px", fontSize: "11px", height: "auto", cursor: safeCurrentPage <= 1 ? "not-allowed" : "pointer" }}
+                      >
+                        ← Prev
+                      </button>
+                      <span style={{ padding: "0 8px", color: "var(--text-primary)", fontWeight: "600" }}>
+                        Page {safeCurrentPage} of {totalPages}
                       </span>
-                    </td>
-                    <td style={{ padding: "12px 16px", color: "var(--text-secondary)" }}>
-                      {doc.processing_time_ms ? `${(parseFloat(doc.processing_time_ms) / 1000).toFixed(1)}s` : "-"}
-                    </td>
-                    <td style={{ padding: "12px 16px", textAlign: "right" }}>
-                      <div style={{ display: "inline-flex", gap: "8px" }}>
-                        <button
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            showToast(`Downloading "${doc.filename}"...`);
-                            await downloadInvoiceFile(doc);
-                          }}
-                          className="btn btn-secondary"
-                          style={{ padding: "4px 10px", fontSize: "11px", borderRadius: "var(--radius-sm)", height: "auto", display: "inline-flex", alignItems: "center", gap: "4px" }}
-                          title="Download original invoice file"
-                        >
-                          📥 Download
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleSelectDocument(doc);
-                          }}
-                          className="btn btn-ghost"
-                          style={{ padding: "4px 12px", fontSize: "11px", borderRadius: "var(--radius-sm)", height: "auto" }}
-                        >
-                          View Details
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                      <button
+                        disabled={safeCurrentPage >= totalPages}
+                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                        className="btn btn-secondary"
+                        style={{ padding: "4px 10px", fontSize: "11px", height: "auto", cursor: safeCurrentPage >= totalPages ? "not-allowed" : "pointer" }}
+                      >
+                        Next →
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+            </>
           )}
         </div>
       </div>

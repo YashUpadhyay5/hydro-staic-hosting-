@@ -58,7 +58,6 @@ export default function ArchivePage() {
   const [filterDate, setFilterDate] = useState("");
   const [sortBy, setSortBy] = useState("date_desc");
   const [auditLog, setAuditLog] = useState(null);
-  const [hasAutoSelected, setHasAutoSelected] = useState(false);
   const [activeTemplate, setActiveTemplate] = useState(null);
   const [dynamicFilters, setDynamicFilters] = useState({});
   const [showExcelModal, setShowExcelModal] = useState(false);
@@ -73,24 +72,22 @@ export default function ArchivePage() {
     }
   };
 
-  const loadArchived = async () => {
+  const loadArchived = async (isInitial = false) => {
     try {
-      setLoading(true);
+      if (isInitial) setLoading(true);
       const res = await API.get("/documents");
       const docs = (res.data || []).filter(d => d.status === "ARCHIVED");
       setArchived(docs);
     } catch (e) {
       console.error("Failed to load archive:", e);
     } finally {
-      setLoading(false);
+      if (isInitial) setLoading(false);
     }
   };
 
   useEffect(() => {
     loadTemplates();
-    loadArchived();
-    const interval = setInterval(loadArchived, 10000);
-    return () => clearInterval(interval);
+    loadArchived(true);
   }, []);
 
   const handleRestore = async (doc) => {
@@ -124,7 +121,7 @@ export default function ArchivePage() {
 
   const handlePrint = (doc) => {
     const token = localStorage.getItem("token") || "";
-    window.open(`http://${window.location.hostname}:8000/api/documents/${doc.document_id}/file?token=${token}`, "_blank");
+    window.open(`/api/documents/${doc.document_id}/file?token=${token}`, "_blank");
   };
 
   const handleSelectDoc = async (doc) => {
@@ -133,6 +130,8 @@ export default function ArchivePage() {
       setSelectedDoc(null);
       return;
     }
+    // Set clicked doc immediately to prevent stale details mismatch
+    setSelectedDoc(doc);
     try {
       const res = await API.get(`/documents/${doc.document_id}`);
       setSelectedDoc(res.data);
@@ -258,22 +257,6 @@ export default function ArchivePage() {
     return sum + grandTotal;
   }, 0);
 
-  useEffect(() => {
-    if (!loading && filtered.length > 0 && !selectedDoc && !hasAutoSelected) {
-      setHasAutoSelected(true);
-      const doc = filtered[0];
-      const fetchDetails = async () => {
-        try {
-          const res = await API.get(`/documents/${doc.document_id}`);
-          setSelectedDoc(res.data);
-        } catch (e) {
-          console.error("Failed to fetch default document details:", e);
-          setSelectedDoc(doc);
-        }
-      };
-      fetchDetails();
-    }
-  }, [loading, filtered, selectedDoc, hasAutoSelected]);
 
   return (
     <div className="page-archive">
@@ -284,6 +267,28 @@ export default function ArchivePage() {
           <p className="page-subtitle">{archived.length} verified invoice(s) • Total: ₹{totalAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</p>
         </div>
         <div className="page-header-right" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+          <button
+            className="btn btn-ghost"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              padding: "9px 14px",
+              borderRadius: "8px",
+              fontSize: "13px",
+              fontWeight: "500",
+              cursor: "pointer",
+              border: "1px solid var(--border-color, #e2e8f0)"
+            }}
+            onClick={() => loadArchived(false)}
+            title="Refresh Archive"
+          >
+            <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+            </svg>
+            Refresh
+          </button>
           <button
             className="btn"
             style={{
@@ -548,7 +553,7 @@ function ArchiveDetailView({ doc, onClose }) {
             }}
             onClick={() => {
               const token = localStorage.getItem("token") || "";
-              window.open(`http://${window.location.hostname}:8000/api/export/excel?document_id=${encodeURIComponent(doc.document_id)}&token=${token}`, "_blank");
+              window.open(`/api/export/excel?document_id=${encodeURIComponent(doc.document_id)}&token=${token}`, "_blank");
             }}
           >
             <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">

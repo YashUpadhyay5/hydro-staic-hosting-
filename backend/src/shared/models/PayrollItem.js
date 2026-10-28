@@ -17,6 +17,11 @@ const PayrollItem = sequelize.define('PayrollItem', {
     field: 'employee_id',
     allowNull: false,
   },
+  workingDays: {
+    type: DataTypes.DOUBLE,
+    field: 'working_days',
+    defaultValue: 30,
+  },
   workedDays: {
     type: DataTypes.DOUBLE,
     field: 'worked_days',
@@ -113,7 +118,11 @@ const PayrollItem = sequelize.define('PayrollItem', {
 }, {
   tableName: 'payroll_items',
   timestamps: true,
-  underscored: true
+  underscored: true,
+  indexes: [
+    { fields: ['payroll_run_id', 'employee_id'] },
+    { fields: ['payroll_run_id'] }
+  ]
 });
 
 module.exports = PayrollItem;

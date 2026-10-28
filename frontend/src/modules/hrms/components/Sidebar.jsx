@@ -1,7 +1,29 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
+import { api } from '../services/api';
 
-export default function Sidebar({ adminUser, currentView, trackingOrigin, onViewChange, onLogout, isSidebarOpen, isCollapsed, onToggleCollapse }) {
+const prefetchViewChunk = (viewId) => {
+    switch (viewId) {
+        case 'leaves-view': 
+            import('./views/LeavesView'); 
+            api.getLeaves().catch(() => {});
+            break;
+        case 'expenses-view': import('./views/ExpensesView'); break;
+        case 'payroll-view': import('./views/PayrollView/index.jsx'); break;
+        case 'live-tracking-view': import('./views/LiveTrackingView'); break;
+        case 'route-replay-view': import('./views/RouteReplayView'); break;
+        case 'geofence-view': import('./views/GeofenceView'); break;
+        case 'site-info-view': import('./views/SiteInfoView'); break;
+        case 'documents-view': import('./views/DocumentsView'); break;
+        case 'media-view': import('./views/MediaView'); break;
+        case 'notifications-view': import('./views/NotificationCenter/NotificationCenter'); break;
+        case 'whatsapp-settings-view': import('./views/WhatsAppNotificationSettingsView'); break;
+        case 'settings-view': import('./views/SettingsView'); break;
+        default: break;
+    }
+};
+
+export default function Sidebar({ adminUser, currentView, trackingOrigin, onViewChange, onLogout, isSidebarOpen, isCollapsed, onToggleCollapse, badgeCounts = {} }) {
     const [isHovered, setIsHovered] = React.useState(false);
     
     const navSections = [
@@ -47,7 +69,9 @@ export default function Sidebar({ adminUser, currentView, trackingOrigin, onView
     const isExpanded = !isCollapsed || isHovered;
 
     // Determine parent route if viewing employee-tracking-view
-    const effectiveActiveView = currentView === 'employee-tracking-view' ? (trackingOrigin || 'attendance-view') : currentView;
+    const effectiveActiveView = currentView === 'employee-tracking-view'
+        ? (trackingOrigin || 'attendance-view')
+        : (currentView === 'leave-balances-view' || currentView === 'leave-balance-detail-view') ? 'leaves-view' : currentView;
 
     const userRole = String(adminUser?.role || 'ADMIN').toUpperCase();
     const isTrackingManager = userRole === 'TRACKING_MANAGER';
@@ -135,6 +159,14 @@ export default function Sidebar({ adminUser, currentView, trackingOrigin, onView
                             )}
 
                             {visibleItems.map(item => {
+                                const badgeCount = Number(badgeCounts[item.id] || 0);
+                                const hasBadge = badgeCount > 0;
+                                const badgeTheme = item.id === 'leaves-view'
+                                    ? { bg: 'linear-gradient(135deg, #f59e0b, #d97706)', shadow: 'rgba(245, 158, 11, 0.45)' }
+                                    : item.id === 'expenses-view'
+                                    ? { bg: 'linear-gradient(135deg, #10b981, #059669)', shadow: 'rgba(16, 185, 129, 0.45)' }
+                                    : { bg: 'linear-gradient(135deg, #ef4444, #dc2626)', shadow: 'rgba(239, 68, 68, 0.45)' };
+
                                 if (item.isExternal) {
                                     return (
                                         <Link 
@@ -143,8 +175,35 @@ export default function Sidebar({ adminUser, currentView, trackingOrigin, onView
                                             className="nav-item"
                                             title={!isExpanded ? item.label : undefined}
                                         >
-                                            <i className={`fa-solid ${item.icon}`}></i>
+                                            <div className="nav-icon-box" style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                <i className={`fa-solid ${item.icon}`}></i>
+                                                {!isExpanded && hasBadge && (
+                                                    <span 
+                                                        className="nav-badge-dot"
+                                                        style={{
+                                                            position: 'absolute',
+                                                            top: '-5px',
+                                                            right: '-7px',
+                                                            background: badgeTheme.bg,
+                                                            boxShadow: `0 2px 5px ${badgeTheme.shadow}`
+                                                        }}
+                                                    >
+                                                        {badgeCount > 9 ? '9+' : badgeCount}
+                                                    </span>
+                                                )}
+                                            </div>
                                             {isExpanded && <span>{item.label}</span>}
+                                            {isExpanded && hasBadge && (
+                                                <span 
+                                                    className="nav-badge-pill"
+                                                    style={{
+                                                        background: badgeTheme.bg,
+                                                        boxShadow: `0 2px 5px ${badgeTheme.shadow}`
+                                                    }}
+                                                >
+                                                    {badgeCount > 99 ? '99+' : badgeCount}
+                                                </span>
+                                            )}
                                         </Link>
                                     );
                                 }
@@ -155,14 +214,42 @@ export default function Sidebar({ adminUser, currentView, trackingOrigin, onView
                                         key={item.id}
                                         href="#" 
                                         className={`nav-item ${isActive ? 'active' : ''}`}
+                                        onMouseEnter={() => prefetchViewChunk(item.id)}
                                         onClick={(e) => {
                                             e.preventDefault();
                                             onViewChange(item.id);
                                         }}
                                         title={!isExpanded ? item.label : undefined}
                                     >
-                                        <i className={`fa-solid ${item.icon}`}></i>
+                                        <div className="nav-icon-box" style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                                            <i className={`fa-solid ${item.icon}`}></i>
+                                            {!isExpanded && hasBadge && (
+                                                <span 
+                                                    className="nav-badge-dot"
+                                                    style={{
+                                                        position: 'absolute',
+                                                        top: '-5px',
+                                                        right: '-7px',
+                                                        background: badgeTheme.bg,
+                                                        boxShadow: `0 2px 5px ${badgeTheme.shadow}`
+                                                    }}
+                                                >
+                                                    {badgeCount > 9 ? '9+' : badgeCount}
+                                                </span>
+                                            )}
+                                        </div>
                                         {isExpanded && <span>{item.label}</span>}
+                                        {isExpanded && hasBadge && (
+                                            <span 
+                                                className="nav-badge-pill"
+                                                style={{
+                                                    background: badgeTheme.bg,
+                                                    boxShadow: `0 2px 5px ${badgeTheme.shadow}`
+                                                }}
+                                            >
+                                                {badgeCount > 99 ? '99+' : badgeCount}
+                                            </span>
+                                        )}
                                     </a>
                                 );
                             })}

@@ -79,6 +79,16 @@ router.post('/login', loginRateLimiter, async (req, res) => {
       ? Number(rawAllowed)
       : dynamicLeaves;
 
+    // Leave figures come from the Leave Balances ledger so the mobile app matches the web portal.
+    let leaveBalance = null;
+    try {
+      const LeaveBalanceService = require('../../hrms/leave/services/LeaveBalanceService');
+      leaveBalance = (await LeaveBalanceService.getBalanceSnapshots([user])).get(user.id) || null;
+    } catch (balanceErr) {
+      console.warn('Login: leave ledger unavailable, using legacy figures:', balanceErr.message);
+    }
+
+    const isOffice = String(user.designation || '').trim().toUpperCase() === 'OFFICE';
     return res.status(200).json({
       user: {
         id: user.id,
@@ -86,8 +96,12 @@ router.post('/login', loginRateLimiter, async (req, res) => {
         email: user.email,
         role: user.role,
         designation: user.designation,
-        allowedLeaves: allowedLeavesCalc,
-        consumedLeaves: user.consumedLeaves || 0
+        primaryWorkMode: isOffice ? 'office' : 'field',
+        canSwitchMode: isOffice,
+        allowedLeaves: leaveBalance ? leaveBalance.credited : allowedLeavesCalc,
+        consumedLeaves: leaveBalance ? leaveBalance.consumed : (user.consumedLeaves || 0),
+        availableLeaves: leaveBalance ? leaveBalance.available : Math.max(0, allowedLeavesCalc - (user.consumedLeaves || 0)),
+        leaveBalance
       },
       token
     });

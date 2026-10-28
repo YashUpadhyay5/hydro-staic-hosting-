@@ -18,10 +18,11 @@ export default function MediaView({ employees = [] }) {
         return { empCode, empName };
     };
 
-    const [media, setMedia] = useState([]);
-    const [clusters, setClusters] = useState([]);
+    const cachedMedia = api.getCached('/media');
+    const [media, setMedia] = useState(() => Array.isArray(cachedMedia) ? cachedMedia : []);
+    const [clusters, setClusters] = useState(() => api.getCached('/clusters') || []);
     const [clusterRadius, setClusterRadius] = useState(500);
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(() => !cachedMedia);
     const [error, setError] = useState(false);
     
     // Tab Control
@@ -70,16 +71,19 @@ export default function MediaView({ employees = [] }) {
     };
 
     const fetchMedia = async () => {
-        setLoading(true);
+        if (!media.length) setLoading(true);
         try {
             // Fetch filtered media by cluster from backend
             const data = await api.getMedia('', selectedClusterId);
-            setMedia(data);
+            if (Array.isArray(data)) {
+                setMedia(data);
+                setError(false);
+            }
         } catch (err) {
             console.error('Error fetching media:', err);
-            setError(true);
+            if (!media.length) setError(true);
         } finally {
-            setTimeout(() => setLoading(false), 300);
+            setLoading(false);
         }
     };
 

@@ -37,68 +37,244 @@ const getDocumentGrandTotal = (doc) => {
 };
 
 const validateDocument = (extraction, dbFields) => {
-  if (!extraction) return { valid: false, errors: ["No extraction data"] };
+  if (!extraction) return { valid: false, errors: ["No extraction data"], structuredErrors: [] };
 
   const errors = [];
+  const structuredErrors = [];
 
-  // 1. Required Invoice Fields
+  const addIssue = (id, message, section = null, key = null, rowIndex = undefined, fixAction = null) => {
+    errors.push(message);
+    structuredErrors.push({ id, message, section, key, rowIndex, fixAction });
+  };
+
+  // 1. Required Invoice Details
   if (!extraction.invoice_details?.invoice_number?.trim()) {
-    errors.push("Missing Invoice Number");
+    addIssue("inv_num", "Missing Invoice Number", "invoice_details", "invoice_number");
   }
   if (!extraction.invoice_details?.invoice_date) {
-    errors.push("Missing Invoice Date");
+    addIssue("inv_date", "Missing Invoice Date", "invoice_details", "invoice_date");
   }
 
-  // 2. Required Vendor/Consumer Fields
+  // 2. Required Party Details
   if (!extraction.vendor_details?.name?.trim()) {
-    errors.push("Missing Vendor Name");
+    addIssue("v_name", "Missing Vendor Name", "vendor_details", "name");
   }
   if (!extraction.consumer_details?.name?.trim()) {
-    errors.push("Missing Consumer Name");
+    addIssue("c_name", "Missing Consumer Name", "consumer_details", "name");
   }
 
-  // 3. GSTIN 15-digit length validation
-  const vendorGst = extraction.vendor_details?.gstin;
-  if (vendorGst && String(vendorGst).trim() && String(vendorGst).trim().length !== 15) {
-    errors.push(`Vendor GSTIN: Length is ${String(vendorGst).trim().length}/15 characters (must be exactly 15)`);
+  // 3. GSTIN Validation
+  const vendorGst = String(extraction.vendor_details?.gstin || extraction.vendor_details?.gst_number || "").trim().toUpperCase();
+  if (!vendorGst) {
+    addIssue("v_gst_miss", "Vendor GSTIN is missing on this document.", "vendor_details", "gstin");
+  } else if (vendorGst.length !== 15) {
+    addIssue("v_gst_len", `Vendor GSTIN (${vendorGst}): Length is ${vendorGst.length}/15 chars (must be 15).`, "vendor_details", "gstin");
+  } else {
+    const vCheck = validateGSTIN(vendorGst);
+    if (!vCheck.isValid) {
+      addIssue("v_gst_inv", `Vendor GSTIN (${vendorGst}) has invalid checksum/format.`, "vendor_details", "gstin");
+    } else if (!vCheck.isChecksumValid && vCheck.correctedGstin) {
+      addIssue(
+        "v_gst_check",
+        `Vendor GSTIN (${vendorGst}) has check-digit typo (suggested ${vCheck.correctedGstin}).`,
+        "vendor_details",
+        "gstin",
+        undefined,
+        { type: "SET_FIELD", section: "vendor_details", key: "gstin", value: vCheck.correctedGstin, description: `Set Vendor GSTIN to ${vCheck.correctedGstin}` }
+      );
+    }
   }
 
-  const consumerGst = extraction.consumer_details?.gstin;
-  if (consumerGst && String(consumerGst).trim() && String(consumerGst).trim().length !== 15) {
-    errors.push(`Consumer GSTIN: Length is ${String(consumerGst).trim().length}/15 characters (must be exactly 15)`);
+  const consumerGst = String(extraction.consumer_details?.gstin || extraction.consumer_details?.gst_number || "").trim().toUpperCase();
+  if (!consumerGst) {
+    addIssue("c_gst_miss", "Company / Consumer GSTIN is missing on this document.", "consumer_details", "gstin");
+  } else if (consumerGst.length !== 15) {
+    addIssue("c_gst_len", `Consumer GSTIN (${consumerGst}): Length is ${consumerGst.length}/15 chars (must be 15).`, "consumer_details", "gstin");
+  } else {
+    const cCheck = validateGSTIN(consumerGst);
+    if (!cCheck.isValid) {
+      addIssue("c_gst_inv", `Consumer GSTIN (${consumerGst}) has invalid checksum/format.`, "consumer_details", "gstin");
+    } else if (!cCheck.isChecksumValid && cCheck.correctedGstin) {
+      addIssue(
+        "c_gst_check",
+        `Consumer GSTIN (${consumerGst}) has check-digit typo (suggested ${cCheck.correctedGstin}).`,
+        "consumer_details",
+        "gstin",
+        undefined,
+        { type: "SET_FIELD", section: "consumer_details", key: "gstin", value: cCheck.correctedGstin, description: `Set Consumer GSTIN to ${cCheck.correctedGstin}` }
+      );
+    }
   }
-  const items = extraction.items || [];
+
+  // 4. Bank Details Validation
+  const bankAcc = String(extraction.bank_details?.account_number || extraction.bank_details?.account_no || extraction.bank_details?.acc_no || extraction.account_number || extraction.vendor_details?.account_number || "").trim();
+  const bankIfsc = String(extraction.bank_details?.ifsc_code || extraction.bank_details?.ifsc || extraction.ifsc_code || extraction.vendor_details?.ifsc_code || "").trim().toUpperCase();
+  const bankName = String(extraction.bank_details?.bank_name || extraction.bank_details?.bank || extraction.bank_name || extraction.vendor_details?.bank_name || "").trim();
+
+  if (!bankAcc) {
+    addIssue("bank_acc_miss", "Bank Account Number is missing on this document.", "bank_details", "account_number");
+  }
+  if (!bankIfsc) {
+    addIssue("bank_ifsc_miss", "Bank IFSC Code is missing on this document.", "bank_details", "ifsc_code");
+  } else if (bankIfsc.length !== 11 || !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(bankIfsc)) {
+    addIssue("bank_ifsc_inv", `Bank IFSC Code (${bankIfsc}) format is invalid (11 alphanumeric chars expected, e.g. SBIN0001234).`, "bank_details", "ifsc_code");
+  }
+  if (!bankName) {
+    addIssue("bank_name_miss", "Bank Name is missing on this document.", "bank_details", "bank_name");
+  }
+
+  // 5. Line Items Constraint Solver (Tier A)
+  const items = extraction.items || extraction.item_details || [];
   if (items.length === 0) {
-    errors.push("No line items");
+    addIssue("no_items", "No line items found on document.", "item_details", "description");
   } else {
     items.forEach((item, idx) => {
-      const desc = item.description?.trim();
+      const desc = item.description?.trim() || item.description_of_goods?.trim() || `Row #${idx + 1}`;
       const qty = parseFloat(item.quantity) || 0;
       const rate = parseFloat(item.unit_price) || 0;
-      if (!desc) {
-        errors.push(`Item #${idx + 1}: Missing description`);
+      const taxable = parseFloat(item.taxable_amount) || 0;
+      const disc = parseFloat(item.discount_amount) || 0;
+
+      if (!item.description?.trim() && !item.description_of_goods?.trim()) {
+        addIssue(`item_${idx}_desc`, `Row #${idx + 1}: Missing description`, "item_details", "description", idx);
       }
+
       if (qty <= 0) {
-        errors.push(`Item #${idx + 1}: Qty <= 0`);
+        addIssue(`item_${idx}_qty0`, `Row #${idx + 1} (${desc}): Quantity is missing or 0`, "item_details", "quantity", idx);
       }
       if (rate <= 0) {
-        errors.push(`Item #${idx + 1}: Rate <= 0`);
+        addIssue(`item_${idx}_rate0`, `Row #${idx + 1} (${desc}): Unit Price is missing or 0`, "item_details", "unit_price", idx);
+      }
+
+      // Check math: Qty * Rate - Disc = Taxable Amount
+      if (qty > 0 && rate > 0) {
+        const expectedTaxable = parseFloat(Math.max(0, (qty * rate) - disc).toFixed(2));
+        if (taxable > 0 && Math.abs(taxable - expectedTaxable) > 1) {
+          const calcRate = parseFloat((taxable / qty).toFixed(2));
+          const calcQty = parseFloat((taxable / rate).toFixed(2));
+
+          if (calcRate > 0 && Math.abs((calcRate * qty) - taxable) < 0.5) {
+            // Misextracted Unit Price (e.g. 12 instead of 1200)
+            addIssue(
+              `item_${idx}_rate_err`,
+              `Row #${idx + 1} (${desc}): Unit Price extracted as ₹${rate} (calculated ₹${calcRate.toFixed(2)} from Total ₹${taxable.toFixed(2)} & Qty ${qty})`,
+              "item_details",
+              "unit_price",
+              idx,
+              { type: "UPDATE_ITEM", rowIndex: idx, field: "unit_price", value: calcRate, description: `Set Unit Price to ₹${calcRate.toFixed(2)}` }
+            );
+          } else if (calcQty > 0 && Math.abs((calcQty * rate) - taxable) < 0.5) {
+            // Misextracted Quantity
+            addIssue(
+              `item_${idx}_qty_err`,
+              `Row #${idx + 1} (${desc}): Quantity extracted as ${qty} (calculated ${calcQty} from Total ₹${taxable.toFixed(2)} & Rate ₹${rate})`,
+              "item_details",
+              "quantity",
+              idx,
+              { type: "UPDATE_ITEM", rowIndex: idx, field: "quantity", value: calcQty, description: `Set Quantity to ${calcQty}` }
+            );
+          } else {
+            // Misextracted Line Total
+            addIssue(
+              `item_${idx}_total_err`,
+              `Row #${idx + 1} (${desc}): Line Total extracted as ₹${taxable.toFixed(2)} (calculated ₹${expectedTaxable.toFixed(2)} from Qty ${qty} × Rate ₹${rate})`,
+              "item_details",
+              "taxable_amount",
+              idx,
+              { type: "UPDATE_ITEM", rowIndex: idx, field: "taxable_amount", value: expectedTaxable, description: `Set Line Total to ₹${expectedTaxable.toFixed(2)}` }
+            );
+          }
+        }
       }
     });
   }
 
-  // 5. Math Mismatch Validation
-  const calculatedItemsTotal = items.reduce((sum, item) => sum + (parseFloat(item.total_amount) || 0), 0);
+  // 6. State & Tax Audit Solver (Tier B)
   const ts = extraction.tax_summary || {};
-  const declaredGrandTotal = parseFloat(ts.grand_total !== undefined ? ts.grand_total : (ts.calculated_grand_total || 0)) || 0;
-  
-  if (Math.abs(calculatedItemsTotal - declaredGrandTotal) > 2) {
-    errors.push(`Total mismatch: items ₹${calculatedItemsTotal.toFixed(2)} vs grand total ₹${declaredGrandTotal.toFixed(2)}`);
+  const cgst = parseFloat(ts.cgst !== undefined ? ts.cgst : (ts.cgst_amount || 0)) || 0;
+  const sgst = parseFloat(ts.sgst !== undefined ? ts.sgst : (ts.sgst_amount || 0)) || 0;
+  const igst = parseFloat(ts.igst !== undefined ? ts.igst : (ts.igst_amount || 0)) || 0;
+  const cess = parseFloat(ts.cess !== undefined ? ts.cess : (ts.cess_amount || 0)) || 0;
+  const roundOff = parseFloat(ts.round_off !== undefined ? ts.round_off : (ts.round_off_amount || 0)) || 0;
+
+  const vStateCode = vendorGst.length >= 2 && /^\d{2}/.test(vendorGst) ? vendorGst.substring(0, 2) : "";
+  const cStateCode = consumerGst.length >= 2 && /^\d{2}/.test(consumerGst) ? consumerGst.substring(0, 2) : "";
+
+  if (vStateCode && cStateCode && vStateCode === cStateCode) {
+    if (igst > 0 && cgst === 0 && sgst === 0) {
+      const half = parseFloat((igst / 2).toFixed(2));
+      addIssue(
+        "tax_intra_igst",
+        `Tax Audit: Intra-state sale (State ${vStateCode}) contains IGST ₹${igst.toFixed(2)} (should be CGST & SGST ₹${half.toFixed(2)} each)`,
+        "tax_summary",
+        "cgst",
+        undefined,
+        { type: "SPLIT_IGST_TO_CGST_SGST", igst: igst, description: `Split IGST ₹${igst.toFixed(2)} into CGST & SGST ₹${half.toFixed(2)} each` }
+      );
+    }
+  }
+
+  // 7. Grand Total Accounting Equation Check (Tier C)
+  const headerSubtotal = parseFloat(ts.taxable_amount !== undefined && ts.taxable_amount !== null && ts.taxable_amount !== "" ? ts.taxable_amount : (ts.subtotal || 0)) || 0;
+
+  const lineItemsTaxableSum = items.reduce((sum, item) => {
+    const q = parseFloat(item.quantity) || 0;
+    const r = parseFloat(item.unit_price) || 0;
+    const d = parseFloat(item.discount_amount) || 0;
+    const itemTaxable = parseFloat(item.taxable_amount) || (q > 0 && r > 0 ? Math.max(0, (q * r) - d) : 0);
+    return sum + itemTaxable;
+  }, 0);
+
+  const extra = parseFloat(
+    dbFields?.additional_charges !== undefined && dbFields?.additional_charges !== null
+      ? dbFields.additional_charges
+      : (ts.additional_charges || extraction.additional_charges || 0)
+  ) || 0;
+
+  const effectiveTaxable = lineItemsTaxableSum > 0 ? lineItemsTaxableSum : headerSubtotal;
+  const totalTaxes = cgst + sgst + igst + cess;
+  const calculatedGrandTotal = parseFloat((effectiveTaxable + totalTaxes + roundOff + extra).toFixed(2));
+  const declaredGrandTotal = parseFloat(ts.grand_total !== undefined && ts.grand_total !== null && ts.grand_total !== "" ? ts.grand_total : (ts.calculated_grand_total || 0)) || 0;
+
+  if (headerSubtotal > 0 && lineItemsTaxableSum > 0 && Math.abs(headerSubtotal - lineItemsTaxableSum) > 2) {
+    addIssue(
+      "subtotal_mismatch",
+      `Subtotal Discrepancy: Header Subtotal is ₹${headerSubtotal.toFixed(2)}, but Line Items sum to ₹${lineItemsTaxableSum.toFixed(2)}.`,
+      "tax_summary",
+      "taxable_amount",
+      undefined,
+      { type: "SET_FIELD", section: "tax_summary", key: "taxable_amount", value: lineItemsTaxableSum, description: `Set Subtotal to ₹${lineItemsTaxableSum.toFixed(2)}` }
+    );
+  }
+
+  const extraStr = extra > 0 ? ` + Charges ₹${extra.toFixed(2)}` : "";
+
+  if (declaredGrandTotal <= 0) {
+    addIssue(
+      "gt_missing",
+      `Grand Total is missing/0: Items Subtotal ₹${effectiveTaxable.toFixed(2)} + Taxes ₹${totalTaxes.toFixed(2)}${extraStr} = ₹${calculatedGrandTotal.toFixed(2)} expected`,
+      "tax_summary",
+      "grand_total",
+      undefined,
+      { type: "SET_FIELD", section: "tax_summary", key: "grand_total", value: calculatedGrandTotal, description: `Set Grand Total to ₹${calculatedGrandTotal.toFixed(2)}` }
+    );
+  } else if (Math.abs(calculatedGrandTotal - declaredGrandTotal) > 2) {
+    const delta = parseFloat((calculatedGrandTotal - declaredGrandTotal).toFixed(2));
+    const deltaStr = delta > 0 ? `Short by ₹${delta.toFixed(2)}` : `Over by ₹${Math.abs(delta).toFixed(2)}`;
+    addIssue(
+      "gt_mismatch",
+      `Total Mismatch (${deltaStr}): Subtotal ₹${effectiveTaxable.toFixed(2)} + Taxes ₹${totalTaxes.toFixed(2)}${extraStr} = ₹${calculatedGrandTotal.toFixed(2)} expected (Extracted ₹${declaredGrandTotal.toFixed(2)})`,
+      "tax_summary",
+      "grand_total",
+      undefined,
+      { type: "SET_FIELD", section: "tax_summary", key: "grand_total", value: calculatedGrandTotal, description: `Apply Calculated Grand Total ₹${calculatedGrandTotal.toFixed(2)}` }
+    );
   }
 
   return {
     valid: errors.length === 0,
-    errors
+    errors,
+    structuredErrors
   };
 };
 
@@ -159,7 +335,10 @@ function AnimatedValue({ value, isCurrency = false, isPercent = false, suffix = 
   return <span className="animated-value">{formatted}</span>;
 }
 
-function KPICards({ selectedDocument, documents = [], localExtraction = null, dbFields = null, onCardClick }) {
+function KPICards({ selectedDocument, documents = [], localExtraction = null, dbFields = null, onCardClick, onJumpToField, onAutoFix }) {
+  const [isAuditHovered, setIsAuditHovered] = useState(false);
+  const [isAuditOpen, setIsAuditOpen] = useState(false);
+
   // If a document is selected, show its specific details
   if (selectedDocument) {
     const ocr = selectedDocument.ocr_result || {};
@@ -180,6 +359,7 @@ function KPICards({ selectedDocument, documents = [], localExtraction = null, db
       </svg>
     );
     let validationErrors = [];
+    let structuredErrors = [];
 
     if (!isCompleted) {
       validationStatus = status === "Failed" ? "FAILED" : "QUEUED";
@@ -196,6 +376,7 @@ function KPICards({ selectedDocument, documents = [], localExtraction = null, db
     } else {
       const validation = validateDocument(extraction, dbFields);
       validationErrors = validation.errors || [];
+      structuredErrors = validation.structuredErrors || [];
       if (!validation.valid) {
         validationStatus = "Warning";
         validationColor = "#d97706";
@@ -395,8 +576,19 @@ function KPICards({ selectedDocument, documents = [], localExtraction = null, db
           className="kpi-card" 
           style={{ 
             borderColor: validationBorderColor, 
-            background: validationBg 
+            background: validationBg,
+            position: "relative",
+            overflow: "visible",
+            zIndex: (isAuditHovered || isAuditOpen) ? 100 : 1,
+            cursor: validationErrors.length > 0 ? "pointer" : "default"
           }}
+          onClick={() => {
+            if (validationErrors.length > 0) {
+              setIsAuditOpen(prev => !prev);
+            }
+          }}
+          onMouseEnter={() => setIsAuditHovered(true)}
+          onMouseLeave={() => setIsAuditHovered(false)}
         >
           <div className="kpi-title-row">
             <span className="kpi-title" style={{ color: validationColor }}>Data Audit</span>
@@ -424,10 +616,112 @@ function KPICards({ selectedDocument, documents = [], localExtraction = null, db
               textOverflow: "ellipsis",
               fontSize: "11px"
             }}
-            title={validationErrors.join(", ")}
           >
             {validationSubtitle}
           </span>
+
+          {/* Interactive Hover & Click Popover Tooltip */}
+          {(isAuditHovered || isAuditOpen) && structuredErrors && structuredErrors.length > 0 && (
+            <div 
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                position: "absolute",
+                top: "calc(100% + 8px)",
+                right: 0,
+                zIndex: 9999,
+                backgroundColor: "#1e293b",
+                color: "#f8fafc",
+                border: "1px solid #f59e0b",
+                borderRadius: "8px",
+                padding: "12px 14px",
+                boxShadow: "0 16px 36px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(245, 158, 11, 0.4)",
+                minWidth: "340px",
+                maxWidth: "420px",
+                maxHeight: "calc(80vh - 160px)",
+                overflowY: "auto",
+                pointerEvents: "auto",
+                textAlign: "left"
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", color: "#f59e0b", fontWeight: "700", fontSize: "12px", marginBottom: "10px", borderBottom: "1px solid rgba(245, 158, 11, 0.3)", paddingBottom: "6px" }}>
+                <span>⚠️ Audit Issues Found ({structuredErrors.length})</span>
+                <span style={{ fontSize: "10px", opacity: 0.8 }}>Auto-Fix or Jump ↵</span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                {structuredErrors.map((errObj, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      padding: "8px 10px",
+                      borderRadius: "6px",
+                      backgroundColor: "rgba(255, 255, 255, 0.05)",
+                      border: "1px solid rgba(245, 158, 11, 0.25)",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "6px"
+                    }}
+                  >
+                    <span style={{ fontSize: "12px", color: "#f8fafc", fontWeight: "500", wordBreak: "break-word", lineHeight: "1.4" }}>
+                      ⚠️ {errObj.message}
+                    </span>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", justifyContent: "flex-end", marginTop: "2px" }}>
+                      {errObj.fixAction && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (onAutoFix) onAutoFix(errObj.fixAction);
+                          }}
+                          style={{
+                            padding: "3px 9px",
+                            fontSize: "11px",
+                            fontWeight: "700",
+                            color: "#ffffff",
+                            backgroundColor: "#2563eb",
+                            border: "none",
+                            borderRadius: "4px",
+                            cursor: "pointer",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "4px",
+                            boxShadow: "0 1px 3px rgba(37, 99, 235, 0.4)"
+                          }}
+                        >
+                          ⚡ Auto-Fix
+                        </button>
+                      )}
+                      {errObj.section && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (onJumpToField) {
+                              onJumpToField(errObj.section, errObj.key, errObj.rowIndex);
+                            }
+                            setIsAuditOpen(false);
+                            setIsAuditHovered(false);
+                          }}
+                          style={{
+                            padding: "3px 9px",
+                            fontSize: "11px",
+                            fontWeight: "700",
+                            color: "#f59e0b",
+                            backgroundColor: "rgba(245, 158, 11, 0.2)",
+                            border: "1px solid rgba(245, 158, 11, 0.4)",
+                            borderRadius: "4px",
+                            cursor: "pointer",
+                            whiteSpace: "nowrap"
+                          }}
+                        >
+                          Fix {errObj.rowIndex !== undefined ? `Row #${errObj.rowIndex + 1}` : ""} ↵
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );

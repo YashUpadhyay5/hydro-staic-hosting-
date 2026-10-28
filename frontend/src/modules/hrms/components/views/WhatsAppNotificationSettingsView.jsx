@@ -3,8 +3,11 @@ import React, { useState, useEffect } from 'react';
 import { api } from '../../services/api';
 
 export default function WhatsAppNotificationSettingsView() {
-  const [loading, setLoading] = useState(true);
-  const [setting, setSetting] = useState({
+  const cachedSettings = api.getCached('/notifications/whatsapp/settings');
+  const cachedLogs = api.getCached('/notifications/whatsapp/logs');
+
+  const [loading, setLoading] = useState(() => !cachedSettings);
+  const [setting, setSetting] = useState(() => cachedSettings?.setting || {
     enabled: true,
     scheduledTime: '12:00',
     timezone: 'Asia/Kolkata',
@@ -12,9 +15,9 @@ export default function WhatsAppNotificationSettingsView() {
     sendOnHolidays: false,
     sendOnWeekoffs: false
   });
-  const [recipients, setRecipients] = useState([]);
-  const [logs, setLogs] = useState([]);
-  const [todaySummary, setTodaySummary] = useState(null);
+  const [recipients, setRecipients] = useState(() => cachedSettings?.recipients || []);
+  const [logs, setLogs] = useState(() => cachedLogs?.logs || []);
+  const [todaySummary, setTodaySummary] = useState(() => cachedLogs?.summaryToday || null);
 
   const [newRecipientType, setNewRecipientType] = useState('ROLE');
   const [newTargetRole, setNewTargetRole] = useState('MANAGER');
@@ -24,16 +27,16 @@ export default function WhatsAppNotificationSettingsView() {
 
   const fetchSettingsAndLogs = async () => {
     try {
-      setLoading(true);
-      const res = await api.request('/notifications/whatsapp/settings');
+      const [res, logsRes] = await Promise.all([
+        api.request('/notifications/whatsapp/settings'),
+        api.request('/notifications/whatsapp/logs')
+      ]);
       if (res && res.setting) {
         setSetting(res.setting);
       }
       if (res && res.recipients) {
         setRecipients(res.recipients);
       }
-
-      const logsRes = await api.request('/notifications/whatsapp/logs');
       if (logsRes && logsRes.logs) {
         setLogs(logsRes.logs);
       }
@@ -43,7 +46,7 @@ export default function WhatsAppNotificationSettingsView() {
     } catch (err) {
       console.error('Error loading WhatsApp settings:', err);
     } finally {
-      setTimeout(() => setLoading(false), 300);
+      setLoading(false);
     }
   };
 

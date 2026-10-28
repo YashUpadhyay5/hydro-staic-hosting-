@@ -46,8 +46,45 @@ const Employee = sequelize.define('Employee', {
     allowNull: false,
     defaultValue: 0,
   },
+  openingLeaveBalance: {
+    type: DataTypes.DOUBLE,
+    field: 'opening_leave_balance',
+    allowNull: false,
+    defaultValue: 0,
+  },
+  earnedLeaves: {
+    type: DataTypes.DOUBLE,
+    field: 'earned_leaves',
+    allowNull: false,
+    defaultValue: 0,
+  },
   dob: {
     type: DataTypes.STRING,
+    allowNull: true,
+  },
+  fatherName: {
+    type: DataTypes.STRING,
+    field: 'father_name',
+    allowNull: true,
+  },
+  spouseName: {
+    type: DataTypes.STRING,
+    field: 'spouse_name',
+    allowNull: true,
+  },
+  presentAddress: {
+    type: DataTypes.TEXT,
+    field: 'present_address',
+    allowNull: true,
+  },
+  permanentAddress: {
+    type: DataTypes.TEXT,
+    field: 'permanent_address',
+    allowNull: true,
+  },
+  emergencyContact: {
+    type: DataTypes.STRING,
+    field: 'emergency_contact',
     allowNull: true,
   },
   empCode: {
@@ -82,6 +119,11 @@ const Employee = sequelize.define('Employee', {
   },
   location: {
     type: DataTypes.STRING,
+    allowNull: true,
+  },
+  placeOfDuty: {
+    type: DataTypes.STRING,
+    field: 'place_of_duty',
     allowNull: true,
   },
   reportingManager: {
@@ -123,6 +165,11 @@ const Employee = sequelize.define('Employee', {
   },
   compensationGross: {
     type: DataTypes.DOUBLE,
+    allowNull: true,
+  },
+  lastRevisionDate: {
+    type: DataTypes.STRING,
+    field: 'last_revision_date',
     allowNull: true,
   },
   pfEligible: {
@@ -230,6 +277,16 @@ const Employee = sequelize.define('Employee', {
     type: DataTypes.STRING,
     allowNull: true,
   },
+  aadhaarNumber: {
+    type: DataTypes.STRING,
+    field: 'aadhaar_number',
+    allowNull: true,
+  },
+  highestQualification: {
+    type: DataTypes.TEXT,
+    field: 'highest_qualification',
+    allowNull: true,
+  },
   panNumber: {
     type: DataTypes.STRING,
     field: 'pan_number',
@@ -331,6 +388,11 @@ const Employee = sequelize.define('Employee', {
     type: DataTypes.DATE,
     field: 'last_seen',
     defaultValue: DataTypes.NOW,
+  },
+  isSystemAccount: {
+    type: DataTypes.BOOLEAN,
+    field: 'is_system_account',
+    defaultValue: false,
   },
   customFields: {
     type: DataTypes.TEXT,

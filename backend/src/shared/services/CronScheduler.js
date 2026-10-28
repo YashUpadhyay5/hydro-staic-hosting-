@@ -6,39 +6,65 @@ const Employee = require('../models/Employee');
 const Footprint = require('../models/Footprint');
 const ShiftEngine = require('./ShiftEngine');
 const HeartbeatMonitorService = require('./HeartbeatMonitorService');
+const WorkdayCalendarService = require('./WorkdayCalendarService');
+
+const getAuthoritativeISTDate = (d = new Date()) => {
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date(d));
+  } catch {
+    return new Date().toISOString().split('T')[0];
+  }
+};
+
+const getISTTimeParts = (d = new Date()) => {
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Kolkata',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    }).formatToParts(new Date(d));
+    const HH = parseInt(parts.find(p => p.type === 'hour')?.value || '0', 10);
+    const MM = parseInt(parts.find(p => p.type === 'minute')?.value || '0', 10);
+    return { HH, MM };
+  } catch {
+    const now = new Date();
+    return { HH: now.getHours(), MM: now.getMinutes() };
+  }
+};
 
 class CronScheduler {
   static start() {
-    console.log('[CronScheduler] Initializing zero-dependency cron scheduler...');
+    console.log('[CronScheduler] Initializing zero-dependency intelligent cron scheduler...');
     
     // Auto-close stale past sessions on boot
     this.autoCloseStaleSessions().catch(err => console.error('[CronScheduler Init Auto-Close Error]:', err.message));
 
-    let last9AMFiredDate = null;
-    let last6PMFiredDate = null;
+    let lastClockInFiredDate = null;
 
     setInterval(async () => {
       try {
         const now = new Date();
-        const todayStr = now.toISOString().split('T')[0];
-        const HH = now.getHours();
-        const MM = now.getMinutes();
+        const todayStr = getAuthoritativeISTDate(now);
+        const { HH, MM } = getISTTimeParts(now);
 
         // 0. Periodic check to auto-close any unclosed past sessions from previous dates
         if (MM === 0 || MM === 30) {
           await this.autoCloseStaleSessions();
         }
 
-        // 1. 9:00 AM Clock-In Reminder (Trigger within the first 5 minutes of the 9:00 AM hour)
-        if (HH === 9 && MM < 5 && last9AMFiredDate !== todayStr) {
-          last9AMFiredDate = todayStr;
-          await this.run9AMClockInReminder(todayStr);
+        // 1. Targeted Clock-In Reminder (Trigger at 09:30 AM IST once per day)
+        // Only sends to employees who are NOT clocked in, and NOT on holiday, weekly-off, or leave!
+        if (HH === 9 && MM === 30 && lastClockInFiredDate !== todayStr) {
+          lastClockInFiredDate = todayStr;
+          await this.runTargetedClockInReminder(todayStr);
         }
 
-        // 2. 6:00 PM Clock-Out Alert (Trigger within the first 5 minutes of the 6:00 PM hour)
-        if (HH === 18 && MM < 5 && last6PMFiredDate !== todayStr) {
-          last6PMFiredDate = todayStr;
-          await this.run6PMClockOutAlert(todayStr);
+        // 2. Clock-Out Repeating Loop (Every 5 minutes from 17:30 to 23:00 IST)
+        // Repeatedly alerts employees who ARE clocked in but have NOT clocked out until they punch out!
+        const isClockOutWindow = (HH > 17 || (HH === 17 && MM >= 30)) && HH <= 23;
+        if (isClockOutWindow && (MM % 5 === 0)) {
+          await this.run5MinClockOutReminderLoop(todayStr);
         }
 
         // 3. 1st of the month: Auto-increment allowed leaves
@@ -57,66 +83,118 @@ class CronScheduler {
     }, 60 * 1000);
   }
 
-  static async run9AMClockInReminder(dateStr) {
+  /**
+   * Clock-In Reminder:
+   * - Evaluates each active employee's workday status (Holiday, Sunday, Approved Leave).
+   * - If working day and NOT clocked in, sends a targeted notification.
+   * - If already clocked in, skips.
+   */
+  static async runTargetedClockInReminder(dateStr) {
     try {
-      console.log(`[CronScheduler] Triggering 9:00 AM clock-in verification for date: ${dateStr}...`);
+      console.log(`[CronScheduler] Running targeted Clock-In check for date: ${dateStr}...`);
       
-      // Find all employees who have clocked in today
-      const clockedInSessions = await Attendance.findAll({
+      // 1. Get all employees who have already clocked in today
+      const todayAttendance = await Attendance.findAll({
         where: { date: dateStr }
       });
 
-      const clockedInUserIds = clockedInSessions.map(s => s.userId);
+      const clockedInUserIds = new Set(
+        todayAttendance
+          .filter(a => a.checkIn && a.checkIn !== 'null' && a.checkIn !== '-' && String(a.checkIn).trim() !== '')
+          .map(a => String(a.userId || '').toLowerCase().trim())
+      );
 
-      // Find all active employees who haven't clocked in
-      const missingEmployees = await Employee.findAll({
+      // 2. Fetch all active employees
+      const activeEmployees = await Employee.findAll({
         where: {
           status: 'ACTIVE',
-          role: 'EMPLOYEE',
-          id: { [Op.notIn]: clockedInUserIds.length > 0 ? clockedInUserIds : [''] }
+          role: 'EMPLOYEE'
         }
       });
 
-      console.log(`[CronScheduler] Found ${missingEmployees.length} employees missing clock-in for today.`);
+      let sentCount = 0;
+      let skippedCount = 0;
 
-      for (const emp of missingEmployees) {
+      for (const emp of activeEmployees) {
+        const uid = String(emp.id || '').toLowerCase().trim();
+        const ucode = String(emp.empCode || '').toLowerCase().trim();
+
+        // Guard: Skip if already clocked in today
+        if (clockedInUserIds.has(uid) || (ucode && clockedInUserIds.has(ucode))) {
+          continue;
+        }
+
+        // Guard: Skip if today is Holiday, Sunday/Weekly Off, or Approved Leave
+        const workdayStatus = await WorkdayCalendarService.evaluateEmployeeDay(emp, dateStr);
+        if (!workdayStatus.isWorkDay) {
+          console.log(`[Clock-In Reminder] Skipped ${emp.name} (${emp.id}): ${workdayStatus.details}`);
+          skippedCount++;
+          continue;
+        }
+
+        // Send targeted reminder to employee's device
         if (emp.fcmToken) {
           const success = await HeartbeatMonitorService.sendPushNotification(
             emp.fcmToken,
-            'Clock-In Reminder',
-            "You haven't clocked in yet. Please clock in now.",
-            { action: 'open_attendance' }
+            '⏰ Clock-In Reminder',
+            `Good morning ${emp.name}! You haven't clocked in for your shift today. Please punch in now.`,
+            { action: 'open_attendance', type: 'CLOCK_IN_REMINDER' }
           );
           if (success) {
-            console.log(`[CronScheduler] Sent 9:00 AM clock-in reminder to user: ${emp.id}`);
+            console.log(`[Clock-In Reminder] Sent to ${emp.name} (${emp.id})`);
+            sentCount++;
           }
         }
       }
+
+      console.log(`[CronScheduler] Clock-In check complete: Sent ${sentCount}, Skipped ${skippedCount} (holiday/off/leave).`);
     } catch (err) {
-      console.error('[CronScheduler] Failed running 9:00 AM job:', err.message);
+      console.error('[CronScheduler] Failed running targeted clock-in job:', err.message);
     }
   }
 
-  static async run6PMClockOutAlert(dateStr) {
+  /**
+   * Clock-Out 5-Minute Repeating Loop:
+   * - Queries attendance records where employee IS clocked in (checkIn != null) BUT NOT clocked out (checkOut IS NULL).
+   * - Sends high-priority reminder every 5 minutes until they punch out.
+   * - Once they punch out, their session is no longer unclosed and reminders stop automatically.
+   */
+  static async run5MinClockOutReminderLoop(dateStr) {
     try {
-      console.log(`[CronScheduler] Triggering 6:00 PM clock-out alarm for date: ${dateStr}...`);
-
-      // Find all active unclosed office sessions
-      const activeOfficeSessions = await Attendance.findAll({
+      // Find all active unclosed sessions for today
+      const unclosedSessions = await Attendance.findAll({
         where: {
           date: dateStr,
-          checkOut: null,
-          workMode: 'office'
+          checkIn: { [Op.ne]: null },
+          [Op.or]: [
+            { checkOut: null },
+            { checkOut: '' },
+            { checkOut: 'null' },
+            { checkOut: '-' },
+            { checkOut: 'undefined' }
+          ]
         }
       });
 
-      for (const session of activeOfficeSessions) {
-        const emp = await Employee.findByPk(session.userId);
+      if (unclosedSessions.length === 0) return;
+
+      console.log(`[CronScheduler 5-Min Clock-Out Pulse] Found ${unclosedSessions.length} unclosed sessions still clocked in at ${new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' })}.`);
+
+      for (const session of unclosedSessions) {
+        const emp = await Employee.findOne({
+          where: {
+            [Op.or]: [
+              { id: session.userId },
+              { empCode: session.userId }
+            ]
+          }
+        });
+
         if (emp && emp.fcmToken) {
           const success = await HeartbeatMonitorService.sendPushNotification(
             emp.fcmToken,
-            'Clock-Out Reminder',
-            'Your working hours are complete. Please clock-out.',
+            '🔔 Clock-Out Reminder',
+            `Hi ${emp.name}, your working hours are complete. Please clock out now.`,
             {
               type: 'ALARM',
               sound: 'alarm_loud',
@@ -124,21 +202,21 @@ class CronScheduler {
             }
           );
           if (success) {
-            console.log(`[CronScheduler] Sent 6:00 PM clock-out alarm notification to user: ${emp.id}`);
+            console.log(`[5-Min Clock-Out Pulse] Sent reminder to ${emp.name} (${session.userId})`);
           }
         }
       }
     } catch (err) {
-      console.error('[CronScheduler] Failed running 6:00 PM job:', err.message);
+      console.error('[CronScheduler 5-Min Clock-Out Pulse Error]:', err.message);
     }
   }
 
   static async autoCloseStaleSessions() {
     try {
-      const todayStr = new Date().toISOString().split('T')[0];
+      const todayStr = getAuthoritativeISTDate();
       const staleSessions = await Attendance.findAll({
         where: {
-          date: { [Op.ne]: todayStr },
+          date: { [Op.lt]: todayStr }, // Strictly past days in IST
           [Op.or]: [
             { checkOut: null },
             { checkOut: '' },

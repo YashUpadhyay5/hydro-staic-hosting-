@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { api } from '../../../services/api';
+import { getFullUrl, forceDownload } from '../../../utils/helpers';
 
 export default function SettingsTab({ payslips = [], employees = [], onReload }) {
   const [search, setSearch] = useState('');
@@ -7,6 +8,7 @@ export default function SettingsTab({ payslips = [], employees = [], onReload })
   const [filterYear, setFilterYear] = useState('');
   const [filterMonth, setFilterMonth] = useState('');
   const [isDispatching, setIsDispatching] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   // Modal State for Manual Payslip Upload
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -69,6 +71,25 @@ export default function SettingsTab({ payslips = [], employees = [], onReload })
       } finally {
         setIsDispatching(false);
       }
+    }
+  };
+
+  const handleDownloadPayslips = async () => {
+    if (!filterMonth) {
+      alert("Please select a specific Pay Cycle Month from the filter dropdown before downloading.");
+      return;
+    }
+
+    setIsDownloading(true);
+    try {
+      await api.downloadPayslipsArchive({
+        month: filterMonth,
+        employeeId: filterEmp || null
+      });
+    } catch (err) {
+      alert(`Download error: ${err.message}`);
+    } finally {
+      setIsDownloading(false);
     }
   };
 
@@ -140,11 +161,34 @@ export default function SettingsTab({ payslips = [], employees = [], onReload })
             Send Payslips to All
           </button>
           
-          {onReload && (
-            <button className="btn btn-outline" style={{ padding: '7px 12px', fontSize: '0.8rem' }} onClick={onReload}>
-              <i className="fa-solid fa-rotate-right" style={{ marginRight: '5px' }}></i> Reload
-            </button>
-          )}
+          <button 
+            className="btn btn-secondary" 
+            style={{ 
+              padding: '7px 14px', 
+              fontSize: '0.8rem', 
+              background: 'linear-gradient(135deg, #0284c7, #0369a1)', 
+              color: '#fff', 
+              border: 'none', 
+              borderRadius: '8px', 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '6px', 
+              fontWeight: 600, 
+              cursor: filterMonth ? 'pointer' : 'not-allowed',
+              opacity: filterMonth ? 1 : 0.65,
+              transition: 'all 0.2s ease'
+            }} 
+            onClick={handleDownloadPayslips}
+            disabled={isDownloading || !filterMonth}
+            title={!filterMonth ? "Select a Pay Cycle Month first" : (filterEmp ? "Download Payslip for selected employee" : "Download All Payslips for this month")}
+          >
+            {isDownloading ? (
+              <i className="fa-solid fa-spinner fa-spin"></i>
+            ) : (
+              <i className="fa-solid fa-file-arrow-down"></i>
+            )}
+            {filterEmp ? 'Download Payslip' : 'Download All Payslips'}
+          </button>
 
           {/* Search Box */}
           <div style={{ position: 'relative' }}>
@@ -292,15 +336,30 @@ export default function SettingsTab({ payslips = [], employees = [], onReload })
                       )}
                     </td>
                     <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-                      <a
-                        href={`http://${window.location.hostname}:8000/${ps.filePath}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="btn btn-outline"
-                        style={{ padding: '6px 14px', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-                      >
-                        <i className="fa-solid fa-file-pdf" style={{ color: '#ef4444' }}></i> View PDF
-                      </a>
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', justifyContent: 'flex-end' }}>
+                        <a
+                          href={`${getFullUrl(ps.filePath)}?_t=${Date.now()}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="btn btn-outline"
+                          style={{ padding: '6px 12px', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                        >
+                          <i className="fa-solid fa-file-pdf" style={{ color: '#ef4444' }}></i> View PDF
+                        </a>
+                        <button
+                          className="btn btn-outline"
+                          style={{ padding: '6px 10px', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}
+                          title="Download Payslip (PDF)"
+                          onClick={() => {
+                            api.downloadPayslipsArchive({
+                              month: ps.month,
+                              employeeId: ps.employeeId || ps.employee?.id
+                            }).catch(err => alert(`Download error: ${err.message}`));
+                          }}
+                        >
+                          <i className="fa-solid fa-download" style={{ color: 'var(--accent-primary)' }}></i>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );

@@ -52,6 +52,10 @@ const Expense = sequelize.define('Expense', {
   status: {
     type: DataTypes.ENUM('pending', 'approved', 'rejected'),
     defaultValue: 'pending',
+  },
+  actionBy: {
+    type: DataTypes.STRING,
+    allowNull: true,
   }
 }, {
   timestamps: true,

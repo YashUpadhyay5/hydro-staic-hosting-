@@ -27,6 +27,7 @@ const HolidayCalendar = require('./HolidayCalendar');
 const ProfessionalTaxState = require('./ProfessionalTaxState');
 const ProfessionalTaxRule = require('./ProfessionalTaxRule');
 const ProfessionalTaxAuditLog = require('./ProfessionalTaxAuditLog');
+const EmployeeGeofenceTrackingState = require('./EmployeeGeofenceTrackingState');
 
 // Chat Models
 const Chat = require('./Chat');
@@ -143,5 +144,6 @@ module.exports = {
   HolidayCalendar,
   ProfessionalTaxState,
   ProfessionalTaxRule,
-  ProfessionalTaxAuditLog
+  ProfessionalTaxAuditLog,
+  EmployeeGeofenceTrackingState
 };

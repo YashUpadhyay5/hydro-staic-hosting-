@@ -3,7 +3,7 @@ const sequelize = require('../../config/database');
 
 const Footprint = sequelize.define('Footprint', {
   id: {
-    type: DataTypes.UUID,
+    type: DataTypes.STRING(255),
     defaultValue: DataTypes.UUIDV4,
     primaryKey: true,
   },

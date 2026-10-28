@@ -1,7 +1,7 @@
 import LoadingSpinner from '../LoadingSpinner';
 import React, { useEffect, useState } from 'react';
 import { api } from '../../services/api';
-import { formatDate, getFullUrl, forceDownload } from '../../utils/helpers';
+import { formatDate, getFullUrl, forceDownload, isActiveEmployee } from '../../utils/helpers';
 
 export default function DocumentsView({ employees, adminUser }) {
     const [title, setTitle] = useState('');
@@ -9,9 +9,12 @@ export default function DocumentsView({ employees, adminUser }) {
     const [file, setFile] = useState(null);
     const [uploading, setUploading] = useState(false);
     
-    const [docs, setDocs] = useState([]);
+    const userIdParam = adminUser && adminUser.role !== 'ADMIN' ? (adminUser.id || adminUser._id) : undefined;
+    const cacheEndpoint = userIdParam ? `/hrms-documents?userId=${userIdParam}` : '/hrms-documents';
+    const cachedDocs = api.getCached(cacheEndpoint);
+    const [docs, setDocs] = useState(() => Array.isArray(cachedDocs) ? cachedDocs : []);
     const [tab, setTab] = useState('all'); // 'all', 'employees', or 'admin'
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(() => !cachedDocs);
     const [error, setError] = useState(false);
     const [modalDoc, setModalDoc] = useState(null); // State for document modal
 
@@ -24,9 +27,10 @@ export default function DocumentsView({ employees, adminUser }) {
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 15;
+    const [isZipping, setIsZipping] = useState(false);
 
     const fetchDocuments = async () => {
-        setLoading(true);
+        if (!docs.length) setLoading(true);
         try {
             const userIdParam = adminUser && adminUser.role !== 'ADMIN' ? (adminUser.id || adminUser._id) : undefined;
             const data = await api.getDocuments(userIdParam);
@@ -35,7 +39,25 @@ export default function DocumentsView({ employees, adminUser }) {
             console.error(err);
             setError(true);
         } finally {
-            setTimeout(() => setLoading(false), 300);
+            setLoading(false);
+        }
+    };
+
+    const handleDownloadZip = async () => {
+        if (!filtered || !filtered.length) {
+            alert('No documents available to download.');
+            return;
+        }
+        try {
+            setIsZipping(true);
+            const docIds = filtered.map(d => d.id);
+            const userIdParam = adminUser && adminUser.role !== 'ADMIN' ? (adminUser.id || adminUser._id) : undefined;
+            await api.downloadDocumentsZip(userIdParam, docIds);
+        } catch (err) {
+            console.error('ZIP download error:', err);
+            alert('Failed to generate ZIP: ' + (err.message || 'Error'));
+        } finally {
+            setIsZipping(false);
         }
     };
 
@@ -199,7 +221,7 @@ export default function DocumentsView({ employees, adminUser }) {
                                         required
                                     >
                                         <option value="ALL">All Employees</option>
-                                        {employees.map(emp => (
+                                        {employees.filter(isActiveEmployee).map(emp => (
                                             <option key={emp.id} value={emp.id}>{emp.name}</option>
                                         ))}
                                     </select>
@@ -320,6 +342,17 @@ export default function DocumentsView({ employees, adminUser }) {
                             }}
                         />
                     </div>
+                    <button
+                        type="button"
+                        className="btn btn-outline"
+                        onClick={handleDownloadZip}
+                        disabled={isZipping || !filtered.length}
+                        style={{ height: '38px', display: 'flex', alignItems: 'center', gap: '8px', padding: '0 16px', borderRadius: '8px', fontSize: '0.875rem', fontWeight: 600, background: '#f8fafc', borderColor: '#cbd5e1' }}
+                        title="Download all filtered documents in a single high-compression ZIP stream"
+                    >
+                        <i className={`fa-solid ${isZipping ? 'fa-spinner fa-spin' : 'fa-file-zipper'}`}></i>
+                        {isZipping ? 'Compressing ZIP...' : 'Download ZIP'}
+                    </button>
                 </div>
             </div>
 

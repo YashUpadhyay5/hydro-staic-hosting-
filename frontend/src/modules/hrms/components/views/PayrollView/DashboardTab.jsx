@@ -61,7 +61,7 @@ export default function DashboardTab({ dashboardData, employees = [], onTabChang
       const lopDays = empLeaves.reduce((total, l) => total + Number(l.lopDays || l.lop_days || 0), 0);
       const payableDays = Math.max(0, workingDays - lopDays);
       const rawGross = Number(emp.compensationGross || emp.salary || 0);
-      const baseSalary = rawGross > 0 ? Math.round(rawGross / 12) : 50000;
+      const baseSalary = rawGross > 0 ? (rawGross > 100000 ? Math.round(rawGross / 12) : rawGross) : 50000;
       const calculatedSalary = Math.round(baseSalary * (payableDays / workingDays));
       return sum + calculatedSalary;
     }, 0);
@@ -74,7 +74,7 @@ export default function DashboardTab({ dashboardData, employees = [], onTabChang
   const deactivatedEmployees = employees.filter(e => e.status === 'PAST');
   deactivatedEmployees.forEach(emp => {
     const rawGross = Number(emp.compensationGross || emp.salary || 0);
-    const monthlyBase = rawGross > 0 ? Math.round(rawGross / 12) : 50000;
+    const monthlyBase = rawGross > 0 ? (rawGross > 100000 ? Math.round(rawGross / 12) : rawGross) : 50000;
     unprocessedEmployees.push({
       id: emp.id,
       empCode: emp.empCode || emp.id,
@@ -818,7 +818,7 @@ export default function DashboardTab({ dashboardData, employees = [], onTabChang
                   <tbody>
                     {filteredUpcomingEmployees.map(emp => {
                       const rawGross = Number(emp.compensationGross || emp.salary || 0);
-                      const monthlyGross = rawGross > 0 ? Math.round(rawGross / 12) : 50000;
+                      const monthlyGross = rawGross > 0 ? (rawGross > 100000 ? Math.round(rawGross / 12) : rawGross) : 50000;
                       const displaySalary = `₹${monthlyGross.toLocaleString()}`;
 
                       return (
@@ -1264,7 +1264,7 @@ export default function DashboardTab({ dashboardData, employees = [], onTabChang
                   <tbody>
                     {filteredPendingEmployees.map(emp => {
                       const rawGross = Number(emp.compensationGross || emp.salary || 0);
-                      const monthlyGross = rawGross > 0 ? Math.round(rawGross / 12) : 50000;
+                      const monthlyGross = rawGross > 0 ? (rawGross > 100000 ? Math.round(rawGross / 12) : rawGross) : 50000;
                       const displaySalary = `₹${monthlyGross.toLocaleString()}`;
 
                       return (

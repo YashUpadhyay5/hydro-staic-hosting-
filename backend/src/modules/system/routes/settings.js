@@ -31,6 +31,7 @@ const VALID_INTERVALS = ['10 Seconds', '30 Seconds', '60 Seconds', '120 Seconds'
 // Safe auto-migration helper to add missing columns to SQLite settings table
 const ensureSettingsColumns = async () => {
   try {
+    if (sequelize.getDialect() !== 'sqlite') return;
     const [columns] = await sequelize.query("PRAGMA table_info(settings);");
     const names = columns.map(c => c.name);
 
@@ -148,6 +149,14 @@ router.put('/', requireRole(['ADMIN']), async (req, res) => {
     if (allow_cross_day !== undefined) settings.allow_cross_day = Boolean(allow_cross_day);
 
     await settings.save();
+
+    // Immediately bust HeartbeatMonitorService config cache so the new location interval takes effect
+    try {
+      const HeartbeatMonitorService = require('../../../shared/services/HeartbeatMonitorService');
+      if (typeof HeartbeatMonitorService.invalidateConfigCache === 'function') {
+        HeartbeatMonitorService.invalidateConfigCache();
+      }
+    } catch (hbCacheErr) {}
 
     const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip || '127.0.0.1';
     await SettingAuditLog.create({

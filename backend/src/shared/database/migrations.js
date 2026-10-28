@@ -185,7 +185,8 @@ const runMigrations = async (sequelize) => {
     { name: 'pt_exemption', type: 'BOOLEAN DEFAULT 0' },
     { name: 'pt_exemption_type', type: 'VARCHAR(255)' },
     { name: 'pt_exemption_reason', type: 'VARCHAR(255)' },
-    { name: 'pt_effective_date', type: 'VARCHAR(255)' }
+    { name: 'pt_effective_date', type: 'VARCHAR(255)' },
+    { name: 'place_of_duty', type: 'VARCHAR(255)' }
   ];
   
   for (const col of additionalCols) {
@@ -262,8 +263,8 @@ const runMigrations = async (sequelize) => {
     }
   }
 
-  // Common migrations for PAN, UAN, ESI fields
-  for (const col of ['pan_number', 'panNumber', 'uan_number', 'uanNumber', 'esi_number', 'esiNumber']) {
+  // Common migrations for Aadhaar, PAN, UAN, ESI, PF fields
+  for (const col of ['aadhaar_number', 'aadhaarNumber', 'aadhar_number', 'aadharNumber', 'pan_number', 'panNumber', 'uan_number', 'uanNumber', 'esi_number', 'esiNumber', 'pf_number', 'pfNumber']) {
     try {
       if (isPostgres) {
         await sequelize.query(`ALTER TABLE location_employees ADD COLUMN IF NOT EXISTS ${col} VARCHAR(255);`);
@@ -274,6 +275,33 @@ const runMigrations = async (sequelize) => {
       // Ignore already exists
     }
   }
+
+  // Migration for highest_qualification column
+  try {
+    if (isPostgres) {
+      await sequelize.query('ALTER TABLE location_employees ADD COLUMN IF NOT EXISTS highest_qualification TEXT;');
+    } else {
+      await sequelize.query('ALTER TABLE location_employees ADD COLUMN highest_qualification TEXT;');
+    }
+    console.log('Migrated location_employees: added highest_qualification column.');
+  } catch (e) {
+    // Ignore if already exists
+  }
+
+  // Migration for permanent_address & emergency_contact columns
+  try {
+    if (isPostgres) {
+      await sequelize.query('ALTER TABLE location_employees ADD COLUMN IF NOT EXISTS permanent_address TEXT;');
+      await sequelize.query('ALTER TABLE location_employees ADD COLUMN IF NOT EXISTS emergency_contact VARCHAR(255);');
+    } else {
+      await sequelize.query('ALTER TABLE location_employees ADD COLUMN permanent_address TEXT;');
+      await sequelize.query('ALTER TABLE location_employees ADD COLUMN emergency_contact VARCHAR(255);');
+    }
+    console.log('Migrated location_employees: added permanent_address and emergency_contact columns.');
+  } catch (e) {
+    // Ignore if already exists
+  }
+
 
   // Migration for wizard_state on payroll_runs
   try {
@@ -305,6 +333,112 @@ const runMigrations = async (sequelize) => {
     } catch (e) {
       // Ignore already exists
     }
+  }
+
+  // Migration for opening_leave_balance and earned_leaves on location_employees
+  const leaveCols = [
+    { name: 'opening_leave_balance', type: 'DOUBLE DEFAULT 0' },
+    { name: 'earned_leaves', type: 'DOUBLE DEFAULT 0' }
+  ];
+  for (const col of leaveCols) {
+    try {
+      if (isPostgres) {
+        await sequelize.query(`ALTER TABLE location_employees ADD COLUMN IF NOT EXISTS ${col.name} ${col.type};`);
+      } else {
+        await sequelize.query(`ALTER TABLE location_employees ADD COLUMN ${col.name} ${col.type};`);
+      }
+    } catch (e) {
+      // Ignore already exists
+    }
+  }
+
+  // Migration for location_leave_adjustments table
+  try {
+    const LeaveAdjustment = require('../models/LeaveAdjustment');
+    await LeaveAdjustment.sync();
+    console.log('Ensured location_leave_adjustments table exists.');
+  } catch (e) {
+    console.warn('location_leave_adjustments sync warning:', e.message);
+  }
+
+  // Migration for salary revision history tracking
+  try {
+    if (isPostgres) {
+      await sequelize.query('ALTER TABLE salary_structures ADD COLUMN IF NOT EXISTS revision_reason VARCHAR(255) DEFAULT \'Salary Revision\';');
+      await sequelize.query('ALTER TABLE location_employees ADD COLUMN IF NOT EXISTS last_revision_date VARCHAR(50);');
+    } else {
+      await sequelize.query('ALTER TABLE salary_structures ADD COLUMN revision_reason VARCHAR(255) DEFAULT \'Salary Revision\';');
+      await sequelize.query('ALTER TABLE location_employees ADD COLUMN last_revision_date VARCHAR(50);');
+    }
+    console.log('Migrated salary revision history columns.');
+  } catch (e) {
+    // Ignore if column already exists
+  }
+
+  // Migration: High-Performance B-Tree indexes for location_leaves
+  try {
+    await sequelize.query('CREATE INDEX IF NOT EXISTS idx_leaves_applied_at ON location_leaves(applied_at DESC);');
+    await sequelize.query('CREATE INDEX IF NOT EXISTS idx_leaves_user_id ON location_leaves(user_id);');
+    await sequelize.query('CREATE INDEX IF NOT EXISTS idx_leaves_status ON location_leaves(status);');
+    console.log('Ensured indexes on location_leaves (applied_at, user_id, status) exist.');
+  } catch (e) {
+    console.warn('location_leaves indexes warning:', e.message);
+  }
+
+  // Migration: Employee Geofence Tracking State Table (Consecutive Outside Geofence Alerts)
+  try {
+    const EmployeeGeofenceTrackingState = require('../models/EmployeeGeofenceTrackingState');
+    await EmployeeGeofenceTrackingState.sync();
+    if (isPostgres) {
+      await sequelize.query('CREATE INDEX IF NOT EXISTS idx_gf_tracking_emp_id ON employee_geofence_tracking_states(employee_id);');
+    }
+    console.log('Ensured employee_geofence_tracking_states table and index exist.');
+  } catch (e) {
+    console.warn('employee_geofence_tracking_states table sync warning:', e.message);
+  }
+
+  // Migration: Leave Balances module columns on location_leave_adjustments
+  const leaveAdjustmentCols = [
+    { name: 'year', type: 'INTEGER' },
+    { name: 'month', type: 'INTEGER' },
+    { name: 'work_date', type: 'VARCHAR(20)' },
+    { name: 'previous_value', type: 'DOUBLE' },
+    { name: 'new_value', type: 'DOUBLE' },
+    { name: 'related_adjustment_id', type: 'UUID' },
+    { name: 'status', type: "VARCHAR(20) DEFAULT 'ACTIVE'" }
+  ];
+  for (const col of leaveAdjustmentCols) {
+    try {
+      if (isPostgres) {
+        await sequelize.query(`ALTER TABLE location_leave_adjustments ADD COLUMN IF NOT EXISTS ${col.name} ${col.type};`);
+      } else {
+        await sequelize.query(`ALTER TABLE location_leave_adjustments ADD COLUMN ${col.name} ${col.type};`);
+      }
+    } catch (e) {
+      // Ignore already exists
+    }
+  }
+  try {
+    await sequelize.query('CREATE INDEX IF NOT EXISTS idx_leave_adjustments_emp_year_month ON location_leave_adjustments(employee_id, year, month);');
+    await sequelize.query('CREATE INDEX IF NOT EXISTS idx_leave_adjustments_work_date ON location_leave_adjustments(employee_id, work_date);');
+    console.log('Ensured Leave Balances columns/indexes on location_leave_adjustments exist.');
+  } catch (e) {
+    console.warn('location_leave_adjustments Leave Balances migration warning:', e.message);
+  }
+
+  // Migration: Ensure location_geofence_settings.id has auto-increment sequence in PostgreSQL
+  try {
+    if (isPostgres) {
+      await sequelize.query(`
+        CREATE SEQUENCE IF NOT EXISTS location_geofence_settings_id_seq;
+        SELECT setval('location_geofence_settings_id_seq', COALESCE((SELECT MAX(id) FROM location_geofence_settings), 0) + 1, false);
+        ALTER TABLE location_geofence_settings ALTER COLUMN id SET DEFAULT nextval('location_geofence_settings_id_seq');
+        ALTER SEQUENCE location_geofence_settings_id_seq OWNED BY location_geofence_settings.id;
+      `);
+      console.log('Ensured location_geofence_settings_id_seq auto-increment sequence exists.');
+    }
+  } catch (e) {
+    console.warn('location_geofence_settings sequence migration warning:', e.message);
   }
 };
 

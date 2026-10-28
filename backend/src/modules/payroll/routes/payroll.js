@@ -17,7 +17,7 @@ const {
 const PayrollEngine = require('../services/PayrollEngine');
 const PayrollQueue = require('../services/PayrollQueue');
 const PayslipGenerator = require('../services/PayslipGenerator');
-const ProfessionalTaxService = require('../../../core/utils/ProfessionalTaxService');
+const PayCalculator = require('../services/PayCalculator');
 const professionalTaxRoutes = require('./professionalTax');
 const { Op } = require('sequelize');
 
@@ -43,10 +43,10 @@ router.get('/dashboard', async (req, res) => {
     });
 
     // Dynamic database fallback calculation: sum monthly compensation of all active employees
-    const employees = await Employee.findAll({ where: { status: 'ACTIVE' } });
+    const employees = await Employee.findAll({ where: { status: 'ACTIVE', is_system_account: false } });
     const totalBaseSalary = employees.reduce((sum, emp) => {
       const rawAnnual = Number(emp.compensationGross || 0);
-      return sum + (rawAnnual > 0 ? Math.round(rawAnnual / 12) : 0);
+      return sum + (rawAnnual > 0 ? (rawAnnual > 100000 ? Math.round(rawAnnual / 12) : rawAnnual) : 0);
     }, 0);
 
     let totalGrossCost = stats ? (Number(stats.getDataValue('totalGross')) || 0) : 0;
@@ -124,7 +124,8 @@ router.get('/deactivated-check', async (req, res) => {
     const results = [];
     for (const emp of exitedEmployees) {
       // Calculate provisional salary based on their attendance / working days
-      const monthlyCTC = emp.compensationGross ? Math.round(emp.compensationGross / 12) : 30000;
+      const rawComp = Number(emp.compensationGross || 0);
+      const monthlyCTC = rawComp > 0 ? (rawComp > 100000 ? Math.round(rawComp / 12) : rawComp) : 30000;
       results.push({
         id: emp.id,
         empCode: emp.empCode || emp.id,
@@ -257,6 +258,121 @@ router.get('/run/:id/state', async (req, res) => {
   }
 });
 
+// Helper: Resolve Employee and PayrollItem robustly across id, empCode, and name
+async function resolveEmployeeAndItem(payrollRunId, empIdentifier) {
+  const cleanId = String(empIdentifier || '').trim();
+  if (!cleanId) return { employee: null, item: null, candidateIds: [] };
+
+  // 1. Find Employee by id, empCode, or name
+  let employee = await Employee.findOne({
+    where: {
+      [Op.or]: [
+        { id: cleanId },
+        { empCode: cleanId },
+        { name: cleanId }
+      ]
+    }
+  });
+
+  if (!employee) {
+    const allEmps = await Employee.findAll();
+    employee = allEmps.find(e => 
+      String(e.id).toLowerCase() === cleanId.toLowerCase() ||
+      (e.empCode && String(e.empCode).toLowerCase() === cleanId.toLowerCase()) ||
+      (e.name && String(e.name).toLowerCase() === cleanId.toLowerCase())
+    );
+  }
+
+  // 2. Build candidate IDs
+  const candidateIds = [
+    cleanId,
+    ...(employee ? [String(employee.id), employee.empCode, employee.name].filter(Boolean) : [])
+  ];
+
+  // 3. Find PayrollItem
+  const item = await PayrollItem.findOne({
+    where: {
+      payrollRunId,
+      employeeId: { [Op.in]: candidateIds }
+    }
+  });
+
+  return { employee, item, candidateIds };
+}
+
+// Runs whose stored items must not change: paid out, or being rebuilt by the engine right now
+const FROZEN_RUN_STATUSES = ['PAID', 'PROCESSING'];
+
+const itemFingerprint = (item) => JSON.stringify([
+  item.workingDays, item.workedDays, item.lopDays, item.grossEarned, item.totalDeductions,
+  item.netSalary, item.reimbursements, item.earningsBreakdown, item.deductionsBreakdown
+]);
+
+// Recalculates a stored PayrollItem with PayCalculator (the same figures the wizard preview shows).
+// Returns true when any stored figure changed.
+async function recalculateItem(item, employee, run) {
+  const result = await PayCalculator.computeEmployeePay({
+    employee,
+    month: run.month,
+    wizardState: run.wizardState,
+    payrollRunId: run.id,
+    mode: 'RECALC',
+    existingItem: item
+  });
+
+  const before = itemFingerprint(item);
+  item.set(PayCalculator.toPayrollItemFields(result));
+  if (item.status === 'FAILED') item.status = 'COMPLETED';
+  const notes = [...result.notes];
+  if (!employee.bankAccountNo || !employee.bankIfscCode) notes.push('Missing bank details. Disbursement will fail.');
+  item.errorLog = notes.join(' | ');
+  await item.save();
+  return itemFingerprint(item) !== before;
+}
+
+async function refreshRunTotals(run) {
+  const items = await PayrollItem.findAll({ where: { payrollRunId: run.id, status: { [Op.ne]: 'SKIPPED_EXIT' } } });
+  run.totalGross = items.reduce((sum, item) => sum + (Number(item.grossEarned) || 0), 0);
+  run.totalDeductions = items.reduce((sum, item) => sum + (Number(item.totalDeductions) || 0), 0);
+  run.totalNet = items.reduce((sum, item) => sum + (Number(item.netSalary) || 0), 0);
+  await run.save();
+}
+
+// Brings a processed run's stored items, totals and already-generated payslips in line with its latest wizard state
+async function recalculateRunItems(runId, onlyEmployeeIds) {
+  const run = await PayrollRun.findByPk(runId);
+  if (!run || FROZEN_RUN_STATUSES.includes(run.status)) return;
+
+  const items = await PayrollItem.findAll({ where: { payrollRunId: run.id } });
+  if (items.length === 0) return;
+  const employees = await Employee.findAll({ where: { id: { [Op.in]: items.map(item => item.employeeId) } } });
+
+  for (const item of items) {
+    if (item.status === 'SKIPPED_EXIT') continue;
+    if (onlyEmployeeIds && !onlyEmployeeIds.includes(String(item.employeeId))) continue;
+    const employee = employees.find(e => String(e.id) === String(item.employeeId));
+    if (!employee) continue;
+
+    const changed = await recalculateItem(item, employee, run);
+    if (changed && await Payslip.count({ where: { payrollItemId: item.id } }) > 0) {
+      await PayslipGenerator.generatePayslipForEmployee(item.id);
+    }
+  }
+  await refreshRunTotals(run);
+}
+
+// Serialises recalculations per run, so overlapping wizard auto-saves can't leave items computed from an older state
+const runRecalcChains = new Map();
+function syncRunItems(runId, onlyEmployeeIds = null) {
+  const previous = runRecalcChains.get(runId) || Promise.resolve();
+  const current = previous.catch(() => {}).then(() => recalculateRunItems(runId, onlyEmployeeIds));
+  runRecalcChains.set(runId, current);
+  current
+    .finally(() => { if (runRecalcChains.get(runId) === current) runRecalcChains.delete(runId); })
+    .catch(() => {});
+  return current;
+}
+
 // 2. Save / Update wizard session state for a payroll run
 router.put('/run/:id/state', async (req, res) => {
   try {
@@ -275,15 +391,38 @@ router.put('/run/:id/state', async (req, res) => {
       ...incomingLop
     };
 
+    const incomingWorkingDays = incomingState.editedWorkingDays && typeof incomingState.editedWorkingDays === 'object' ? incomingState.editedWorkingDays : {};
+    const currentWorkingDays = currentState.editedWorkingDays && typeof currentState.editedWorkingDays === 'object' ? currentState.editedWorkingDays : {};
+    const mergedWorkingDays = {
+      ...currentWorkingDays,
+      ...incomingWorkingDays
+    };
+
+    const incomingLeaves = incomingState.editedLeaves && typeof incomingState.editedLeaves === 'object' ? incomingState.editedLeaves : {};
+    const currentLeaves = currentState.editedLeaves && typeof currentState.editedLeaves === 'object' ? currentState.editedLeaves : {};
+    const mergedLeaves = {
+      ...currentLeaves,
+      ...incomingLeaves
+    };
+
     const mergedState = {
       ...currentState,
       ...incomingState,
       editedLop: mergedLop,
+      editedWorkingDays: mergedWorkingDays,
+      editedLeaves: mergedLeaves,
       updatedAt: new Date().toISOString()
     };
 
     run.wizardState = mergedState;
     await run.save();
+
+    // Keep already-processed items (and their payslips) identical to what the wizard now shows
+    try {
+      await syncRunItems(run.id);
+    } catch (syncErr) {
+      console.warn('Error syncing existing payroll items during state save:', syncErr.message);
+    }
 
     return res.status(200).json({
       success: true,
@@ -296,7 +435,7 @@ router.put('/run/:id/state', async (req, res) => {
   }
 });
 
-// 3. Direct LOP save endpoint for single employee (persists without requiring prior run processing)
+// 3. Direct LOP save endpoint for single employee with candidate matching & cascade recalculation
 router.put('/run/:id/lop', async (req, res) => {
   try {
     const { id } = req.params;
@@ -310,30 +449,121 @@ router.put('/run/:id/lop', async (req, res) => {
     const currentState = typeof currentRaw === 'string' ? JSON.parse(currentRaw) : currentRaw;
     const currentEditedLop = currentState.editedLop || {};
 
-    currentEditedLop[employeeId] = Number(lopDays || 0);
+    const numericLop = Number(lopDays || 0);
+    currentEditedLop[employeeId] = numericLop;
+
+    const { employee, item } = await resolveEmployeeAndItem(id, employeeId);
+    if (employee) {
+      if (employee.id) currentEditedLop[employee.id] = numericLop;
+      if (employee.empCode) currentEditedLop[employee.empCode] = numericLop;
+    }
     currentState.editedLop = currentEditedLop;
     currentState.updatedAt = new Date().toISOString();
 
     run.wizardState = currentState;
     await run.save();
 
-    // If an item already exists in payroll_items for this employee, update it too
-    const item = await PayrollItem.findOne({ where: { payrollRunId: id, employeeId } });
-    if (item) {
-      item.lopDays = Number(lopDays || 0);
-      item.workedDays = Math.max(30 - Number(lopDays || 0), 0);
-      await item.save();
+    if (item && employee) {
+      await syncRunItems(run.id, [String(employee.id)]);
+      await item.reload();
     }
 
     return res.status(200).json({
       success: true,
       message: `LOP of ${lopDays} days saved successfully for employee.`,
       employeeId,
-      lopDays: Number(lopDays || 0),
-      wizardState: currentState
+      lopDays: numericLop,
+      wizardState: currentState,
+      updatedItem: item
     });
   } catch (error) {
     console.error('Error saving LOP:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// 4. Direct Working Days save endpoint for single employee with candidate matching & cascade recalculation
+router.put('/run/:id/working-days', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { employeeId, workingDays } = req.body;
+    if (!employeeId) return res.status(400).json({ error: 'employeeId is required.' });
+
+    const run = await PayrollRun.findByPk(id);
+    if (!run) return res.status(404).json({ error: 'Payroll run not found.' });
+
+    const currentRaw = run.wizardState || {};
+    const currentState = typeof currentRaw === 'string' ? JSON.parse(currentRaw) : currentRaw;
+    const currentEditedWd = currentState.editedWorkingDays || {};
+
+    const numWd = Number(workingDays || 0);
+    currentEditedWd[employeeId] = numWd;
+
+    const { employee, item } = await resolveEmployeeAndItem(id, employeeId);
+    if (employee) {
+      if (employee.id) currentEditedWd[employee.id] = numWd;
+      if (employee.empCode) currentEditedWd[employee.empCode] = numWd;
+    }
+    currentState.editedWorkingDays = currentEditedWd;
+    currentState.updatedAt = new Date().toISOString();
+
+    run.wizardState = currentState;
+    await run.save();
+
+    if (item && employee) {
+      await syncRunItems(run.id, [String(employee.id)]);
+      await item.reload();
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Working days of ${numWd} saved successfully for employee.`,
+      employeeId,
+      workingDays: numWd,
+      wizardState: currentState,
+      updatedItem: item
+    });
+  } catch (error) {
+    console.error('Error saving working days:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// 5. Direct Leaves save endpoint for single employee
+router.put('/run/:id/leaves', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { employeeId, leaves } = req.body;
+    if (!employeeId) return res.status(400).json({ error: 'employeeId is required.' });
+
+    const run = await PayrollRun.findByPk(id);
+    if (!run) return res.status(404).json({ error: 'Payroll run not found.' });
+
+    const currentRaw = run.wizardState || {};
+    const currentState = typeof currentRaw === 'string' ? JSON.parse(currentRaw) : currentRaw;
+    const currentEditedLeaves = currentState.editedLeaves || {};
+
+    currentEditedLeaves[employeeId] = leaves || {};
+    const { employee } = await resolveEmployeeAndItem(id, employeeId);
+    if (employee) {
+      if (employee.id) currentEditedLeaves[employee.id] = leaves || {};
+      if (employee.empCode) currentEditedLeaves[employee.empCode] = leaves || {};
+    }
+    currentState.editedLeaves = currentEditedLeaves;
+    currentState.updatedAt = new Date().toISOString();
+
+    run.wizardState = currentState;
+    await run.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Leaves saved successfully for employee.',
+      employeeId,
+      leaves,
+      wizardState: currentState
+    });
+  } catch (error) {
+    console.error('Error saving leaves:', error);
     return res.status(500).json({ error: error.message });
   }
 });
@@ -346,8 +576,12 @@ router.post('/process', async (req, res) => {
     const run = await PayrollRun.findByPk(payrollRunId);
     if (!run) return res.status(404).json({ error: 'Payroll run not found.' });
 
-    if (run.status === 'PROCESSING') {
+    // A run left in PROCESSING by a crashed or restarted job can be processed again
+    if (run.status === 'PROCESSING' && PayrollQueue.isRunActive(run.id)) {
       return res.status(400).json({ error: 'Payroll run is already processing.' });
+    }
+    if (run.status === 'PAID') {
+      return res.status(400).json({ error: 'Payroll for this month has already been released and is locked.' });
     }
 
     const { includedExitedEmployeeIds, skippedExitedEmployeeIds } = req.body;
@@ -380,117 +614,25 @@ router.post('/approve', async (req, res) => {
 router.post('/disburse', async (req, res) => {
   try {
     const { payrollRunId } = req.body;
-    const run = await PayrollRun.findByPk(payrollRunId);
+    let run = await PayrollRun.findByPk(payrollRunId);
     if (!run) return res.status(404).json({ error: 'Payroll run not found.' });
-
-    // Check if PayrollItems already exist for this run
-    const existingItems = await PayrollItem.findAll({ where: { payrollRunId } });
-
-    // If wizard was used (no backend items created), auto-create items from active & checked exited employees
-    if (existingItems.length === 0) {
-      const { includedExitedEmployeeIds = [], skippedExitedEmployees = [] } = req.body;
-      const includedSet = new Set((includedExitedEmployeeIds || []).map(String));
-
-      // Fetch active + selected exited employees
-      const employees = await Employee.findAll({
-        where: {
-          [Op.or]: [
-            { status: 'ACTIVE' },
-            { id: { [Op.in]: Array.from(includedSet) } }
-          ]
-        }
-      });
-
-      for (const emp of employees) {
-        const monthlyCTC = emp.compensationGross
-          ? Math.round(emp.compensationGross / 12)
-          : 30000; // fallback default
-
-        const basic = Math.round(monthlyCTC * 0.50);
-        const hra = Math.round(monthlyCTC * 0.30);
-        const other = Math.max(0, monthlyCTC - basic - hra);
-        const pfWage = basic + other;
-        const grossEarned = basic + hra + other;
-
-        let pfEE = 0;
-        if (emp.pfEligible !== false) {
-          if (emp.pfAmount && Number(emp.pfAmount) > 0) {
-            pfEE = Number(emp.pfAmount);
-          } else {
-            pfEE = pfWage < 15000 ? Math.round(pfWage * 0.12) : 1800;
-          }
-        }
-
-        const vpfEE = (emp.vpfEligible && Number(emp.vpfAmount) > 0) ? Number(emp.vpfAmount) : 0;
-        const esi = (emp.esiEligible !== false && grossEarned <= 21000) ? Math.round(grossEarned * 0.0075) : 0;
-        let pt = 0;
-        try {
-          const ptResult = await ProfessionalTaxService.calculateProfessionalTax({
-            employee: emp,
-            grossSalary: grossEarned,
-            basicSalary: basic,
-            taxableSalary: grossEarned - (pfEE + vpfEE + esi),
-            totalEarnings: grossEarned,
-            payrollDate: run.month ? `${run.month}-01` : new Date().toISOString().split('T')[0],
-            attendanceRatio: 1
-          });
-          pt = ptResult.ptAmount || 0;
-        } catch (ptErr) {
-          console.warn('Dynamic PT calculation error, fallback to 0:', ptErr.message);
-          pt = 0;
-        }
-        const lwf = emp.lwfEligible !== false ? Math.round((Number(emp.lwfAmount) || 60) / 12) : 0;
-        const tds = 0;
-        const totalDeductions = pfEE + vpfEE + esi + pt + lwf + tds;
-        const netSalary = Math.max(0, grossEarned - totalDeductions);
-
-        // Skip if duplicate exists
-        const exists = await PayrollItem.findOne({ where: { payrollRunId, employeeId: emp.id } });
-        if (exists) continue;
-
-        await PayrollItem.create({
-          payrollRunId,
-          employeeId: emp.id,
-          workedDays: 30,
-          lopDays: 0,
-          grossEarned,
-          totalDeductions,
-          netSalary,
-          status: 'COMPLETED',
-          earningsBreakdown: { BASIC: basic, HRA: hra, OTHER_ALLOWANCE: other },
-          deductionsBreakdown: { PF_EE: pfEE, VPF_EE: vpfEE, ESI_EE: esi, PT: pt, LWF_EE: lwf, TDS: tds }
-        });
-      }
-    } else {
-      // Mark existing items COMPLETED
-      await PayrollItem.update(
-        { status: 'COMPLETED' },
-        { where: { payrollRunId } }
-      );
+    if (run.status === 'PROCESSING' && PayrollQueue.isRunActive(run.id)) {
+      return res.status(400).json({ error: 'Payroll run is still processing. Please try again in a moment.' });
     }
 
-    // Create SKIPPED_EXIT items for unchecked exited employees if provided
-    const { skippedExitedEmployees = [] } = req.body;
-    for (const skipped of skippedExitedEmployees) {
-      const exists = await PayrollItem.findOne({ where: { payrollRunId, employeeId: skipped.id } });
-      if (!exists) {
-        await PayrollItem.create({
-          payrollRunId,
-          employeeId: skipped.id,
-          workedDays: skipped.payableDays || 0,
-          lopDays: skipped.lopDays || 0,
-          grossEarned: skipped.calculatedSalary || 0,
-          totalDeductions: 0,
-          netSalary: skipped.calculatedSalary || 0,
-          status: 'SKIPPED_EXIT',
-          errorLog: `Deactivated employee (${skipped.exitDate || 'Previous month'}) - skipped by admin selection`,
-          earningsBreakdown: { BASIC: skipped.calculatedSalary || 0 },
-          deductionsBreakdown: {}
-        });
+    if (run.status !== 'PAID') {
+      const itemCount = await PayrollItem.count({ where: { payrollRunId } });
+      if (itemCount === 0 || run.status === 'PROCESSING' || run.status === 'FAILED') {
+        // Not (successfully) processed yet: run the same engine Lock & Freeze uses
+        run = await PayrollEngine.executePayRun(payrollRunId, { includedExitedEmployeeIds: req.body.includedExitedEmployeeIds || [] });
+      } else {
+        // Release exactly what the wizard shows: bring stored items in line with the final wizard state
+        await syncRunItems(run.id);
+        await run.reload();
       }
     }
 
-    // Transition run status to PAID
+    await refreshRunTotals(run);
     run.status = 'PAID';
     await run.save();
 
@@ -513,13 +655,101 @@ router.post('/disburse', async (req, res) => {
   }
 });
 
+// Same shape as PayCalculator.computeEmployeePay() for an item that is already stored
+function storedItemPreviewRow(item) {
+  return {
+    employeeId: item.employeeId,
+    workingDays: item.workingDays,
+    workedDays: item.workedDays,
+    lopDays: item.lopDays,
+    earnings: item.earningsBreakdown || {},
+    deductions: item.deductionsBreakdown || {},
+    grossEarned: item.grossEarned,
+    totalDeductions: item.totalDeductions,
+    reimbursements: item.reimbursements || 0,
+    netSalary: item.netSalary,
+    isHeld: /on hold/i.test(item.errorLog || ''),
+    notes: item.errorLog ? [item.errorLog] : []
+  };
+}
+
+// Pay run wizard preview. Every salary figure the wizard shows (Step 1, Step 7/8 tables, CSV register)
+// comes from PayCalculator - the same calculation Lock & Freeze stores and Form W / payslips read back.
+router.post('/run/:id/preview', async (req, res) => {
+  try {
+    const run = await PayrollRun.findByPk(req.params.id);
+    if (!run) return res.status(404).json({ error: 'Payroll run not found.' });
+
+    const items = await PayrollItem.findAll({ where: { payrollRunId: run.id } });
+
+    // Released payroll is final: show exactly what was paid
+    if (run.status === 'PAID' && items.length > 0) {
+      return res.status(200).json({ runId: run.id, month: run.month, status: run.status, rows: items.map(storedItemPreviewRow) });
+    }
+
+    // Unsaved wizard edits are previewed by sending the current wizard state in the body
+    const wizardState = PayCalculator.parseWizardState(req.body && req.body.wizardState ? req.body.wizardState : run.wizardState);
+    const employees = await Employee.findAll({ where: PayCalculator.payRunWorkforceWhere(wizardState), order: [['name', 'ASC']] });
+
+    const rows = [];
+    for (const employee of employees) {
+      const existingItem = items.find(item => String(item.employeeId) === String(employee.id) && item.status !== 'SKIPPED_EXIT');
+      rows.push(await PayCalculator.computeEmployeePay({
+        employee,
+        month: run.month,
+        wizardState,
+        payrollRunId: run.id,
+        mode: existingItem ? 'RECALC' : 'PREVIEW',
+        existingItem
+      }));
+    }
+    return res.status(200).json({ runId: run.id, month: run.month, status: run.status, rows });
+  } catch (error) {
+    console.error('Payroll preview error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+const ITEM_EMPLOYEE_ATTRIBUTES = [
+  'id', 'name', 'empCode', 'department', 'designation',
+  'bankAccountNo', 'bankIfscCode', 'bankName',
+  'panNumber', 'uanNumber', 'esiNumber',
+  'fatherName', 'gender', 'dob', 'joiningDate',
+  'compensationGross', 'pfEligible', 'esiEligible', 'ptEligible'
+];
+
 router.get('/runs/:id/items', async (req, res) => {
   try {
     const items = await PayrollItem.findAll({
       where: { payrollRunId: req.params.id },
-      include: [{ model: Employee, as: 'employee', attributes: ['id', 'name', 'department', 'designation', 'bankAccountNo'] }]
+      include: [{ model: Employee, as: 'employee', attributes: ITEM_EMPLOYEE_ATTRIBUTES }]
     });
-    return res.status(200).json(items);
+    if (items.length > 0) return res.status(200).json(items);
+
+    const run = await PayrollRun.findByPk(req.params.id);
+    if (!run) return res.status(200).json([]);
+
+    // Not processed yet: once the wizard reaches validation (Step 7), show what processing will store
+    const wizardState = PayCalculator.parseWizardState(run.wizardState);
+    const isApprovedOrLocked = ['APPROVED', 'PAID', 'COMPLETED', 'LOCKED'].includes(run.status);
+    if (Number(wizardState.completedStep || 0) < 7 && !isApprovedOrLocked) {
+      return res.status(200).json([]);
+    }
+
+    const employees = await Employee.findAll({ where: PayCalculator.payRunWorkforceWhere(wizardState) });
+    const draftItems = [];
+    for (const employee of employees) {
+      const result = await PayCalculator.computeEmployeePay({ employee, month: run.month, wizardState, payrollRunId: run.id, mode: 'PREVIEW' });
+      draftItems.push({
+        id: `synth-${employee.id}`,
+        payrollRunId: run.id,
+        employeeId: employee.id,
+        ...PayCalculator.toPayrollItemFields(result),
+        status: 'DRAFT',
+        employee: Object.fromEntries(ITEM_EMPLOYEE_ATTRIBUTES.map(attr => [attr, employee[attr]]))
+      });
+    }
+    return res.status(200).json(draftItems);
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
@@ -565,6 +795,7 @@ router.get('/payslips', async (req, res) => {
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const archiver = require('archiver');
 
 const payslipStorage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -635,6 +866,222 @@ router.post('/payslips/upload', uploadPayslipFile.single('file'), async (req, re
   } catch (error) {
     console.error('Error uploading custom payslip:', error);
     return res.status(500).json({ error: error.message });
+  }
+});
+
+// --- DOWNLOAD PAYSLIP / BULK ARCHIVE ---
+function resolvePayslipDiskPath(rawPath) {
+  if (!rawPath) return null;
+  if (path.isAbsolute(rawPath) && fs.existsSync(rawPath)) return rawPath;
+
+  let clean = String(rawPath).replace(/^[/\\]+/, '');
+  if (clean.startsWith('static/uploads/')) {
+    clean = clean.replace('static/uploads/', '');
+  }
+  if (clean.startsWith('storage/')) {
+    clean = clean.replace('storage/', '');
+  }
+
+  const possibleBaseDirs = [
+    process.env.STORAGE_PATH,
+    path.join(__dirname, '../../../../storage'),
+    path.join(__dirname, '../../../../../storage'),
+    path.join(__dirname, '../../../../uploads'),
+    path.join(__dirname, '../../../../../uploads'),
+    path.join(__dirname, '../../../../static/uploads'),
+    path.join(__dirname, '../../../../../static/uploads'),
+    process.cwd()
+  ].filter(Boolean);
+
+  for (const base of possibleBaseDirs) {
+    const full = path.join(base, clean);
+    if (fs.existsSync(full)) return full;
+    const fullWithPayslips = path.join(base, 'payslips', path.basename(clean));
+    if (fs.existsSync(fullWithPayslips)) return fullWithPayslips;
+  }
+  return null;
+}
+
+router.get('/payslips/download-archive', async (req, res) => {
+  try {
+    const { month, employeeId } = req.query;
+    if (!month) {
+      return res.status(400).json({ error: 'Month (YYYY-MM) is required.' });
+    }
+
+    // 1. Single Employee Payslip Download (Returns direct .pdf)
+    if (employeeId && employeeId !== 'ALL' && employeeId !== '') {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(employeeId));
+      const whereCondition = { month };
+      if (isUuid) {
+        whereCondition[Op.or] = [
+          { employeeId: String(employeeId) },
+          { id: String(employeeId) }
+        ];
+      } else {
+        whereCondition.employeeId = String(employeeId);
+      }
+
+      let payslip = await Payslip.findOne({
+        where: whereCondition,
+        include: [
+          { model: Employee, as: 'employee' },
+          { model: PayrollItem, as: 'payrollItem' }
+        ]
+      });
+
+      // If not found by direct employeeId, match employee by empCode or id
+      if (!payslip) {
+        const emp = await Employee.findOne({
+          where: {
+            [Op.or]: [
+              { id: String(employeeId) },
+              { empCode: String(employeeId) }
+            ]
+          }
+        });
+        if (emp) {
+          payslip = await Payslip.findOne({
+            where: { month, employeeId: emp.id },
+            include: [
+              { model: Employee, as: 'employee' },
+              { model: PayrollItem, as: 'payrollItem' }
+            ]
+          });
+        }
+      }
+
+      if (!payslip) {
+        return res.status(404).json({ error: `No payslip found for employee ${employeeId} in cycle ${month}.` });
+      }
+
+      const emp = payslip.employee || {};
+      const rawName = emp.name || emp.empCode || payslip.employeeId || 'Employee';
+      const cleanName = String(rawName).replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '_') || 'Employee';
+      const downloadFilename = `Payslip_${cleanName}_${month}.pdf`;
+
+      const shouldRegenerate = req.query.regenerate === 'true' || req.query.fresh === 'true';
+      // Check if already on disk as .pdf (unless fresh regeneration requested)
+      const diskPath = !shouldRegenerate ? resolvePayslipDiskPath(payslip.filePath) : null;
+      if (diskPath && diskPath.toLowerCase().endsWith('.pdf') && fs.existsSync(diskPath)) {
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="${downloadFilename}"`);
+        return fs.createReadStream(diskPath).pipe(res);
+      }
+
+      // Check if a companion .pdf exists in the storage directory
+      if (diskPath && fs.existsSync(diskPath)) {
+        const companionPdf = diskPath.replace(/\.html$/i, '.pdf');
+        if (fs.existsSync(companionPdf)) {
+          res.setHeader('Content-Type', 'application/pdf');
+          res.setHeader('Content-Disposition', `attachment; filename="${downloadFilename}"`);
+          return fs.createReadStream(companionPdf).pipe(res);
+        }
+      }
+
+      // Generate vector PDF on the fly
+      const pdfBuffer = await PayslipGenerator.generatePdfBuffer(emp, month, payslip.payrollItem);
+
+      // Cache PDF to storage directory for fast subsequent downloads
+      try {
+        const STORAGE_PATH = process.env.STORAGE_PATH || path.join(__dirname, '../../../../storage');
+        const folder = path.join(STORAGE_PATH, 'payslips');
+        if (!fs.existsSync(folder)) fs.mkdirSync(folder, { recursive: true });
+        const cachePath = path.join(folder, `payslip_${emp.id || payslip.employeeId}_${month}.pdf`);
+        fs.writeFileSync(cachePath, pdfBuffer);
+      } catch (cacheErr) {
+        console.warn('Could not cache generated payslip PDF:', cacheErr.message);
+      }
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${downloadFilename}"`);
+      return res.send(pdfBuffer);
+    }
+
+    // 2. Bulk All Employees Payslips Download (ZIP archive with individual PDF files per employee)
+    const payslips = await Payslip.findAll({
+      where: { month },
+      include: [
+        { model: Employee, as: 'employee' },
+        { model: PayrollItem, as: 'payrollItem' }
+      ],
+      order: [['createdAt', 'ASC']]
+    });
+
+    if (!payslips || payslips.length === 0) {
+      return res.status(404).json({ error: `No payslips found for cycle ${month}.` });
+    }
+
+    const zipFilename = `Payslips_All_Employees_${month}.zip`;
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${zipFilename}"`);
+
+    const archive = archiver('zip', { zlib: { level: 9 } });
+
+    archive.on('error', (err) => {
+      console.error('Error in payslips zip archive creation:', err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Archive creation failed: ' + err.message });
+      }
+    });
+
+    archive.pipe(res);
+
+    const usedNames = new Set();
+    const STORAGE_PATH = process.env.STORAGE_PATH || path.join(__dirname, '../../../../storage');
+    const folder = path.join(STORAGE_PATH, 'payslips');
+    if (!fs.existsSync(folder)) fs.mkdirSync(folder, { recursive: true });
+
+    for (const ps of payslips) {
+      const emp = ps.employee || {};
+      const rawName = emp.name || emp.empCode || ps.employeeId || 'Employee';
+      const cleanName = String(rawName).replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '_') || 'Employee';
+
+      let entryName = `Payslip_${cleanName}_${month}.pdf`;
+      if (usedNames.has(entryName.toLowerCase())) {
+        const disambig = String(emp.empCode || ps.employeeId || Math.random().toString(36).substring(7)).replace(/[^\w-]/g, '');
+        entryName = `Payslip_${cleanName}_${disambig}_${month}.pdf`;
+      }
+      usedNames.add(entryName.toLowerCase());
+
+      // If pre-existing .pdf exists on disk (unless fresh regeneration requested)
+      const shouldRegenerate = req.query.regenerate === 'true' || req.query.fresh === 'true';
+      const diskPath = !shouldRegenerate ? resolvePayslipDiskPath(ps.filePath) : null;
+      if (diskPath && diskPath.toLowerCase().endsWith('.pdf') && fs.existsSync(diskPath)) {
+        archive.file(diskPath, { name: entryName });
+        continue;
+      }
+
+      // Check companion .pdf
+      if (diskPath && fs.existsSync(diskPath)) {
+        const companionPdf = diskPath.replace(/\.html$/i, '.pdf');
+        if (fs.existsSync(companionPdf)) {
+          archive.file(companionPdf, { name: entryName });
+          continue;
+        }
+      }
+
+      // Generate PDF buffer using PDFKit
+      try {
+        const pdfBuffer = await PayslipGenerator.generatePdfBuffer(emp, month, ps.payrollItem);
+        // Cache to disk
+        try {
+          const cachePath = path.join(folder, `payslip_${emp.id || ps.employeeId}_${month}.pdf`);
+          fs.writeFileSync(cachePath, pdfBuffer);
+        } catch (e) {}
+
+        archive.append(pdfBuffer, { name: entryName });
+      } catch (genErr) {
+        console.error(`Error generating PDF for ${rawName}:`, genErr);
+      }
+    }
+
+    await archive.finalize();
+  } catch (error) {
+    console.error('Error downloading payslip archive:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: error.message });
+    }
   }
 });
 
@@ -897,34 +1344,29 @@ router.post('/tax/:employeeId', async (req, res) => {
 router.put('/items/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { lopDays } = req.body;
-    
+    const { lopDays, workingDays } = req.body;
+
     const item = await PayrollItem.findByPk(id);
     if (!item) return res.status(404).json({ error: 'Payroll item not found.' });
 
+    const run = await PayrollRun.findByPk(item.payrollRunId);
+    const employee = await Employee.findByPk(item.employeeId);
+    if (!run || !employee) return res.status(404).json({ error: 'Payroll run or employee not found.' });
+
+    // Edits live in the wizard state (the calculator's input); the item is then recalculated from it
+    const wizardState = PayCalculator.parseWizardState(run.wizardState);
     if (lopDays !== undefined) {
-      item.lopDays = Number(lopDays);
-      
-      const employee = await Employee.findByPk(item.employeeId);
-      const structure = await SalaryStructure.findOne({ where: { employeeId: item.employeeId, status: 'ACTIVE' } });
-      
-      if (structure && employee) {
-        const totalDays = 30;
-        const workedDays = Math.max(totalDays - item.lopDays, 0);
-        const prorationFactor = workedDays / totalDays;
-        
-        item.workedDays = workedDays;
-        item.grossEarned = Math.round(structure.grossSalary * prorationFactor);
-        
-        const epf = employee.pfEligible !== false ? Math.round((structure.grossSalary * 0.50) * prorationFactor * 0.12) : 0;
-        const net = item.grossEarned - epf;
-        
-        item.deductionsBreakdown = JSON.stringify({ EPF_EE: epf });
-        item.netSalary = Math.max(net, 0);
-      }
+      wizardState.editedLop = { ...(wizardState.editedLop || {}), [employee.id]: Number(lopDays) };
     }
-    
-    await item.save();
+    if (workingDays !== undefined) {
+      wizardState.editedWorkingDays = { ...(wizardState.editedWorkingDays || {}), [employee.id]: Number(workingDays) };
+    }
+    wizardState.updatedAt = new Date().toISOString();
+    run.wizardState = wizardState;
+    await run.save();
+
+    await syncRunItems(run.id, [String(employee.id)]);
+    await item.reload();
     return res.status(200).json(item);
   } catch (error) {
     return res.status(500).json({ error: error.message });

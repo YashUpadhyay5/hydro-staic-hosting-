@@ -13,12 +13,13 @@ export default function Login({ onLoginSuccess }) {
         setError('');
         try {
             const res = await api.login(email, password);
-            if (res.user && res.user.role === 'ADMIN') {
+            const userRole = String(res.user?.role || '').toUpperCase();
+            if (res.user && userRole !== 'EMPLOYEE') {
                 localStorage.setItem('adminUser', JSON.stringify(res.user));
                 localStorage.setItem('adminToken', res.token);
                 onLoginSuccess(res.user, res.token);
             } else {
-                throw new Error("Access Denied: Admins only.");
+                throw new Error("Access Denied: Web Dashboard access is restricted to authorized roles.");
             }
         } catch (err) {
             setError(err.message || 'Invalid credentials.');

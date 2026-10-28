@@ -132,16 +132,17 @@ const runSeeders = async (sequelize) => {
     for (const emp of employees) {
       const existing = await SalaryStructure.findOne({ where: { employeeId: emp.id } });
       if (!existing) {
-        const gross = emp.compensationGross || 50000;
+        const annualComp = Number(emp.compensationGross || 0);
+        const monthlyGross = annualComp > 0 ? Math.round(annualComp / 12) : 25000;
         await SalaryStructure.create({
           employeeId: emp.id,
-          ctc: gross * 1.2, // Rough estimate
-          grossSalary: gross,
+          ctc: annualComp > 0 ? annualComp : monthlyGross * 12,
+          grossSalary: monthlyGross,
           effectiveFrom: '2026-04-01',
           version: 1,
           status: 'ACTIVE'
         });
-        console.log(`Seeded default salary structure for employee: ${emp.name} (Gross: ₹${gross})`);
+        console.log(`Seeded default salary structure for employee: ${emp.name} (Monthly Gross: ₹${monthlyGross})`);
       }
     }
   } catch (seedErr) {

@@ -1,17 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { api } from '../../../services/api';
 
-// Tab Subcomponents
+// Tab Subcomponents — core tabs load with PayrollView for instant tab switching
 import DashboardTab from './DashboardTab';
 import PayRunsTab from './PayRunsTab';
 import PayrollAdminTab from './PayrollAdminTab';
 import ApprovalsTab from './ApprovalsTab';
 import LoansTab from './LoansTab';
 import BenefitsTab from './BenefitsTab';
-import ReportTab from './ReportTab';
 import SettingsTab from './SettingsTab';
 import ProfessionalTaxTab from './ProfessionalTaxTab';
 import RunItemsModal from './RunItemsModal';
+
+// Heavy compliance report tab is lazy — only loaded when user opens Reports
+const ReportTab = lazy(() => import('./ReportTab'));
 
 export default function PayrollView({ employees = [], adminUser }) {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -36,6 +38,51 @@ export default function PayrollView({ employees = [], adminUser }) {
   const [leaves, setLeaves] = useState([]);
   const [attendance, setAttendance] = useState([]);
   const [fetchedEmployees, setFetchedEmployees] = useState([]);
+  const [liveEmployees, setLiveEmployees] = useState(employees);
+
+  useEffect(() => {
+    if (employees && employees.length > 0) {
+      setLiveEmployees(employees);
+    }
+  }, [employees]);
+
+  const refreshLiveEmployees = async () => {
+    try {
+      const data = await api.getEmployees({ limit: 1000 });
+      const list = Array.isArray(data) ? data : (data?.data || []);
+      if (list && list.length > 0) {
+        setLiveEmployees(list);
+        setFetchedEmployees(list);
+      }
+    } catch (e) {
+      console.warn('Could not refresh live employees in PayrollView:', e);
+    }
+  };
+
+  useEffect(() => {
+    refreshLiveEmployees();
+  }, [activeTab]);
+
+  useEffect(() => {
+    const handleEmpUpdated = () => {
+      refreshLiveEmployees();
+      fetchDashboard();
+      fetchTabRelatedData();
+    };
+    window.addEventListener('employee-updated', handleEmpUpdated);
+    window.addEventListener('focus', handleEmpUpdated);
+    return () => {
+      window.removeEventListener('employee-updated', handleEmpUpdated);
+      window.removeEventListener('focus', handleEmpUpdated);
+    };
+  }, []);
+
+  // Report tab state — payroll run items for compliance forms
+  const [runItemsForForms, setRunItemsForForms] = useState([]);
+  const [selectedReportMonth, setSelectedReportMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
 
   // Structure edit state
   const [selectedEmployee, setSelectedEmployee] = useState('');
@@ -72,7 +119,7 @@ export default function PayrollView({ employees = [], adminUser }) {
   useEffect(() => {
     fetchDashboard();
     fetchTabRelatedData();
-  }, [activeTab]);
+  }, [activeTab, selectedReportMonth]);
 
   const fetchDashboard = async () => {
     try {
@@ -116,16 +163,33 @@ export default function PayrollView({ employees = [], adminUser }) {
         const data = await api.getPayslips();
         setPayslips(data);
       } else if (activeTab === 'report') {
-        const [psData, attData, leavesData, empData] = await Promise.all([
-          api.getPayslips().catch(() => []),
-          api.getAttendance().catch(() => []),
+        const [attData, leavesData, empData, runsData] = await Promise.all([
+          api.getAttendance({ month: selectedReportMonth }).catch(() => []),
           api.getLeaves().catch(() => []),
-          (!employees || employees.length === 0) ? api.getEmployees().catch(() => []) : Promise.resolve([])
+          api.getEmployees({ limit: 1000 }).catch(() => []),
+          api.getPayrollRuns().catch(() => [])
         ]);
-        if (psData) setPayslips(psData);
         if (attData) setAttendance(attData);
         if (leavesData) setLeaves(leavesData);
-        if (empData && empData.length > 0) setFetchedEmployees(empData);
+        if (empData) {
+          const list = Array.isArray(empData) ? empData : (empData?.data || []);
+          if (list.length > 0) setFetchedEmployees(list);
+        }
+
+        // Find the run matching selectedReportMonth and load its items (prefer PAID, then COMPLETED, then any matching run strictly for selectedReportMonth)
+        const matchedRun = (runsData || []).find(r => r.month === selectedReportMonth && (r.status === 'PAID' || r.status === 'COMPLETED' || r.status === 'APPROVED'))
+          || (runsData || []).find(r => r.month === selectedReportMonth);
+        if (matchedRun) {
+          try {
+            const items = await api.getPayrollRunItems(matchedRun.id);
+            setRunItemsForForms(items || []);
+          } catch (e) {
+            console.warn('Could not load run items for compliance forms:', e.message);
+            setRunItemsForForms([]);
+          }
+        } else {
+          setRunItemsForForms([]);
+        }
       }
     } catch (err) {
       console.error(err);
@@ -171,14 +235,46 @@ export default function PayrollView({ employees = [], adminUser }) {
     try {
       setLoading(true);
       const res = await api.processPayroll(runId, options);
-      setMessage('Processing payroll initiated. Retrying in background...');
+      setMessage('Processing payroll calculations in background...');
       
-      // Simulating simple poll check for job completion
-      setTimeout(async () => {
-        const check = await api.getPayrollRuns();
-        setRuns(check);
-        setMessage('Payroll calculations updated successfully.');
-      }, 3000);
+      // Actively poll job status or runs until completed
+      let attempts = 0;
+      const maxAttempts = 20; // 20 * 1000ms = 20 seconds max
+      let completed = false;
+      
+      while (attempts < maxAttempts && !completed) {
+        await new Promise(r => setTimeout(r, 1000));
+        attempts++;
+        if (res && res.jobId) {
+          try {
+            const jobStatus = await api.request(`/payroll/job/${res.jobId}`);
+            if (jobStatus && (jobStatus.status === 'COMPLETED' || jobStatus.status === 'FAILED')) {
+              completed = true;
+              break;
+            }
+          } catch (e) {}
+        }
+        try {
+          const freshRuns = await api.getPayrollRuns();
+          const target = freshRuns?.find(r => r.id === runId);
+          if (target && target.status !== 'PROCESSING') {
+            completed = true;
+            break;
+          }
+        } catch (e) {}
+      }
+
+      const freshRuns = await api.getPayrollRuns();
+      setRuns(freshRuns || []);
+      const updatedTarget = freshRuns?.find(r => r.id === runId);
+      if (updatedTarget) {
+        setSelectedRun(updatedTarget);
+      }
+      const freshItems = await api.getPayrollRunItems(runId);
+      setRunItems(freshItems || []);
+      setRunItemsForForms(freshItems || []);
+      fetchDashboard();
+      setMessage('Payroll calculations processed and synchronized successfully.');
     } catch (err) {
       setMessage(`Error: ${err.message}`);
     } finally {
@@ -351,13 +447,13 @@ export default function PayrollView({ employees = [], adminUser }) {
       {/* Tab views */}
       <div className="custom-scrollbar" style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
       {activeTab === 'dashboard' && (
-        <DashboardTab dashboardData={dashboardData} employees={employees} onTabChange={setActiveTab} latestRunItems={latestRunItems} leaves={leaves} />
+        <DashboardTab dashboardData={dashboardData} employees={liveEmployees} onTabChange={setActiveTab} latestRunItems={latestRunItems} leaves={leaves} />
       )}
 
       {activeTab === 'runs' && (
         <PayRunsTab
           runs={runs}
-          employees={employees}
+          employees={liveEmployees}
           adminUser={adminUser}
           reimbursements={reimbursements}
           newRunMonth={newRunMonth}
@@ -372,7 +468,7 @@ export default function PayrollView({ employees = [], adminUser }) {
 
       {activeTab === 'payroll-admin' && (
         <PayrollAdminTab
-          employees={employees}
+          employees={liveEmployees}
           selectedEmployee={selectedEmployee}
           setSelectedEmployee={setSelectedEmployee}
           ctcInput={ctcInput}
@@ -396,7 +492,7 @@ export default function PayrollView({ employees = [], adminUser }) {
 
       {activeTab === 'loans' && (
         <LoansTab
-          employees={employees}
+          employees={liveEmployees}
           loans={loans}
           loanEmp={loanEmp}
           setLoanEmp={setLoanEmp}
@@ -410,7 +506,7 @@ export default function PayrollView({ employees = [], adminUser }) {
 
       {activeTab === 'benefits' && (
         <BenefitsTab
-          employees={employees}
+          employees={liveEmployees}
           reimbursements={reimbursements}
           claimEmp={claimEmp}
           setClaimEmp={setClaimEmp}
@@ -426,29 +522,34 @@ export default function PayrollView({ employees = [], adminUser }) {
       )}
 
       {activeTab === 'report' && (
-        <ReportTab
-          employees={employees && employees.length > 0 ? employees : fetchedEmployees}
-          attendance={attendance}
-          leaves={leaves}
-          payslips={payslips}
-          taxEmp={taxEmp}
-          handleLoadTaxRecord={handleLoadTaxRecord}
-          taxRegime={taxRegime}
-          setTaxRegime={setTaxRegime}
-          sec80C={sec80C}
-          setSec80C={setSec80C}
-          sec80D={sec80D}
-          setSec80D={setSec80D}
-          rentPaid={rentPaid}
-          setRentPaid={setRentPaid}
-          handleSaveTax={handleSaveTax}
-        />
+        <Suspense fallback={<div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-secondary)' }}><i className="fa-solid fa-spinner fa-spin" style={{ marginRight: '8px' }}></i>Loading compliance reports...</div>}>
+          <ReportTab
+            setActiveTab={setActiveTab}
+            employees={liveEmployees}
+            attendance={attendance}
+            leaves={leaves}
+            runItems={runItemsForForms}
+            selectedReportMonth={selectedReportMonth}
+            setSelectedReportMonth={setSelectedReportMonth}
+            taxEmp={taxEmp}
+            handleLoadTaxRecord={handleLoadTaxRecord}
+            taxRegime={taxRegime}
+            setTaxRegime={setTaxRegime}
+            sec80C={sec80C}
+            setSec80C={setSec80C}
+            sec80D={sec80D}
+            setSec80D={setSec80D}
+            rentPaid={rentPaid}
+            setRentPaid={setRentPaid}
+            handleSaveTax={handleSaveTax}
+          />
+        </Suspense>
       )}
 
       {activeTab === 'payslips' && (
         <SettingsTab
           payslips={payslips}
-          employees={employees}
+          employees={liveEmployees}
           onReload={async () => {
             try {
               const data = await api.getPayslips();

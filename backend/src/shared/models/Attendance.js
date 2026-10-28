@@ -131,6 +131,8 @@ const Attendance = sequelize.define('Attendance', {
   timestamps: true,
   indexes: [
     { fields: ['userId', 'date'] },
+    { fields: ['userId'] },
+    { fields: ['userName'] },
     { fields: ['createdAt'] }
   ]
 });

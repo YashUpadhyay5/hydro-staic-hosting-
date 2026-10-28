@@ -35,6 +35,18 @@ const OPENCELLID_API_KEY = 'pk.689d849289c8c63708068b2ff1f63b2d';
  * @param {number|string} cellId Cell Tower Identifier
  * @returns {Promise<{latitude: number, longitude: number, accuracy: number}|null>}
  */
+let isOpenCellIdQuotaExceeded = false;
+let quotaExceededResetTime = 0;
+
+/**
+ * Resolves cellular network info to latitude and longitude.
+ * 
+ * @param {number|string} mcc Mobile Country Code
+ * @param {number|string} mnc Mobile Network Code
+ * @param {number|string} lac Local Area Code / Tracking Area Code
+ * @param {number|string} cellId Cell Tower Identifier
+ * @returns {Promise<{latitude: number, longitude: number, accuracy: number}|null>}
+ */
 async function resolveCellToCoords(mcc, mnc, lac, cellId) {
   if (!cellId) {
     return null;
@@ -49,6 +61,11 @@ async function resolveCellToCoords(mcc, mnc, lac, cellId) {
   if (MOCK_CELL_MAPPING[parsedCellId]) {
     console.log(`[CellResolver] Resolved test Cell ID ${parsedCellId} from local mock database`);
     return MOCK_CELL_MAPPING[parsedCellId];
+  }
+
+  // Circuit breaker check: If OpenCellID daily limit was exceeded, skip network lookup for 1 hour
+  if (isOpenCellIdQuotaExceeded && Date.now() < quotaExceededResetTime) {
+    return null;
   }
 
   // 2. Resolve via OpenCellID API
@@ -68,7 +85,7 @@ async function resolveCellToCoords(mcc, mnc, lac, cellId) {
         cellid: parsedCellId,
         format: 'json'
       },
-      timeout: 3000
+      timeout: 1000
     });
 
     if (response.data && response.data.lat && response.data.lon) {
@@ -78,11 +95,20 @@ async function resolveCellToCoords(mcc, mnc, lac, cellId) {
         accuracy: parseFloat(response.data.range) || 500
       };
       console.log(`[CellResolver] OpenCellID Success: Resolved Cell ID ${parsedCellId} to (${result.latitude}, ${result.longitude})`);
+      isOpenCellIdQuotaExceeded = false;
       return result;
     }
   } catch (err) {
-    const errorMsg = err.response && err.response.data ? JSON.stringify(err.response.data) : err.message;
+    const errorData = err.response && err.response.data ? err.response.data : {};
+    const errorMsg = typeof errorData === 'object' ? JSON.stringify(errorData) : err.message;
     console.warn(`[CellResolver] OpenCellID Lookup failed for Cell ID ${parsedCellId}: ${errorMsg}`);
+    
+    // Check if error is due to daily limit exceeded or unauthorized API key
+    if (errorData.code === 7 || (errorMsg && errorMsg.includes("limit exceeded"))) {
+      console.warn(`[CellResolver Circuit Breaker] Daily API limit exceeded. Bypassing OpenCellID network calls for 1 hour to maintain low latency.`);
+      isOpenCellIdQuotaExceeded = true;
+      quotaExceededResetTime = Date.now() + (60 * 60 * 1000); // 1 hour cooldown
+    }
   }
 
   return null;

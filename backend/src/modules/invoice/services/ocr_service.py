@@ -223,7 +223,8 @@ class OCRService:
                 if prefix in OCRService.IFSC_BANK_MAP:
                     bank["bank_name"] = OCRService.IFSC_BANK_MAP[prefix]
 
-        return bank
+        VALID_BANK_KEYS = {"bank_name", "account_number", "ifsc_code", "branch", "account_name", "ifsc", "account_no"}
+        return {k: v for k, v in bank.items() if k in VALID_BANK_KEYS and v is not None}
 
     @staticmethod
     def _map_model_output_to_template(output, execution_time_ms=None):
@@ -430,7 +431,14 @@ class OCRService:
 
     @staticmethod
     def _call_runpod_serverless(api_url, base64_data, filename, headers, template_config=None):
-        is_pdf = filename.lower().endswith(".pdf")
+        import base64
+        raw_bytes = None
+        try:
+            raw_bytes = base64.b64decode(base64_data)
+        except Exception:
+            raw_bytes = b""
+
+        is_pdf = filename.lower().endswith(".pdf") or (bool(raw_bytes) and raw_bytes.startswith(b"%PDF"))
         
         # Build requested_schema dynamically based on enabled fields in template_config
         requested_schema = {}
@@ -569,51 +577,47 @@ Extraction Guidelines:
 Output Schema:
 {json.dumps(requested_schema, indent=2)}"""
 
-        user_prompt = "Extract all invoice data including vendor, customer, line items, taxes, and bank details (bank name, account number, IFSC code) in the requested JSON structure."
+        import re
+        clean_name = re.sub(r"\.[^.]+$", "", filename or "document").strip()
+        img_filename = f"{clean_name}.jpg"
 
         input_data = {
-            "filename": filename,
-            "system_prompt": system_prompt,
-            "user_prompt": user_prompt
+            "filename": img_filename,
         }
-        if template_config:
-            input_data["template_config"] = template_config
-            input_data["schema"] = template_config
             
-        if is_pdf:
+        raw_bytes = None
+        if base64_data:
+            try:
+                raw_bytes = base64.b64decode(base64_data)
+            except Exception as b64_err:
+                print(f"[RunPod Decode Error] {b64_err}")
+                raw_bytes = None
+
+        is_pdf_doc = filename.lower().endswith(".pdf") or (raw_bytes and raw_bytes.startswith(b"%PDF"))
+
+        if is_pdf_doc and raw_bytes:
             pdf_image_base64 = None
             try:
                 import fitz
-                import base64
-                pdf_bytes = base64.b64decode(base64_data)
-                doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-                if len(doc) > 0:
-                    page = doc.load_page(0)
-                    pix = page.get_pixmap(dpi=150)
-                    img_data = pix.tobytes("png")
+                pdf_doc = fitz.open(stream=raw_bytes, filetype="pdf")
+                if len(pdf_doc) > 0:
+                    page = pdf_doc.load_page(0)
+                    pix = page.get_pixmap(dpi=150, alpha=False)
+                    img_data = pix.tobytes("jpg")
                     pdf_image_base64 = base64.b64encode(img_data).decode("utf-8")
-                doc.close()
+                pdf_doc.close()
             except Exception as pdf_err:
-                print(f"Failed to render PDF page to image with PyMuPDF: {pdf_err}")
+                print(f"[PyMuPDF Error] Failed to render PDF page to image: {pdf_err}")
 
             if pdf_image_base64:
                 input_data["image_base64"] = pdf_image_base64
-                input_data["image"] = pdf_image_base64
-                input_data["file"] = pdf_image_base64
             else:
-                tiny_png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
-                input_data["image_base64"] = tiny_png
-                input_data["image"] = tiny_png
-                input_data["file"] = tiny_png
-
-            input_data["pdf"] = base64_data
-            input_data["pdf_base64"] = base64_data
+                input_data["image_base64"] = base64_data
         else:
             input_data["image_base64"] = base64_data
-            input_data["image"] = base64_data
-            input_data["file"] = base64_data
 
         start_call_time = time.time()
+        print(f"[RunPod Debug] input keys={list(input_data.keys())} filename={input_data.get('filename')} img_len={len(input_data.get('image_base64', ''))}")
         payload = {
             "input": input_data
         }
@@ -638,8 +642,8 @@ Output Schema:
 
         if status != "COMPLETED" and status != "FAILED" and request_id:
             status_url = api_url.replace("/runsync", f"/status/{request_id}").replace("/run", f"/status/{request_id}")
-            for _ in range(300):
-                time.sleep(1)
+            for _ in range(150):
+                time.sleep(2)
                 status_response = requests.get(status_url, headers=headers, timeout=30)
                 status_response.raise_for_status()
                 status_json = status_response.json()

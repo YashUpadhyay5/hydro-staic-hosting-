@@ -109,19 +109,14 @@ router.post('/calendars/sync', async (req, res) => {
           state: cal.state || record.state,
           year: cal.year || record.year,
           isDefault: cal.isDefault !== undefined ? cal.isDefault : record.isDefault,
-          holidays: cal.holidays || record.holidays
+          // never replace saved holidays with an empty list from a stale browser copy
+          holidays: (Array.isArray(cal.holidays) && (cal.holidays.length > 0 || !(record.holidays || []).length)) ? cal.holidays : record.holidays
         });
       }
     }
 
-    // Delete any DB calendars that were removed in the UI
-    if (syncedIds.length > 0) {
-      await HolidayCalendar.destroy({
-        where: {
-          id: { [Op.notIn]: syncedIds }
-        }
-      });
-    }
+    // NOTE: sync never deletes. A browser holding an old or short list used to wipe other calendars here.
+    // Calendars are removed only through DELETE /calendars/:id.
 
     const allDbCalendars = await HolidayCalendar.findAll({ order: [['createdAt', 'ASC']] });
     return res.status(200).json({ success: true, calendars: allDbCalendars });

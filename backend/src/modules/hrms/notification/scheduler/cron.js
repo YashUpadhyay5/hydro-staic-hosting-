@@ -5,25 +5,9 @@ const { Op } = require('sequelize');
 
 class NotificationScheduler {
   start() {
-    // Clock-in Reminder - 9:00 AM everyday
-    cron.schedule('0 9 * * *', async () => {
-      console.log('Running scheduled task: Clock-in Reminder');
-      await NotificationService.sendToAll(
-        'Clock-in Reminder',
-        'Please remember to clock in for your shift today.',
-        { type: 'CLOCK_IN_REMINDER' }
-      );
-    });
-
-    // Clock-out Reminder - 6:00 PM everyday
-    cron.schedule('0 18 * * *', async () => {
-      console.log('Running scheduled task: Clock-out Reminder');
-      await NotificationService.sendToAll(
-        'Clock-out Reminder',
-        'Please remember to clock out before you leave.',
-        { type: 'CLOCK_OUT_REMINDER' }
-      );
-    });
+    // NOTE: Hardcoded sendToAll() clock-in/out broadcasts REMOVED.
+    // Shift-aware, holiday-aware, and 5-minute repeating clock-out notifications
+    // are now authoritatively managed by CronScheduler.
 
     // Process generic pending scheduled notifications every minute
     cron.schedule('* * * * *', async () => {

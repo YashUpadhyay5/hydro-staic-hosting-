@@ -1,12 +1,11 @@
 import LoadingSpinner from '../LoadingSpinner';
 import React, { useEffect, useRef, useState } from 'react';
-import * as XLSX from 'xlsx';
-import ExcelJS from 'exceljs';
 import { api } from '../../services/api';
 
 export default function GeofenceView() {
     const [loading, setLoading] = useState(true);
-    const [geofences, setGeofences] = useState([]);
+    const cachedGeofences = api.getCached('/geofence');
+    const [geofences, setGeofences] = useState(() => Array.isArray(cachedGeofences) ? cachedGeofences : []);
     const [name, setName] = useState('');
     const [latitude, setLatitude] = useState('');
     const [longitude, setLongitude] = useState('');
@@ -359,6 +358,8 @@ export default function GeofenceView() {
     // Download Sample Excel Template
     const handleDownloadTemplate = async () => {
         try {
+            // Dynamic import — ExcelJS only loads when user clicks Download Template
+            const { default: ExcelJS } = await import('exceljs');
             const workbook = new ExcelJS.Workbook();
             workbook.creator = 'HRMS Admin';
             const sheet = workbook.addWorksheet('Geofence Sites');
@@ -425,8 +426,10 @@ export default function GeofenceView() {
         setErrorMsg('');
 
         const reader = new FileReader();
-        reader.onload = (evt) => {
+        reader.onload = async (evt) => {
             try {
+                // Dynamic import — xlsx only loads when user selects an Excel file
+                const XLSX = await import('xlsx');
                 const bstr = evt.target.result;
                 const wb = XLSX.read(bstr, { type: 'array' });
                 const wsname = wb.SheetNames[0];

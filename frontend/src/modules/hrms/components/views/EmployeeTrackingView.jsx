@@ -51,7 +51,14 @@ const getAuthoritativeISTDate = (d = new Date()) => {
 };
 
 export default function EmployeeTrackingView({ userId, userName, employees = [], onBack, backText = 'Back to Employees' }) {
-    const [trackingDate, setTrackingDate] = useState(() => getAuthoritativeISTDate());
+    const [trackingDate, setTrackingDate] = useState(() => {
+        try {
+            const params = new URLSearchParams(window.location.search);
+            return params.get('date') || sessionStorage.getItem('trackingDate') || getAuthoritativeISTDate();
+        } catch {
+            return getAuthoritativeISTDate();
+        }
+    });
     const [battery, setBattery] = useState('--');
     const [temp, setTemp] = useState('--');
     const [gpsOff, setGpsOff] = useState('--');
@@ -191,6 +198,21 @@ export default function EmployeeTrackingView({ userId, userName, employees = [],
                 return (fUid && associatedIds.has(fUid)) || (fUName && targetNames.has(fUName)) || (!fUid && !fUName);
             }).sort((a, b) => parseTimestampMs(a.timestamp || a.createdAt) - parseTimestampMs(b.timestamp || b.createdAt));
 
+            // 1. Deduplicate exact timestamps (removes network retry bursts)
+            const cleanByTimestamp = [];
+            const seenTimestamps = new Set();
+            data.forEach(f => {
+                const ts = parseTimestampMs(f.timestamp || f.createdAt);
+                if (ts && !seenTimestamps.has(ts)) {
+                    seenTimestamps.add(ts);
+                    cleanByTimestamp.push(f);
+                }
+            });
+
+            // Respect the GPS ping interval configured in settings (e.g., 10s, 30s, 60s):
+            // Display all legitimate pings received from employee devices without artificial consolidation.
+            data = cleanByTimestamp;
+
             // Fallback: If 0 footprints recorded but employee has clocked in today, use clock-in coords
             if (data.length === 0 && allAttendance && allAttendance.length > 0) {
                 const matchingAtt = allAttendance.find(r => {
@@ -276,7 +298,7 @@ export default function EmployeeTrackingView({ userId, userName, employees = [],
         } catch (err) {
             console.error(err);
         } finally {
-            setTimeout(() => setLoading(false), 300);
+            setLoading(false);
         }
     };
 
@@ -335,8 +357,9 @@ export default function EmployeeTrackingView({ userId, userName, employees = [],
     useEffect(() => {
         if (!mapInstance.current && mapRef.current && window.L) {
             mapInstance.current = window.L.map(mapRef.current).setView([28.6692, 77.4538], 10);
-            window.L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=cb1_2ae4_1_8e228ec653d025bb97ea2305', {
-                attribution: '&copy; OpenStreetMap &copy; CARTO'
+            window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; OpenStreetMap contributors',
+                maxZoom: 19
             }).addTo(mapInstance.current);
 
             if (footprints && footprints.length > 0) {

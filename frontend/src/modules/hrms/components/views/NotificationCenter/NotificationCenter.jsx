@@ -1,18 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { api } from '../../../services/api';
 
 const NotificationCenter = () => {
-  const [stats, setStats] = useState({ 
+  const cachedHistory = api.getCached('/notifications/history');
+  const cachedStats = api.getCached('/notifications/stats');
+  const cachedLogs = api.getCached('/notifications/logs');
+  const cachedEmployees = api.getCached('/employees');
+
+  const [stats, setStats] = useState(() => (cachedStats?.success && cachedStats?.data) ? cachedStats.data : { 
     totalNotifications: 0, 
     sentNotifications: 0, 
     failedNotifications: 0, 
     pendingNotifications: 0, 
     totalDevices: 0 
   });
-  const [history, setHistory] = useState([]);
-  const [logs, setLogs] = useState([]);
-  const [employees, setEmployees] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [history, setHistory] = useState(() => (cachedHistory?.success && Array.isArray(cachedHistory?.data)) ? cachedHistory.data : []);
+  const [logs, setLogs] = useState(() => (cachedLogs?.success && Array.isArray(cachedLogs?.data)) ? cachedLogs.data : []);
+  const [employees, setEmployees] = useState(() => Array.isArray(cachedEmployees) ? cachedEmployees : (cachedEmployees?.data || []));
+  const [loading, setLoading] = useState(() => !cachedHistory);
   const [tabIndex, setTabIndex] = useState(0); // 0 = History, 1 = Detailed Logs
 
   // Filters & Search
@@ -39,15 +45,14 @@ const NotificationCenter = () => {
   const headers = { Authorization: `Bearer ${token}` };
 
   const getApiUrl = (endpoint) => {
-    const hostname = window.location.hostname;
-    return `http://${hostname}:8000/api${endpoint}`;
+    return `/api${endpoint}`;
   };
 
   const fetchStats = async () => {
     try {
-      const res = await axios.get(getApiUrl('/notifications/stats'), { headers });
-      if (res.data.success) {
-        setStats(res.data.data);
+      const res = await api.getNotificationStats();
+      if (res && res.success) {
+        setStats(res.data);
       }
     } catch (err) {
       console.error('Failed to fetch stats:', err);
@@ -55,11 +60,11 @@ const NotificationCenter = () => {
   };
 
   const fetchHistory = async () => {
-    setLoading(true);
+    if (!history.length) setLoading(true);
     try {
-      const res = await axios.get(getApiUrl('/notifications/history'), { headers });
-      if (res.data.success) {
-        setHistory(res.data.data);
+      const res = await api.getNotificationHistory();
+      if (res && res.success) {
+        setHistory(res.data);
       }
     } catch (err) {
       console.error('Failed to fetch history:', err);
@@ -69,11 +74,11 @@ const NotificationCenter = () => {
   };
 
   const fetchLogs = async () => {
-    setLoading(true);
+    if (!logs.length) setLoading(true);
     try {
-      const res = await axios.get(getApiUrl('/notifications/logs'), { headers });
-      if (res.data.success) {
-        setLogs(res.data.data);
+      const res = await api.getNotificationLogs();
+      if (res && res.success) {
+        setLogs(res.data);
       }
     } catch (err) {
       console.error('Failed to fetch logs:', err);
@@ -84,11 +89,11 @@ const NotificationCenter = () => {
 
   const fetchEmployees = async () => {
     try {
-      const res = await axios.get(getApiUrl('/employees'), { headers });
-      if (Array.isArray(res.data)) {
+      const res = await api.getEmployees();
+      if (Array.isArray(res)) {
+        setEmployees(res);
+      } else if (res && Array.isArray(res.data)) {
         setEmployees(res.data);
-      } else if (res.data && Array.isArray(res.data.data)) {
-        setEmployees(res.data.data);
       }
     } catch (err) {
       console.error('Failed to fetch employees:', err);
@@ -482,15 +487,51 @@ const NotificationCenter = () => {
                   <tr key={idx} style={{ borderBottom: '1px solid var(--border-color)', background: idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)' }}>
                     {tabIndex === 0 ? (
                       <>
-                        <td style={{ padding: '15px 20px', fontWeight: '700' }}>{item.title}</td>
+                        <td style={{ padding: '15px 20px', fontWeight: '700' }}>
+                          <div>{item.title}</div>
+                          {item.recipient?.name && (
+                            <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginTop: '2px' }}>
+                              Target: <span style={{ color: '#4f46e5' }}>{item.recipient.name}</span>
+                            </div>
+                          )}
+                        </td>
                         <td style={{ padding: '15px 20px', color: 'var(--text-muted)', fontSize: '13px' }}>{item.body ? item.body.substring(0, 50) : '-'}</td>
                         <td style={{ padding: '15px 20px' }}>
                           <span style={{ background: 'rgba(255,255,255,0.05)', padding: '4px 8px', borderRadius: '6px', fontSize: '12px' }}>
                             {item.channel}
                           </span>
                         </td>
-                        <td style={{ padding: '15px 20px', fontSize: '14px' }}>
-                          <span style={{ color: '#10b981' }}>{item.successCount || 0}</span> / <span style={{ color: '#ef4444' }}>{item.failureCount || 0}</span> ({item.recipientCount || 0})
+                        <td style={{ padding: '15px 20px', fontSize: '13px' }}>
+                          {(() => {
+                            let recLabel = item.recipientName;
+                            if (!recLabel && item.recipient?.name) {
+                              recLabel = `${item.recipient.name} (${item.recipient.empCode || item.recipient.id})`;
+                            }
+                            if (!recLabel && item.targetId) {
+                              const found = (employees || []).find(e => e.id === item.targetId || e.empCode === item.targetId);
+                              if (found) recLabel = `${found.name} (${found.empCode || found.id})`;
+                              else if (item.target === 'ALL') recLabel = 'All Employees';
+                              else recLabel = String(item.targetId);
+                            }
+                            if (!recLabel) recLabel = item.target === 'ALL' ? 'All Employees' : 'System';
+
+                            return (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <i className="fa-solid fa-user" style={{ fontSize: '11px', color: '#6366f1' }}></i>
+                                  <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{recLabel}</span>
+                                </div>
+                                {item.breachDetails && (
+                                  <div style={{ fontSize: '11px', color: '#f59e0b', fontWeight: 600 }}>
+                                    📍 {item.breachDetails.distanceMeters ? `${(item.breachDetails.distanceMeters / 1000).toFixed(1)} km outside ` : 'Outside '}{item.breachDetails.nearestGeofence}
+                                  </div>
+                                )}
+                                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                                  Delivery: <span style={{ color: '#10b981', fontWeight: 700 }}>{item.successCount || 0}</span> / <span style={{ color: '#ef4444', fontWeight: 700 }}>{item.failureCount || 0}</span> ({item.recipientCount || 0})
+                                </div>
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td style={{ padding: '15px 20px' }}>
                           <span 
@@ -513,7 +554,22 @@ const NotificationCenter = () => {
                     ) : (
                       <>
                         <td style={{ padding: '15px 20px', fontFamily: 'monospace', fontSize: '12px' }}>{item.firebaseMessageId || 'N/A'}</td>
-                        <td style={{ padding: '15px 20px', fontWeight: '600' }}>{item.employeeId || 'System'}</td>
+                        <td style={{ padding: '15px 20px', fontWeight: '600' }}>
+                          {(() => {
+                            const emp = item.employee || (employees || []).find(e => e.id === item.employeeId || e.empCode === item.employeeId);
+                            if (emp) {
+                              return (
+                                <div>
+                                  <span style={{ color: 'var(--text-primary)', fontWeight: 700 }}>{emp.name}</span>
+                                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>
+                                    {emp.empCode || item.employeeId} {emp.department ? `• ${emp.department}` : ''}
+                                  </span>
+                                </div>
+                              );
+                            }
+                            return item.employeeId || 'System';
+                          })()}
+                        </td>
                         <td style={{ padding: '15px 20px' }}>
                           <span 
                             style={{ 

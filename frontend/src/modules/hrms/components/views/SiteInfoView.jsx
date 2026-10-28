@@ -1,6 +1,5 @@
 import LoadingSpinner from '../LoadingSpinner';
 import React, { useEffect, useRef, useState } from 'react';
-import ExcelJS from 'exceljs';
 import { api } from '../../services/api';
 
 export default function SiteInfoView({ employees }) {
@@ -75,11 +74,12 @@ export default function SiteInfoView({ employees }) {
     const [fromDate, setFromDate] = useState(getTodayString());
     const [toDate, setToDate] = useState(getTodayString());
 
-    const [loading, setLoading] = useState(true);
+    const cachedGeofences = api.getCached('/geofence');
+    const [loading, setLoading] = useState(() => !cachedGeofences);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [exporting, setExporting] = useState(false);
     const [showExportMenu, setShowExportMenu] = useState(false);
-    const [geofences, setGeofences] = useState([]);
+    const [geofences, setGeofences] = useState(() => Array.isArray(cachedGeofences) ? cachedGeofences : []);
     const [logs, setLogs] = useState([]);
     const [metrics, setMetrics] = useState({
         insideTime: 0,
@@ -90,12 +90,18 @@ export default function SiteInfoView({ employees }) {
     });
     const [visitedGeofences, setVisitedGeofences] = useState([]);
     const [searchPerformed, setSearchPerformed] = useState(false);
+    const [overlapMode, setOverlapMode] = useState('CLOSEST'); // 'CLOSEST' (Single Nearest Site - Default) or 'SPLIT' (50/50 Equal Time Split)
 
     // Outside Geofence Timelines Modal & Interactive Details
     const [showOutsideModal, setShowOutsideModal] = useState(false);
     const [outsidePings, setOutsidePings] = useState([]);
     const [outsideSessions, setOutsideSessions] = useState([]);
     const [outsideSearchTerm, setOutsideSearchTerm] = useState('');
+
+    // Inside Geofence Timelines Modal & Interactive Details
+    const [showInsideModal, setShowInsideModal] = useState(false);
+    const [insidePings, setInsidePings] = useState([]);
+    const [insideSearchTerm, setInsideSearchTerm] = useState('');
 
     const mapRef = useRef(null);
     const mapInstance = useRef(null);
@@ -170,7 +176,7 @@ export default function SiteInfoView({ employees }) {
             } catch (err) {
                 console.error('Error fetching geofences:', err);
             } finally {
-                setTimeout(() => setLoading(false), 300);
+                setLoading(false);
             }
         };
         loadGeofences();
@@ -190,7 +196,7 @@ export default function SiteInfoView({ employees }) {
     };
 
     // Calculate site analytics for a single employee on a given date
-    const analyzeSingleEmployee = async (empId, date, geofenceList) => {
+    const analyzeSingleEmployee = async (empId, date, geofenceList, currentOverlapMode = overlapMode) => {
         const rawLogs = await api.getFootprintHistory(empId, date);
 
         const parseTs = (item) => {
@@ -200,14 +206,29 @@ export default function SiteInfoView({ employees }) {
             return isNaN(parsed) ? 0 : parsed;
         };
 
-        const validLogs = (rawLogs || []).filter(log => {
+        const isReliableGpsLog = (log) => {
             if (!log || log.latitude == null || log.longitude == null) return false;
             const lat = parseFloat(log.latitude);
             const lon = parseFloat(log.longitude);
-            if (isNaN(lat) || isNaN(lon) || lat === 0 || lon === 0) return false;
-            if (log.isMockLocation === true) return false;
+            if (isNaN(lat) || isNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180 || (lat === 0 && lon === 0)) return false;
+            if (log.isMockLocation === true || log.is_mock_location === true) return false;
+
+            // Reject cellular tower jumps, wifi and network location estimations
+            const method = String(log.trackingMethod || log.tracking_method || log.provider || '').toUpperCase();
+            const hasCellId = Boolean(log.cellId || log.cell_id);
+            if (method.includes('CELL') || method.includes('TOWER') || method.includes('WIFI') || method.includes('NETWORK') || hasCellId) {
+                return false;
+            }
+
+            // Accuracy guard: Coarse / bad accuracy readings (> 500m) are unreliable and should not be considered in any calculation
+            const acc = parseFloat(log.accuracy);
+            if (!isNaN(acc) && acc > 500) {
+                return false;
+            }
             return true;
-        });
+        };
+
+        const validLogs = (rawLogs || []).filter(isReliableGpsLog);
 
         const gpsLogs = validLogs.sort((a, b) => parseTs(a) - parseTs(b));
 
@@ -217,6 +238,7 @@ export default function SiteInfoView({ employees }) {
                 gpsLogs: [],
                 metrics: { insideTime: 0, outsideTime: 0, totalTime: 0, insidePercentage: 0, outsidePercentage: 0 },
                 visitedGeofences: [],
+                insidePings: [],
                 outsidePings: [],
                 outsideSessions: []
             };
@@ -236,6 +258,7 @@ export default function SiteInfoView({ employees }) {
             let minDistance = Infinity;
             let closestInsideGf = null;
             let minInsideDistance = Infinity;
+            const insideGfs = [];
 
             parsedGeofences.forEach(gf => {
                 const dist = getDistance(log.latitude, log.longitude, gf.latitude, gf.longitude);
@@ -245,6 +268,7 @@ export default function SiteInfoView({ employees }) {
                 }
                 if (dist <= gf.radius) {
                     isInside = true;
+                    insideGfs.push(gf);
                     if (dist < minInsideDistance) {
                         minInsideDistance = dist;
                         closestInsideGf = gf;
@@ -260,6 +284,8 @@ export default function SiteInfoView({ employees }) {
                 index,
                 date,
                 isInside,
+                insideGfs,
+                insideCount: insideGfs.length,
                 assignedGfName: closestInsideGf ? closestInsideGf.name : null,
                 nearestGfName: nearestGf ? nearestGf.name : 'Unknown Site',
                 minDistanceMeters: Math.round(minDistance),
@@ -268,19 +294,8 @@ export default function SiteInfoView({ employees }) {
             };
         });
 
-        const isReliableGpsForOutside = (log) => {
-            const method = String(log.trackingMethod || log.provider || '').toUpperCase();
-            if (method.includes('CELL') || method.includes('TOWER') || method.includes('WIFI') || method.includes('NETWORK')) {
-                return false; // Cell tower jumps cannot trigger outside geofence alerts
-            }
-            const acc = parseFloat(log.accuracy);
-            if (!isNaN(acc) && acc > 500) {
-                return false; // Coarse pings (>500m) cannot trigger outside geofence alerts
-            }
-            return true;
-        };
-
-        const outsidePings = annotatedLogs.filter(l => !l.isInside && isReliableGpsForOutside(l));
+        const insidePings = annotatedLogs.filter(l => l.isInside);
+        const outsidePings = annotatedLogs.filter(l => !l.isInside);
 
         // Group contiguous outside pings into excursion sessions
         const outsideSessions = [];
@@ -328,7 +343,7 @@ export default function SiteInfoView({ employees }) {
         };
 
         annotatedLogs.forEach((log) => {
-            const isOutside = !log.isInside && isReliableGpsForOutside(log);
+            const isOutside = !log.isInside;
             if (isOutside) {
                 if (!currentSession) {
                     currentSession = {
@@ -363,59 +378,18 @@ export default function SiteInfoView({ employees }) {
         }
 
         const visitedGeofences = parsedGeofences.map(gf => {
-            const insidePings = gpsLogs.filter(log => {
+            // Find all raw pings that fell inside this geofence radius
+            const siteInsidePings = annotatedLogs.filter(log => {
                 const dist = getDistance(log.latitude, log.longitude, gf.latitude, gf.longitude);
                 return dist <= gf.radius;
             });
 
-            if (insidePings.length === 0) return null;
+            if (siteInsidePings.length === 0) return null;
 
-            const firstPing = insidePings[0];
-            const lastPing = insidePings[insidePings.length - 1];
-
-            const arrivalTime = new Date(firstPing.timestamp || firstPing.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-            const leavingTime = new Date(lastPing.timestamp || lastPing.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-
-            // Exclusive Pings (assigned to this geofence as nearest centroid)
+            // Exclusive Pings (assigned strictly to this geofence as nearest centroid)
             const exclusivePings = annotatedLogs.filter(log => log.assignedGfName === gf.name);
 
-            // Compute exclusive spending time (summing continuous time windows for this geofence)
-            let exclusiveMs = 0;
-            if (exclusivePings.length > 1) {
-                let prevLog = exclusivePings[0];
-                exclusivePings.forEach((p, idx) => {
-                    if (idx > 0) {
-                        const delta = p.timestampMs - prevLog.timestampMs;
-                        // Check if there were any confirmed OUTSIDE pings between prevLog and p
-                        const hasOutsidePingsBetween = annotatedLogs.some(l => 
-                            l.timestampMs > prevLog.timestampMs && 
-                            l.timestampMs < p.timestampMs && 
-                            !l.isInside
-                        );
-
-                        if (!hasOutsidePingsBetween) {
-                            // Employee stayed inside the same site continuously!
-                            exclusiveMs += delta;
-                        } else {
-                            if (delta <= 15 * 60 * 1000) {
-                                exclusiveMs += delta;
-                            } else {
-                                exclusiveMs += 60000;
-                            }
-                        }
-                        prevLog = p;
-                    }
-                });
-            } else if (exclusivePings.length === 1) {
-                exclusiveMs = 60000;
-            }
-
-            let spendingMins = Math.round(exclusiveMs / 60000);
-            if (spendingMins === 0 && insidePings.length > 0) {
-                spendingMins = Math.round((new Date(lastPing.timestamp || lastPing.createdAt).getTime() - new Date(firstPing.timestamp || firstPing.createdAt).getTime()) / 60000);
-            }
-
-            // Compute overlaps between visited geofences for transparency
+            // Compute overlapping sites for transparency
             const otherInsideSites = [];
             gpsLogs.forEach(log => {
                 const insideGeofencesForLog = parsedGeofences.filter(otherGf => {
@@ -431,6 +405,114 @@ export default function SiteInfoView({ employees }) {
                 }
             });
 
+            // IN 'CLOSEST' MODE (Single Site / Winner-takes-all):
+            // If another site was closer for ALL pings, this site gets 0 exclusive pings -> REMOVE COMPLETELY!
+            if (currentOverlapMode === 'CLOSEST' && exclusivePings.length === 0) {
+                return null;
+            }
+
+            // Determine effective pings to use for this site's visits and timeline
+            const effectivePings = currentOverlapMode === 'CLOSEST' ? exclusivePings : siteInsidePings;
+            if (effectivePings.length === 0) return null;
+
+            const firstPing = effectivePings[0];
+            const lastPing = effectivePings[effectivePings.length - 1];
+
+            const arrivalTime = firstPing.timeString || new Date(firstPing.timestamp || firstPing.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const leavingTime = lastPing.timeString || new Date(lastPing.timestamp || lastPing.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+            // Build discrete visit sessions for this geofence
+            const visits = [];
+            let currentVisit = null;
+
+            effectivePings.forEach((p) => {
+                if (!currentVisit) {
+                    currentVisit = {
+                        visitIndex: 1,
+                        date,
+                        siteName: gf.name,
+                        pings: [p],
+                        startPing: p,
+                        endPing: p
+                    };
+                } else {
+                    const prevPing = currentVisit.pings[currentVisit.pings.length - 1];
+                    const deltaMs = p.timestampMs - prevPing.timestampMs;
+                    // Check if employee was outside or at another site between prevPing and p
+                    const hasLeftSite = annotatedLogs.some(l => 
+                        l.timestampMs > prevPing.timestampMs && 
+                        l.timestampMs < p.timestampMs && 
+                        (!l.isInside || (currentOverlapMode === 'CLOSEST' && l.assignedGfName !== gf.name))
+                    );
+
+                    // A new visit starts if they exited the site boundary OR had a large tracking gap > 45 mins
+                    if (hasLeftSite || deltaMs > 45 * 60 * 1000) {
+                        visits.push(currentVisit);
+                        currentVisit = {
+                            visitIndex: visits.length + 1,
+                            date,
+                            siteName: gf.name,
+                            pings: [p],
+                            startPing: p,
+                            endPing: p
+                        };
+                    } else {
+                        currentVisit.pings.push(p);
+                        currentVisit.endPing = p;
+                    }
+                }
+            });
+
+            if (currentVisit) {
+                visits.push(currentVisit);
+            }
+
+            // Calculate duration for each visit session
+            const processedVisits = visits.map((v, vIdx) => {
+                let durMs = 0;
+                if (currentOverlapMode === 'SPLIT') {
+                    // Split mode: Divide each interval by number of overlapping sites for that ping
+                    if (v.pings.length > 1) {
+                        let prevP = v.pings[0];
+                        for (let i = 1; i < v.pings.length; i++) {
+                            const currP = v.pings[i];
+                            const delta = currP.timestampMs - prevP.timestampMs;
+                            const splitFactor = currP.insideCount || 1;
+                            durMs += (delta / splitFactor);
+                            prevP = currP;
+                        }
+                    } else {
+                        durMs = 60000 / (v.pings[0].insideCount || 1);
+                    }
+                } else {
+                    // Closest / Exclusive mode: 100% of the session time credited to this site
+                    const sMs = v.startPing.timestampMs;
+                    const eMs = v.endPing.timestampMs;
+                    durMs = eMs - sMs;
+                    if (durMs <= 0) {
+                        durMs = 60000; // Single ping counted as 1 min
+                    }
+                }
+
+                const durMins = Math.max(1, Math.round(durMs / 60000));
+                const durSecs = Math.max(60, Math.round(durMs / 1000));
+                return {
+                    ...v,
+                    visitNumber: vIdx + 1,
+                    startTime: v.startPing.timeString,
+                    endTime: v.endPing.timeString,
+                    durationMs: durMs,
+                    durationMins: durMins,
+                    durationSecs: durSecs,
+                    pingsCount: v.pings.length
+                };
+            });
+
+            const spendingMins = Math.max(1, Math.round(processedVisits.reduce((acc, v) => acc + v.durationMs, 0) / 60000));
+            const hasOverlap = otherInsideSites.length > 0;
+            const isOverlapResolved = currentOverlapMode === 'CLOSEST' && hasOverlap;
+            const isSplitOverlap = currentOverlapMode === 'SPLIT' && hasOverlap;
+
             return {
                 id: gf.id || gf.name,
                 rawGfId: gf.id,
@@ -441,10 +523,16 @@ export default function SiteInfoView({ employees }) {
                 arrivalTime,
                 leavingTime,
                 spendingMins,
-                pingsCount: insidePings.length,
+                pingsCount: effectivePings.length,
                 exclusivePingsCount: exclusivePings.length,
                 overlappingSites: otherInsideSites,
-                hasOverlap: otherInsideSites.length > 0
+                hasOverlap,
+                isOverlapResolved,
+                isSplitOverlap,
+                overlapSplitFactor: otherInsideSites.length + 1,
+                visits: processedVisits,
+                visitsCount: processedVisits.length,
+                isMultiVisit: processedVisits.length > 1
             };
         }).filter(Boolean);
 
@@ -469,6 +557,7 @@ export default function SiteInfoView({ employees }) {
                 outsidePercentage: outsidePercent
             },
             visitedGeofences,
+            insidePings,
             outsidePings,
             outsideSessions
         };
@@ -505,6 +594,7 @@ export default function SiteInfoView({ employees }) {
         try {
             let combinedLogs = [];
             let combinedVisited = [];
+            let combinedInsidePings = [];
             let combinedOutsidePings = [];
             let combinedOutsideSessions = [];
             let accInsideMins = 0;
@@ -524,6 +614,7 @@ export default function SiteInfoView({ employees }) {
                 
                 if (res.hasData) {
                     combinedLogs = combinedLogs.concat(res.gpsLogs);
+                    combinedInsidePings = combinedInsidePings.concat(res.insidePings || []);
                     combinedOutsidePings = combinedOutsidePings.concat(res.outsidePings);
                     combinedOutsideSessions = combinedOutsideSessions.concat(res.outsideSessions);
                     accInsideMins += res.metrics.insideTime;
@@ -541,6 +632,7 @@ export default function SiteInfoView({ employees }) {
             }
 
             setLogs(combinedLogs);
+            setInsidePings(combinedInsidePings);
             setOutsidePings(combinedOutsidePings);
             setOutsideSessions(combinedOutsideSessions);
 
@@ -572,7 +664,11 @@ export default function SiteInfoView({ employees }) {
 
                 if (isVisited) {
                     const lastV = visitsForGf[visitsForGf.length - 1];
-                    hoverTooltipText += `<br/>Time Spent: <b>${formatMinutes(lastV.spendingMins)}</b><br/>Arrival: ${lastV.arrivalTime} | Exit: ${lastV.leavingTime}`;
+                    if (lastV.isMultiVisit) {
+                        hoverTooltipText += `<br/><b>🔁 ${lastV.visitsCount} In & Out Visits</b><br/>First In: ${lastV.arrivalTime} • Last Out: ${lastV.leavingTime}<br/><span style="color:#10b981;font-weight:bold;">Net Time Inside: ${formatMinutes(siteInfoSpending(lastV))}</span>`;
+                    } else {
+                        hoverTooltipText += `<br/>Time Spent: <b>${formatMinutes(siteInfoSpending(lastV))}</b><br/>Arrival: ${lastV.arrivalTime} | Exit: ${lastV.leavingTime}`;
+                    }
                 }
 
                 const circle = window.L.circle([gf.latitude, gf.longitude], {
@@ -594,14 +690,37 @@ export default function SiteInfoView({ employees }) {
                                 Date: <b>${lastV.date}</b>
                             </div>
                             <div style="display: flex; flex-direction: column; gap: 6px;">
-                                <div>⏰ <span style="color: #666;">Arrival:</span> <b>${lastV.arrivalTime}</b></div>
-                                <div>🚪 <span style="color: #666;">Leaving:</span> <b>${lastV.leavingTime}</b></div>
-                                <div>⏳ <span style="color: #666;">Spent:</span> <b style="color: #2563eb;">${formatMinutes(siteInfoSpending(lastV))}</b></div>
-                                <div>📍 <span style="color: #666;">Pings:</span> <b>${lastV.pingsCount}</b></div>
+                                ${lastV.isMultiVisit ? `
+                                    <div style="padding: 8px 10px; background: rgba(16, 185, 129, 0.1); border-radius: 8px; border: 1px solid rgba(16, 185, 129, 0.3); margin-bottom: 4px;">
+                                        <div style="font-weight: 800; color: #059669; font-size: 12px; display: flex; align-items: center; gap: 4px;">
+                                            🔁 Multi-Visit: ${lastV.visitsCount} In & Out Sessions
+                                        </div>
+                                        <div style="font-size: 11px; color: #334155; margin-top: 3px;">
+                                            First In: <b>${lastV.arrivalTime}</b> • Last Out: <b>${lastV.leavingTime}</b>
+                                        </div>
+                                        <div style="font-size: 11px; color: #059669; font-weight: 700; margin-top: 2px;">
+                                            Net Spent Inside: <b>${formatMinutes(siteInfoSpending(lastV))}</b>
+                                        </div>
+                                    </div>
+                                    <div style="font-size: 11px; color: #64748b; font-weight: 700; margin-top: 2px;">In & Out Sessions Breakdown:</div>
+                                    <div style="max-height: 130px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;">
+                                        ${(lastV.visits || []).map((v, i) => `
+                                            <div style="padding: 4px 6px; background: #f8fafc; border-radius: 4px; font-size: 11px; border: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center;">
+                                                <span><b>#${i+1}:</b> ${v.startTime}${v.startTime !== v.endTime ? ` ➔ ${v.endTime}` : ''}</span>
+                                                <b style="color: #059669;">${v.durationMins}m (${v.pingsCount}p)</b>
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                ` : `
+                                    <div>⏰ <span style="color: #666;">Arrival:</span> <b>${lastV.arrivalTime}</b></div>
+                                    <div>🚪 <span style="color: #666;">Leaving:</span> <b>${lastV.leavingTime}</b></div>
+                                    <div>⏳ <span style="color: #666;">Spent:</span> <b style="color: #2563eb;">${formatMinutes(siteInfoSpending(lastV))}</b></div>
+                                `}
+                                <div style="margin-top: 4px;">📍 <span style="color: #666;">Total Inside Pings:</span> <b>${lastV.pingsCount}</b></div>
                             </div>
                         </div>
                     `;
-                    circle.bindPopup(popupContent, { minWidth: 220 });
+                    circle.bindPopup(popupContent, { minWidth: 240 });
                 }
 
                 circle.addTo(layersGroupRef.current);
@@ -721,6 +840,26 @@ export default function SiteInfoView({ employees }) {
         }
     };
 
+    // Fly to specific inside ping on map
+    const handleFocusInsidePingOnMap = (ping) => {
+        setShowInsideModal(false);
+        if (!mapInstance.current) return;
+        
+        const lat = parseFloat(ping.latitude);
+        const lng = parseFloat(ping.longitude);
+
+        if (!isNaN(lat) && !isNaN(lng)) {
+            mapInstance.current.flyTo([lat, lng], 17, { duration: 1.2 });
+            const key = ping.assignedGfName || ping.nearestGfName;
+            const circle = circleLayersRef.current[key];
+            if (circle) {
+                setTimeout(() => {
+                    circle.openPopup();
+                }, 450);
+            }
+        }
+    };
+
     // Excel Export Generator
     const handleExportExcel = async (exportScope) => {
         let targetDates = [];
@@ -766,6 +905,8 @@ export default function SiteInfoView({ employees }) {
                 return;
             }
 
+            // Dynamic import — ExcelJS only loads when user clicks Export
+            const { default: ExcelJS } = await import('exceljs');
             const workbook = new ExcelJS.Workbook();
             workbook.creator = 'HRMS System';
             workbook.lastModifiedBy = 'Admin';
@@ -971,7 +1112,16 @@ export default function SiteInfoView({ employees }) {
         const term = outsideSearchTerm.toLowerCase();
         return p.timeString.toLowerCase().includes(term) ||
                p.nearestGfName.toLowerCase().includes(term) ||
-               p.date.includes(term);
+               (p.date && p.date.includes(term));
+    });
+
+    const filteredInsidePings = insidePings.filter(p => {
+        if (!insideSearchTerm) return true;
+        const term = insideSearchTerm.toLowerCase();
+        return (p.timeString && p.timeString.toLowerCase().includes(term)) ||
+               (p.assignedGfName && p.assignedGfName.toLowerCase().includes(term)) ||
+               (p.nearestGfName && p.nearestGfName.toLowerCase().includes(term)) ||
+               (p.date && p.date.includes(term));
     });
 
     return (
@@ -1095,6 +1245,23 @@ export default function SiteInfoView({ employees }) {
                         </div>
                     </div>
                 )}
+
+                {/* Overlap Boundary Handling Mode */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <label style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-secondary)' }}>
+                        <i className="fa-solid fa-layer-group" style={{ marginRight: '5px', color: 'var(--primary-color)' }}></i>
+                        Overlap Handling
+                    </label>
+                    <select 
+                        value={overlapMode} 
+                        onChange={(e) => setOverlapMode(e.target.value)}
+                        style={{ padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-glass)', background: 'var(--bg-dark)', color: 'var(--text-primary)', width: '235px', fontWeight: '600' }}
+                        title="Choose how to resolve GPS pings that fall inside overlapping geofence boundaries"
+                    >
+                        <option value="CLOSEST">🎯 Closest Site Only (Single Site)</option>
+                        <option value="SPLIT">⚖️ 50/50 Equal Time Split</option>
+                    </select>
+                </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '22px' }}>
                     <button 
@@ -1258,19 +1425,47 @@ export default function SiteInfoView({ employees }) {
                         
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                             
-                            {/* Inside Geofence Card */}
-                            <div 
-                                style={{ 
-                                    padding: '14px', 
-                                    borderRadius: '10px', 
-                                    background: 'rgba(16, 185, 129, 0.08)', 
-                                    border: '1px solid rgba(16, 185, 129, 0.2)' 
-                                }}
-                            >
-                                <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: '600' }}>Inside Geofence</span>
-                                <h4 style={{ margin: '6px 0 0 0', fontSize: '20px', fontWeight: '800', color: '#10b981' }}>{formatMinutes(metrics.insideTime)}</h4>
-                                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>({metrics.insidePercentage}%)</span>
-                            </div>
+                            {/* Inside Geofence Card (Interactive Clickable) */}
+                            {(() => {
+                                const canInspectInside = metrics.insideTime > 0 || insidePings.length > 0;
+                                return (
+                                    <div 
+                                        onClick={() => {
+                                            if (canInspectInside) setShowInsideModal(true);
+                                        }}
+                                        style={{ 
+                                            padding: '14px', 
+                                            borderRadius: '10px', 
+                                            background: 'rgba(16, 185, 129, 0.08)', 
+                                            border: '1px solid rgba(16, 185, 129, 0.3)',
+                                            cursor: canInspectInside ? 'pointer' : 'default',
+                                            transition: 'all 0.2s',
+                                            position: 'relative'
+                                        }}
+                                        title={canInspectInside ? "Click to view detailed inside geofence pings, visits and durations" : "No inside geofence duration recorded"}
+                                    >
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <span style={{ fontSize: '12px', color: '#10b981', fontWeight: '700' }}>Inside Geofence</span>
+                                            {insidePings.length > 0 ? (
+                                                <span style={{ background: '#10b981', color: '#fff', fontSize: '10px', fontWeight: 700, padding: '2px 6px', borderRadius: '10px' }}>
+                                                    {insidePings.length} pings ➔
+                                                </span>
+                                            ) : null}
+                                        </div>
+                                        <h4 style={{ margin: '6px 0 0 0', fontSize: '20px', fontWeight: '800', color: '#10b981' }}>{formatMinutes(metrics.insideTime)}</h4>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2px' }}>
+                                            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                                                ({metrics.insidePercentage}%{visitedGeofences.length > 0 ? ` • ${visitedGeofences.reduce((acc, v) => acc + (v.visitsCount || 1), 0)} visits` : ''})
+                                            </span>
+                                            {canInspectInside && (
+                                                <span style={{ fontSize: '10px', color: '#10b981', fontWeight: 600, textDecoration: 'underline' }}>
+                                                    Click to inspect 📍
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })()}
 
                             {/* Outside Geofence Card (Interactive Clickable) */}
                             {(() => {
@@ -1323,11 +1518,30 @@ export default function SiteInfoView({ employees }) {
                         </div>
 
                         {/* Overlap Explanation Callout Banner */}
-                        {visitedGeofences.some(v => v.hasOverlap) && (
-                            <div style={{ padding: '10px 14px', background: '#eff6ff', borderRadius: '8px', border: '1px solid #bfdbfe', fontSize: '11px', color: '#1e40af', lineHeight: 1.4, display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
-                                <i className="fa-solid fa-circle-info" style={{ fontSize: '14px', color: '#2563eb', marginTop: '2px' }}></i>
+                        {visitedGeofences.some(v => v.hasOverlap || v.isOverlapResolved || v.isSplitOverlap) && (
+                            <div style={{ 
+                                padding: '10px 14px', 
+                                background: overlapMode === 'CLOSEST' ? 'rgba(16, 185, 129, 0.08)' : 'rgba(37, 99, 235, 0.08)', 
+                                borderRadius: '8px', 
+                                border: `1px solid ${overlapMode === 'CLOSEST' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(37, 99, 235, 0.3)'}`, 
+                                fontSize: '11px', 
+                                color: overlapMode === 'CLOSEST' ? '#059669' : '#1e40af', 
+                                lineHeight: 1.4, 
+                                display: 'flex', 
+                                alignItems: 'flex-start', 
+                                gap: '8px' 
+                            }}>
+                                <i className={overlapMode === 'CLOSEST' ? "fa-solid fa-circle-check" : "fa-solid fa-scale-balanced"} style={{ fontSize: '14px', color: overlapMode === 'CLOSEST' ? '#10b981' : '#2563eb', marginTop: '2px' }}></i>
                                 <div>
-                                    <strong>Geofence Boundary Overlap Detected:</strong> Some visited sites share overlapping radii. Individual site cards display duration spent inside each boundary, while top summary deduplicates shared boundary time to prevent double-counting.
+                                    {overlapMode === 'CLOSEST' ? (
+                                        <>
+                                            <strong>Geofence Boundary Overlap Conflict Resolved:</strong> Coordinates falling inside overlapping radii were exclusively attributed to the closest site center. Secondary overlapping site cards have been removed to prevent duplicate visits.
+                                        </>
+                                    ) : (
+                                        <>
+                                            <strong>Geofence Boundary 50/50 Split Active:</strong> Coordinates falling within multiple overlapping site boundaries have their dwell time distributed equally across both sites to prevent double-counting.
+                                        </>
+                                    )}
                                 </div>
                             </div>
                         )}
@@ -1378,15 +1592,56 @@ export default function SiteInfoView({ employees }) {
                                                 {site.date && (
                                                     <span style={{ background: 'rgba(255, 255, 255, 0.08)', color: 'var(--text-secondary)', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: '600' }}>{site.date}</span>
                                                 )}
-                                                {site.hasOverlap && (
+                                                {site.isMultiVisit ? (
+                                                    <span style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '1px 8px', borderRadius: '10px', fontSize: '10px', fontWeight: '800' }}>
+                                                        🔁 {site.visitsCount} Visits (Come & Go)
+                                                    </span>
+                                                ) : (
+                                                    <span style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6', border: '1px solid rgba(59, 130, 246, 0.3)', padding: '1px 8px', borderRadius: '10px', fontSize: '10px', fontWeight: '700' }}>
+                                                        1 Visit
+                                                    </span>
+                                                )}
+                                                {site.isOverlapResolved && (
+                                                    <span style={{ background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0', padding: '1px 8px', borderRadius: '10px', fontSize: '10px', fontWeight: '700', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                                        <i className="fa-solid fa-bullseye"></i> Nearest Site (Resolved Overlap with {site.overlappingSites.join(', ')})
+                                                    </span>
+                                                )}
+                                                {site.isSplitOverlap && (
+                                                    <span style={{ background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe', padding: '1px 8px', borderRadius: '10px', fontSize: '10px', fontWeight: '700', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                                        <i className="fa-solid fa-scale-balanced"></i> {Math.round(100 / (site.overlapSplitFactor || 2))}% Split ({site.overlappingSites.join(', ')})
+                                                    </span>
+                                                )}
+                                                {!site.isOverlapResolved && !site.isSplitOverlap && site.hasOverlap && (
                                                     <span style={{ background: '#fef3c7', color: '#d97706', border: '1px solid #fde68a', padding: '1px 8px', borderRadius: '10px', fontSize: '10px', fontWeight: '700', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                                                         <i className="fa-solid fa-layer-group"></i> Overlaps with {site.overlappingSites.join(', ')}
                                                     </span>
                                                 )}
                                             </div>
                                             <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                                                Arrival: <b>{site.arrivalTime}</b> • Left: <b>{site.leavingTime}</b>
+                                                {site.isMultiVisit ? (
+                                                    <>
+                                                        First In: <b>{site.arrivalTime}</b> • Last Out: <b>{site.leavingTime}</b>{' '}
+                                                        <span style={{ color: '#10b981', fontWeight: '700' }}>
+                                                            ({site.visitsCount} entries & exits • {formatMinutes(siteInfoSpending(site))} net spent)
+                                                        </span>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        Arrival: <b>{site.arrivalTime}</b> • Left: <b>{site.leavingTime}</b> (1 continuous visit)
+                                                    </>
+                                                )}
                                             </span>
+                                            {site.isMultiVisit && (
+                                                <span 
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setShowInsideModal(true);
+                                                    }}
+                                                    style={{ fontSize: '11px', color: '#10b981', fontWeight: '700', textDecoration: 'underline', marginTop: '2px', cursor: 'pointer', display: 'inline-block' }}
+                                                >
+                                                    🔍 View All {site.visitsCount} In & Out Sessions ➔
+                                                </span>
+                                            )}
                                         </div>
                                         <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
                                             <span style={{ background: 'rgba(37, 99, 235, 0.1)', color: '#2563eb', padding: '4px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: '700' }}>
@@ -1608,6 +1863,272 @@ export default function SiteInfoView({ employees }) {
                             <button 
                                 className="btn btn-primary" 
                                 onClick={() => setShowOutsideModal(false)}
+                                style={{ margin: 0, padding: '8px 24px', fontSize: '13px' }}
+                            >
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ---------------------------------------------------------------------- */}
+            {/* INSIDE GEOFENCE DETAILED BREAKDOWN MODAL */}
+            {/* ---------------------------------------------------------------------- */}
+            {showInsideModal && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    width: '100vw',
+                    height: '100vh',
+                    background: 'rgba(0, 0, 0, 0.8)',
+                    backdropFilter: 'blur(5px)',
+                    zIndex: 99999,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justify: 'center',
+                    padding: '20px'
+                }}>
+                    <div className="glass" style={{
+                        width: '100%',
+                        maxWidth: '900px',
+                        maxHeight: '90vh',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        borderRadius: '16px',
+                        overflow: 'hidden',
+                        boxShadow: '0 25px 60px rgba(0,0,0,0.6)',
+                        background: 'var(--bg-panel, #0f172a)',
+                        border: '1px solid rgba(16, 185, 129, 0.3)'
+                    }}>
+                        {/* Modal Header */}
+                        <div style={{
+                            padding: '20px 24px',
+                            borderBottom: '1px solid var(--border-glass, #1e293b)',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            background: 'rgba(16, 185, 129, 0.05)'
+                        }}>
+                            <div>
+                                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#10b981', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <i className="fa-solid fa-circle-check"></i>
+                                    Inside Geofence Detailed Breakdown ({insidePings.length} Pings • {formatMinutes(metrics.insideTime)})
+                                </h3>
+                                <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#94a3b8' }}>
+                                    Detailed visit sessions, arrival & exit timestamps, and location pings recorded inside office geofences.
+                                </p>
+                            </div>
+                            <button 
+                                onClick={() => setShowInsideModal(false)}
+                                style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '24px', cursor: 'pointer' }}
+                            >
+                                &times;
+                            </button>
+                        </div>
+
+                        {/* Modal Content */}
+                        <div style={{ padding: '20px', flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                            
+                            {/* Summary Cards Row */}
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+                                <div style={{ padding: '12px', borderRadius: '10px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-glass)' }}>
+                                    <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>Total Inside Duration</span>
+                                    <h4 style={{ margin: '4px 0 0', fontSize: '18px', fontWeight: 800, color: '#10b981' }}>{formatMinutes(metrics.insideTime)}</h4>
+                                </div>
+                                <div style={{ padding: '12px', borderRadius: '10px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-glass)' }}>
+                                    <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>Inside Pings Count</span>
+                                    <h4 style={{ margin: '4px 0 0', fontSize: '18px', fontWeight: 800, color: '#3b82f6' }}>{insidePings.length} Pings</h4>
+                                </div>
+                                <div style={{ padding: '12px', borderRadius: '10px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-glass)' }}>
+                                    <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>Visited Office Sites</span>
+                                    <h4 style={{ margin: '4px 0 0', fontSize: '18px', fontWeight: 800, color: '#f59e0b' }}>{visitedGeofences.length} Sites</h4>
+                                </div>
+                                <div style={{ padding: '12px', borderRadius: '10px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-glass)' }}>
+                                    <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>Total Visit Sessions</span>
+                                    <h4 style={{ margin: '4px 0 0', fontSize: '18px', fontWeight: 800, color: '#a855f7' }}>
+                                        {visitedGeofences.reduce((acc, v) => acc + (v.visitsCount || 1), 0)} Sessions
+                                    </h4>
+                                </div>
+                            </div>
+
+                            {/* Visited Sites & Multi-Visit Sessions Breakdown */}
+                            {visitedGeofences.length > 0 && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                    <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <i className="fa-solid fa-building-circle-check" style={{ color: '#10b981' }}></i>
+                                        Office Sites & Visit Sessions Breakdown
+                                    </h4>
+
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                        {visitedGeofences.map((site, sIdx) => (
+                                            <div key={sIdx} style={{ padding: '14px 16px', borderRadius: '10px', background: 'rgba(16, 185, 129, 0.05)', border: '1px solid rgba(16, 185, 129, 0.2)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                                                    <div>
+                                                        <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                                                            🏢 {site.name}
+                                                        </span>
+                                                        {site.date && (
+                                                            <span style={{ marginLeft: '8px', background: 'rgba(255,255,255,0.08)', color: 'var(--text-secondary)', padding: '1px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: '600' }}>
+                                                                {site.date}
+                                                            </span>
+                                                        )}
+                                                        <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '2px' }}>
+                                                            {site.isMultiVisit ? (
+                                                                <span>
+                                                                    First In: <b>{site.arrivalTime}</b> • Last Out: <b>{site.leavingTime}</b>{' '}
+                                                                    <span style={{ color: '#10b981', fontWeight: 700 }}>
+                                                                        ({site.visitsCount} visits, {formatMinutes(siteInfoSpending(site))} net spent)
+                                                                    </span>
+                                                                </span>
+                                                            ) : (
+                                                                <span>
+                                                                    Arrival: <b>{site.arrivalTime}</b> • Left: <b>{site.leavingTime}</b> (1 continuous visit)
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                        <span style={{ background: '#10b981', color: '#fff', padding: '3px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: 700 }}>
+                                                            {formatMinutes(siteInfoSpending(site))} spent
+                                                        </span>
+                                                        <span style={{ background: 'rgba(255,255,255,0.08)', color: 'var(--text-secondary)', padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600 }}>
+                                                            {site.pingsCount} pings
+                                                        </span>
+                                                    </div>
+                                                </div>
+
+                                                {/* Discrete Visits Timeline List */}
+                                                {site.visits && site.visits.length > 0 && (
+                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '4px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                                                        <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                                            Detailed Visits Timeline ({site.visits.length} Visit{site.visits.length > 1 ? 's' : ''}):
+                                                        </span>
+                                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '8px' }}>
+                                                            {site.visits.map((v, vIdx) => (
+                                                                <div key={vIdx} style={{ padding: '8px 12px', borderRadius: '6px', background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(16, 185, 129, 0.15)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                                    <div>
+                                                                        <div style={{ fontSize: '12px', fontWeight: 700, color: '#10b981' }}>
+                                                                            Visit #{v.visitNumber || vIdx + 1}
+                                                                        </div>
+                                                                        <div style={{ fontSize: '11px', color: '#cbd5e1', marginTop: '1px' }}>
+                                                                            {v.startTime === v.endTime ? (
+                                                                                <span>At <b>{v.startTime}</b></span>
+                                                                            ) : (
+                                                                                <span><b>{v.startTime}</b> ➔ <b>{v.endTime}</b></span>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
+                                                                    <div style={{ textAlign: 'right' }}>
+                                                                        <span style={{ fontSize: '11px', fontWeight: 700, color: '#10b981' }}>
+                                                                            {formatMinutes(v.durationMins)}
+                                                                        </span>
+                                                                        <div style={{ fontSize: '10px', color: '#94a3b8' }}>
+                                                                            {v.pingsCount} ping{v.pingsCount > 1 ? 's' : ''}
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Ping-by-Ping Detailed Log Table */}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                                        📍 Inside Geofence Ping-by-Ping Location Log
+                                    </h4>
+
+                                    <input 
+                                        type="text" 
+                                        placeholder="Filter by time or site..."
+                                        value={insideSearchTerm}
+                                        onChange={e => setInsideSearchTerm(e.target.value)}
+                                        style={{
+                                            padding: '6px 12px',
+                                            borderRadius: '6px',
+                                            border: '1px solid var(--border-glass, #334155)',
+                                            background: 'rgba(0,0,0,0.2)',
+                                            color: 'var(--text-primary)',
+                                            fontSize: '12px',
+                                            outline: 'none',
+                                            width: '200px'
+                                        }}
+                                    />
+                                </div>
+
+                                <div style={{ borderRadius: '8px', border: '1px solid var(--border-glass, #334155)', overflow: 'hidden' }}>
+                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
+                                        <thead>
+                                            <tr style={{ background: 'rgba(255,255,255,0.05)' }}>
+                                                <th style={{ padding: '10px' }}>#</th>
+                                                <th style={{ padding: '10px' }}>Time</th>
+                                                <th style={{ padding: '10px' }}>Site / Geofence</th>
+                                                <th style={{ padding: '10px' }}>Coordinates</th>
+                                                <th style={{ padding: '10px' }}>Distance from Centroid</th>
+                                                <th style={{ padding: '10px', textAlign: 'right' }}>Map Focus</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {filteredInsidePings.length === 0 ? (
+                                                <tr>
+                                                    <td colSpan="6" style={{ padding: '20px', textAlign: 'center', color: '#94a3b8' }}>
+                                                        No inside pings matched your filter.
+                                                    </td>
+                                                </tr>
+                                            ) : (
+                                                filteredInsidePings.map((ping, idx) => (
+                                                    <tr key={idx} style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                                                        <td style={{ padding: '10px', color: '#64748b' }}>{idx + 1}</td>
+                                                        <td style={{ padding: '10px', fontWeight: 700, color: '#10b981' }}>{ping.timeString}</td>
+                                                        <td style={{ padding: '10px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                                                            🏢 {ping.assignedGfName || ping.nearestGfName || 'Geofence'}
+                                                        </td>
+                                                        <td style={{ padding: '10px', fontFamily: 'monospace', color: '#94a3b8' }}>
+                                                            {ping.latitude.toFixed(6)}, {ping.longitude.toFixed(6)}
+                                                        </td>
+                                                        <td style={{ padding: '10px' }}>
+                                                            <span style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', padding: '2px 8px', borderRadius: '4px', fontWeight: 600 }}>
+                                                                {ping.minDistanceMeters}m from center
+                                                            </span>
+                                                        </td>
+                                                        <td style={{ padding: '10px', textAlign: 'right' }}>
+                                                            <button 
+                                                                className="btn btn-outline"
+                                                                style={{ margin: 0, padding: '4px 10px', fontSize: '11px', borderColor: '#10b981', color: '#10b981' }}
+                                                                onClick={() => handleFocusInsidePingOnMap(ping)}
+                                                            >
+                                                                <i className="fa-solid fa-location-crosshairs"></i> Focus on Map
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                ))
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Modal Footer */}
+                        <div style={{
+                            padding: '16px 24px',
+                            borderTop: '1px solid var(--border-glass, #1e293b)',
+                            display: 'flex',
+                            justifyContent: 'flex-end',
+                            background: 'rgba(0,0,0,0.2)'
+                        }}>
+                            <button 
+                                className="btn btn-primary" 
+                                onClick={() => setShowInsideModal(false)}
                                 style={{ margin: 0, padding: '8px 24px', fontSize: '13px' }}
                             >
                                 Close

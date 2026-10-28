@@ -30,11 +30,30 @@ const handleSummary = async (req, res) => {
       Leave.count({ where: { status: 'pending' } }),
       Expense.count({ where: { status: 'pending' } }),
       Attendance.count({ 
+        distinct: true,
+        col: 'userId',
         where: { 
           date: { [Op.in]: [todayStr, altDate] }
         } 
       }),
-      Employee.count({ where: { role: { [Op.ne]: 'ADMIN' } } })
+      Employee.count({ 
+        where: { 
+          [Op.and]: [
+            {
+              [Op.or]: [
+                { isSystemAccount: false },
+                { isSystemAccount: null }
+              ]
+            },
+            {
+              [Op.or]: [
+                { status: 'ACTIVE' },
+                { status: null }
+              ]
+            }
+          ]
+        } 
+      })
     ]);
 
     return res.status(200).json({

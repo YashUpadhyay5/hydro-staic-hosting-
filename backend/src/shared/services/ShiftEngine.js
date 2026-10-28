@@ -41,6 +41,16 @@ class ShiftEngine {
     const clean = String(rawSetting).trim().toLowerCase();
 
     // Known shift presets
+    if (clean === '9-5:30' || clean === '9 to 5:30' || clean === '9-5.30' || clean === '09:00-17:30' || clean === '9:00-17:30') {
+      return {
+        code: '9-5:30',
+        start: '09:00:00',
+        end: '17:30:00',
+        graceMinutes: 30,
+        label: '9:00 AM - 5:30 PM'
+      };
+    }
+
     if (clean === '9-6' || clean === '9 to 6' || clean === '09:00-18:00' || clean === 'general') {
       return {
         code: '9-6',
@@ -81,8 +91,9 @@ class ShiftEngine {
       };
     }
 
-    // Dynamic pattern matching e.g. "8:30-17:30" or "9-18"
-    const rangeMatch = clean.match(/^(\d{1,2})(?::(\d{2}))?\s*[-–to]+\s*(\d{1,2})(?::(\d{2}))?$/);
+    // Dynamic pattern matching e.g. "8:30-17:30", "9-18", or "Other (10:00 - 19:00)"
+    const normalized = clean.replace(/^(other[:\s]*\(?)/i, '').replace(/\)$/, '').trim();
+    const rangeMatch = normalized.match(/^(\d{1,2})(?::(\d{2}))?\s*[-–to]+\s*(\d{1,2})(?::(\d{2}))?$/);
     if (rangeMatch) {
       let startH = parseInt(rangeMatch[1], 10);
       const startM = parseInt(rangeMatch[2] || '0', 10);
@@ -194,7 +205,18 @@ class ShiftEngine {
 
     if (inSecs != null && outSecs != null) {
       let diff = outSecs - inSecs;
-      if (diff < 0) diff += 86400; // Handled overnight shift wrap
+      if (diff === 0) return '00:00:00';
+      if (diff < 0) {
+        // True overnight shifts crossing midnight must start in evening/night (>= 19:00) and end next morning (<= 12:00)
+        const inMins = Math.floor(inSecs / 60);
+        const outMins = Math.floor(outSecs / 60);
+        if (inMins >= 19 * 60 && outMins <= 12 * 60) {
+          diff += 86400; // Legitimate overnight shift wrap
+        } else {
+          // Inverted punch error (e.g. checkOut earlier than checkIn during daytime) -> 0 hours
+          return '00:00:00';
+        }
+      }
       const h = Math.floor(diff / 3600);
       const m = Math.floor((diff % 3600) / 60);
       const s = diff % 60;

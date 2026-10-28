@@ -46,14 +46,17 @@ server.on('error', (err) => {
 // Initialize Socket.IO Gateway
 const io = initSocketGateway(server);
 app.set('io', io);
+HeartbeatMonitorService.setIO(io);
 
 const startServer = async () => {
   try {
     await sequelize.sync();
-    await sequelize.query('PRAGMA journal_mode=WAL;').catch(() => {});
-    await sequelize.query('PRAGMA busy_timeout=5000;').catch(() => {});
-    await sequelize.query('CREATE INDEX IF NOT EXISTS idx_footprints_user_ts ON location_footprints(userId, timestamp DESC);').catch(() => {});
-    console.log('Database architecture connected with schema sync enabled.');
+    if (sequelize.options.dialect === 'sqlite') {
+      await sequelize.query('PRAGMA journal_mode=WAL;').catch(() => {});
+      await sequelize.query('PRAGMA busy_timeout=5000;').catch(() => {});
+    }
+    await sequelize.query('CREATE INDEX IF NOT EXISTS idx_footprints_user_ts ON location_footprints(user_id, timestamp DESC);').catch(() => {});
+    console.log(`Database architecture connected (${sequelize.options.dialect}) with schema sync enabled.`);
     
     await runMigrations(sequelize);
     await runSeeders(sequelize);
@@ -61,6 +64,7 @@ const startServer = async () => {
     
     server.listen(PORT, '0.0.0.0', () => {
       bindAttempts = 0;
+      if (typeof process.send === 'function') process.send('ready');
       console.log(`Server executing active connection interface protocols across port: ${PORT} (0.0.0.0)`);
 
       // CHANGE 7 & CHANGE 1: SERVER STARTUP REPORT & ROUTE AUDIT LOGS
@@ -92,22 +96,34 @@ const startServer = async () => {
         console.warn('[Startup Report Warning]:', rptErr.message);
       }
       
-      // Start background heartbeat tracking monitor loop
-      setTimeout(() => {
-        HeartbeatMonitorService.runBackgroundCheck().catch(err => console.error('[HeartbeatService Loop Error]:', err.message));
-      }, 5000);
-      
-      setInterval(() => {
-        HeartbeatMonitorService.runBackgroundCheck().catch(err => console.error('[HeartbeatService Loop Error]:', err.message));
-      }, 60000);
-      
-      // Start background daily scheduled notifications and database backup service
-      CronScheduler.start();
-      NotificationScheduler.start();
-      const { initDailyWhatsAppCron } = require('./shared/services/jobs/dailyAttendanceWhatsAppJob');
-      initDailyWhatsAppCron();
-      const backupService = require('./core/services/backupService');
-      backupService.startAutoBackupInterval(6);
+      // Leader Gating for PM2 Cluster Mode (only primary worker 0 runs schedulers)
+      const isLeaderWorker = !process.env.NODE_APP_INSTANCE || process.env.NODE_APP_INSTANCE === '0';
+      if (isLeaderWorker) {
+        console.log(`[PM2 Cluster] Worker ${process.env.NODE_APP_INSTANCE || '0'} designated as Cluster Leader for schedulers.`);
+        
+        // Start background heartbeat tracking monitor loop
+        setTimeout(() => {
+          HeartbeatMonitorService.runBackgroundCheck().catch(err => console.error('[HeartbeatService Loop Error]:', err.message));
+        }, 5000);
+        
+        setInterval(() => {
+          HeartbeatMonitorService.runBackgroundCheck().catch(err => console.error('[HeartbeatService Loop Error]:', err.message));
+        }, 60000);
+        
+        // Start background daily scheduled notifications and database backup service
+        CronScheduler.start();
+        NotificationScheduler.start();
+        const { initDailyWhatsAppCron } = require('./shared/services/jobs/dailyAttendanceWhatsAppJob');
+        initDailyWhatsAppCron();
+        const backupService = require('./core/services/backupService');
+        backupService.startAutoBackupInterval(6);
+
+        // Auto-sync salary structures with employee master records on boot
+        const { syncAllSalaryStructures } = require('./shared/database/syncSalaryStructures');
+        syncAllSalaryStructures().catch(err => console.warn('[Startup SalaryStructure Sync Warning]:', err.message));
+      } else {
+        console.log(`[PM2 Cluster] Worker ${process.env.NODE_APP_INSTANCE} active in high-throughput API processing mode.`);
+      }
     });
 
     // Graceful Shutdown Handlers for PM2 and Windows Process Management

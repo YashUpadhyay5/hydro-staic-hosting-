@@ -64,7 +64,7 @@ class BackupService {
         }
     }
 
-    cleanupOldBackups(maxKeep = 30) {
+    cleanupOldBackups(maxKeep = 2) {
         try {
             const files = fs.readdirSync(this.backupDir)
                 .filter(f => f.startsWith('database_backup_') && f !== 'database_backup_LATEST.sqlite')

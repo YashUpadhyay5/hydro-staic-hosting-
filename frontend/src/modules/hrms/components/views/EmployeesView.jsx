@@ -14,6 +14,7 @@ const getLocationCalendarsFromStorage = () => {
 import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../../services/api';
 import { getFullUrl, forceDownload, formatDate } from '../../utils/helpers';
+import LeaveAdjustmentModal from './LeaveAdjustmentModal';
 
 const COUNTRY_CODES = [
     { code: '+91', label: 'IN (+91)' },
@@ -27,6 +28,14 @@ const COUNTRY_CODES = [
     { code: '+977', label: 'NP (+977)' },
     { code: '+966', label: 'SA (+966)' },
 ];
+
+const SYSTEM_CUSTOM_FIELD_KEYS = new Set([
+    'panNumber', 'pan', 'uanNumber', 'pfUan', 'pfNumber', 'pf_number',
+    'esiNumber', 'esicNumber', 'esiNo', 'bankAccountNo',
+    'accountNumber', 'bankIfscCode', 'ifscCode', 'aadhaarNumber',
+    'aadharNumber', 'aadhaar', 'aadhar', 'highestQualification',
+    'openingLeaveBalance', 'earnedLeaves'
+]);
 
 const ALL_INDIAN_STATES = [
     { stateCode: 'AP', stateName: 'Andhra Pradesh', maxAnnualPt: 2500 },
@@ -61,6 +70,21 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
     
     // Add Employee Form State
     const [showAddForm, setShowAddForm] = useState(false);
+    const [showLeaveAdjustmentModal, setShowLeaveAdjustmentModal] = useState(false);
+    const [leaveAdjustmentEmpId, setLeaveAdjustmentEmpId] = useState(null);
+
+    // Fullscreen Image Lightbox Preview State
+    const [previewImage, setPreviewImage] = useState(null); // { url, title, subtitle }
+
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            if (e.key === 'Escape') setPreviewImage(null);
+        };
+        if (previewImage) {
+            window.addEventListener('keydown', handleKeyDown);
+        }
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [previewImage]);
     const [profileTab, setProfileTab] = useState('PROFILE');
     const [financeSubTab, setFinanceSubTab] = useState('SALARY');
     const isScrollingRef = useRef(false);
@@ -135,15 +159,29 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
     const [nationality, setNationality] = useState('Indian');
     const [phoneNo, setPhoneNo] = useState('');
     const [countryCode, setCountryCode] = useState('+91');
+    const [fatherName, setFatherName] = useState('');
+    const [presentAddress, setPresentAddress] = useState('');
+    const [permanentAddress, setPermanentAddress] = useState('');
+    const [emergencyContact, setEmergencyContact] = useState('');
     const [designation, setDesignation] = useState('FIELD');
     const [role, setRole] = useState('EMPLOYEE');
     const [allowedLeaves, setAllowedLeaves] = useState(0);
     
-    // Step 5: Bank Details
+    // Step 5: Bank & Statutory Numbers
     const [bankName, setBankName] = useState('');
     const [bankAccountNo, setBankAccountNo] = useState('');
     const [bankIfscCode, setBankIfscCode] = useState('');
     const [bankBranchName, setBankBranchName] = useState('');
+    const [aadhaarNumber, setAadhaarNumber] = useState('');
+    const [highestQualLevel, setHighestQualLevel] = useState('');
+    const [highestQualStream, setHighestQualStream] = useState('');
+    const [highestQualInstitution, setHighestQualInstitution] = useState('');
+    const [highestQualYear, setHighestQualYear] = useState('');
+    const [highestQualPercent, setHighestQualPercent] = useState('');
+    const [panNumber, setPanNumber] = useState('');
+    const [uanNumber, setUanNumber] = useState('');
+    const [pfNumber, setPfNumber] = useState('');
+    const [esiNumber, setEsiNumber] = useState('');
     
     // Step 2: Job Details
     const [joiningDate, setJoiningDate] = useState('');
@@ -177,6 +215,7 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
     });
     
     const [reportingManager, setReportingManager] = useState('');
+    const [placeOfDuty, setPlaceOfDuty] = useState('');
 
     // Step 3: Employment Terms
     const [probationPolicy, setProbationPolicy] = useState('Permanent Employee');
@@ -202,7 +241,9 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
     const [newHolidayName, setNewHolidayName] = useState('');
     
     const [weeklyOffs, setWeeklyOffs] = useState('Sunday');
-    const [attendanceSetting, setAttendanceSetting] = useState('9-6'); // '9-6' or 'Flexible'
+    const [attendanceSetting, setAttendanceSetting] = useState('9-5:30'); // '9-5:30', 'Flexible', or 'Other'
+    const [startTime, setStartTime] = useState('09:00');
+    const [endTime, setEndTime] = useState('17:30');
     const [overtime, setOvertime] = useState('Eligible for overtime');
 
     // Step 5: Expense & Compensation Settings
@@ -311,11 +352,26 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
     const [editBankAccountNo, setEditBankAccountNo] = useState('');
     const [editBankIfscCode, setEditBankIfscCode] = useState('');
     const [editBankBranchName, setEditBankBranchName] = useState('');
+    const [editFatherName, setEditFatherName] = useState('');
+    const [editPresentAddress, setEditPresentAddress] = useState('');
+    const [editPermanentAddress, setEditPermanentAddress] = useState('');
+    const [editEmergencyContact, setEditEmergencyContact] = useState('');
+    const [editAadhaarNumber, setEditAadhaarNumber] = useState('');
+    const [editHighestQualLevel, setEditHighestQualLevel] = useState('');
+    const [editHighestQualStream, setEditHighestQualStream] = useState('');
+    const [editHighestQualInstitution, setEditHighestQualInstitution] = useState('');
+    const [editHighestQualYear, setEditHighestQualYear] = useState('');
+    const [editHighestQualPercent, setEditHighestQualPercent] = useState('');
+    const [editPanNumber, setEditPanNumber] = useState('');
+    const [editUanNumber, setEditUanNumber] = useState('');
+    const [editPfNumber, setEditPfNumber] = useState('');
+    const [editEsiNumber, setEditEsiNumber] = useState('');
     const [editJoiningDate, setEditJoiningDate] = useState('');
     const [editJobTitle, setEditJobTitle] = useState('');
     const [editLegalEntity, setEditLegalEntity] = useState('');
     const [editDepartment, setEditDepartment] = useState('');
     const [editLocation, setEditLocation] = useState('');
+    const [editPlaceOfDuty, setEditPlaceOfDuty] = useState('');
     const [editReportingManager, setEditReportingManager] = useState('');
     const [editProbationPolicy, setEditProbationPolicy] = useState('');
     const [editNoticePeriod, setEditNoticePeriod] = useState('');
@@ -324,7 +380,9 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
     const [editNewLeaveType, setEditNewLeaveType] = useState('');
     const [showEditLeaveDropdown, setShowEditLeaveDropdown] = useState(false);
     const [editWeeklyOffs, setEditWeeklyOffs] = useState('');
-    const [editAttendanceSetting, setEditAttendanceSetting] = useState('9-6');
+    const [editAttendanceSetting, setEditAttendanceSetting] = useState('9-5:30');
+    const [editStartTime, setEditStartTime] = useState('09:00');
+    const [editEndTime, setEditEndTime] = useState('17:30');
     const [editOvertime, setEditOvertime] = useState('');
     const [editHolidayDetails, setEditHolidayDetails] = useState('Chennai');
     const [isEditAddingNewSite, setIsEditAddingNewSite] = useState(false);
@@ -351,9 +409,47 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
     const [editTaxRegime, setEditTaxRegime] = useState('New Regime (Section 115BAC)');
     const [editDynamicFields, setEditDynamicFields] = useState({});
 
+    const getNextMonthFirst = () => {
+        const d = new Date();
+        const nextMonth = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+        const y = nextMonth.getFullYear();
+        const m = String(nextMonth.getMonth() + 1).padStart(2, '0');
+        return `${y}-${m}-01`;
+    };
+
+    const [editRevisionEffectiveDate, setEditRevisionEffectiveDate] = useState(getNextMonthFirst());
+    const [editRevisionReason, setEditRevisionReason] = useState('Annual Appraisal');
+    const [salaryHistoryData, setSalaryHistoryData] = useState(null);
+    const [loadingSalaryHistory, setLoadingSalaryHistory] = useState(false);
+
+    const fetchSalaryHistory = async (empId) => {
+        if (!empId) return;
+        setLoadingSalaryHistory(true);
+        try {
+            const res = await api.getSalaryHistory(empId);
+            if (res && res.success) {
+                setSalaryHistoryData(res);
+            } else {
+                setSalaryHistoryData(null);
+            }
+        } catch (err) {
+            console.error('Error fetching salary history:', err);
+            setSalaryHistoryData(null);
+        } finally {
+            setLoadingSalaryHistory(false);
+        }
+    };
+
+    useEffect(() => {
+        if (viewingEmployee && profileTab === 'FINANCES' && financeSubTab === 'REVISIONS') {
+            fetchSalaryHistory(viewingEmployee.id);
+        }
+    }, [viewingEmployee, profileTab, financeSubTab]);
+
     const handleCloseProfile = () => {
         setViewingEmployee(null);
         setIsEditing(false);
+        setSalaryHistoryData(null);
         localStorage.removeItem('viewingEmployeeId');
         localStorage.removeItem('isEditingEmployee');
     };
@@ -402,15 +498,33 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                 setEditLegalEntity(emp.legalEntity || 'Hydromaterials Private Limited');
                 setEditDepartment(emp.department || 'Company');
                 setEditLocation(emp.location || 'Headquarters');
+                setEditPlaceOfDuty(emp.placeOfDuty || emp.place_of_duty || '');
                 setEditReportingManager(emp.reportingManager || '');
                 setEditProbationPolicy(emp.probationPolicy || 'Permanent Employee');
                 setEditNoticePeriod(emp.noticePeriod || '1 Month');
                 setEditLeaveSetting(emp.leaveSetting || 'Paid Leaves');
                 setEditWeeklyOffs(emp.weeklyOffs || 'Sunday');
-                setEditAttendanceSetting(emp.attendanceSetting || '9-6');
+                let rawAtt1 = emp.attendanceSetting || '9-5:30';
+                if (rawAtt1 === '9-6') rawAtt1 = '9-5:30';
+                let sTime1 = emp.startTime || '09:00';
+                let eTime1 = emp.endTime || '17:30';
+                if (rawAtt1.startsWith('Other') || (!['9-5:30', 'Flexible'].includes(rawAtt1) && rawAtt1.includes('-'))) {
+                    setEditAttendanceSetting('Other');
+                    const match1 = rawAtt1.match(/(\d{1,2}:\d{2})\s*[-–to]+\s*(\d{1,2}:\d{2})/);
+                    if (match1) {
+                        sTime1 = match1[1].padStart(5, '0');
+                        eTime1 = match1[2].padStart(5, '0');
+                    }
+                } else {
+                    setEditAttendanceSetting(rawAtt1);
+                }
+                setEditStartTime(sTime1);
+                setEditEndTime(eTime1);
                 setEditOvertime(emp.overtime || 'Eligible for overtime');
                 setEditHolidayDetails(emp.holidayDetails || 'New Year');
                 setEditCompensationGross(emp.compensationGross !== undefined ? emp.compensationGross : 240000);
+                setEditRevisionEffectiveDate(getNextMonthFirst());
+                setEditRevisionReason('Annual Appraisal');
                 setEditPfEligible(emp.pfEligible !== undefined ? emp.pfEligible : true);
                 setEditPfAmount(emp.pfAmount !== undefined && emp.pfAmount !== null ? emp.pfAmount : '');
                 setShowEditEditPf(false);
@@ -426,9 +540,33 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                 const isLegacyDefault = emp.ptAmount === 208 || emp.ptAmount === '208';
                 setEditPtAmount(emp.ptAmount !== undefined && emp.ptAmount !== null && !isLegacyDefault ? emp.ptAmount : '');
                 setShowEditEditLwf(false);
-                setShowEditEditPt(false);
                 setEditTaxRegime(emp.taxRegime || 'New Regime (Section 115BAC)');
-                setEditDynamicFields(emp.customFields || {});
+                const cleanDynFields = {};
+                if (emp.customFields && typeof emp.customFields === 'object') {
+                    Object.entries(emp.customFields).forEach(([k, v]) => {
+                        if (!SYSTEM_CUSTOM_FIELD_KEYS.has(k)) {
+                            cleanDynFields[k] = v;
+                        }
+                    });
+                }
+                setEditDynamicFields(cleanDynFields);
+                setEditFatherName(emp.fatherName || emp.father_name || '');
+                setEditPresentAddress(emp.presentAddress || emp.present_address || '');
+                setEditPermanentAddress(emp.permanentAddress || emp.permanent_address || '');
+                setEditEmergencyContact(emp.emergencyContact || emp.emergency_contact || '');
+                setEditAadhaarNumber(emp.aadhaarNumber || emp.aadharNumber || emp.aadhaar || emp.aadhar || emp.customFields?.aadhaarNumber || emp.customFields?.aadharNumber || '');
+                let hq1 = emp.highestQualification;
+                if (typeof hq1 === 'string') { try { hq1 = JSON.parse(hq1); } catch (e) { hq1 = {}; } }
+                hq1 = hq1 || emp.customFields?.highestQualification || {};
+                setEditHighestQualLevel(hq1?.level || '');
+                setEditHighestQualStream(hq1?.stream || '');
+                setEditHighestQualInstitution(hq1?.institution || '');
+                setEditHighestQualYear(hq1?.year || '');
+                setEditHighestQualPercent(hq1?.percentage || hq1?.percent || '');
+                setEditPanNumber(emp.panNumber || emp.pan || '');
+                setEditUanNumber(emp.uanNumber || emp.pfUan || '');
+                setEditPfNumber(emp.pfNumber || emp.pf_number || '');
+                setEditEsiNumber(emp.esiNumber || emp.esicNumber || emp.esiNo || '');
                 
                 const storedEditing = localStorage.getItem('isEditingEmployee') === 'true';
                 setIsEditing(storedEditing);
@@ -473,21 +611,65 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
         setEditBankAccountNo(emp.bankAccountNo || '');
         setEditBankIfscCode(emp.bankIfscCode || '');
         setEditBankBranchName(emp.bankBranchName || '');
+        setEditFatherName(emp.fatherName || emp.father_name || '');
+        setEditPresentAddress(emp.presentAddress || emp.present_address || '');
+        setEditPermanentAddress(emp.permanentAddress || emp.permanent_address || '');
+        setEditEmergencyContact(emp.emergencyContact || emp.emergency_contact || '');
+        const cleanDynFieldsOnEdit = {};
+        if (emp.customFields && typeof emp.customFields === 'object') {
+            Object.entries(emp.customFields).forEach(([k, v]) => {
+                if (!SYSTEM_CUSTOM_FIELD_KEYS.has(k)) {
+                    cleanDynFieldsOnEdit[k] = v;
+                }
+            });
+        }
+        setEditDynamicFields(cleanDynFieldsOnEdit);
+        setEditAadhaarNumber(emp.aadhaarNumber || emp.aadharNumber || emp.aadhaar || emp.aadhar || emp.customFields?.aadhaarNumber || emp.customFields?.aadharNumber || '');
+        let hq2 = emp.highestQualification;
+        if (typeof hq2 === 'string') { try { hq2 = JSON.parse(hq2); } catch (e) { hq2 = {}; } }
+        hq2 = hq2 || emp.customFields?.highestQualification || {};
+        setEditHighestQualLevel(hq2?.level || '');
+        setEditHighestQualStream(hq2?.stream || '');
+        setEditHighestQualInstitution(hq2?.institution || '');
+        setEditHighestQualYear(hq2?.year || '');
+        setEditHighestQualPercent(hq2?.percentage || hq2?.percent || '');
+        setEditPanNumber(emp.panNumber || emp.pan || '');
+        setEditUanNumber(emp.uanNumber || emp.pfUan || '');
+        setEditPfNumber(emp.pfNumber || emp.pf_number || '');
+        setEditEsiNumber(emp.esiNumber || emp.esicNumber || emp.esiNo || '');
         setEditJoiningDate(emp.joiningDate || '');
         setEditJobTitle(emp.jobTitle || 'Design Engineer');
         setEditLegalEntity(emp.legalEntity || 'Hydromaterials Private Limited');
         setEditDepartment(emp.department || 'Company');
         setEditLocation(emp.location || 'Headquarters');
+        setEditPlaceOfDuty(emp.placeOfDuty || emp.place_of_duty || '');
         setEditReportingManager(emp.reportingManager || '');
         setEditProbationPolicy(emp.probationPolicy || 'Permanent Employee');
         setEditNoticePeriod(emp.noticePeriod || '1 Month');
         setEditLeaveSetting(emp.leaveSetting || 'Paid Leaves');
         setEditWeeklyOffs(emp.weeklyOffs || 'Sunday');
-        setEditAttendanceSetting(emp.attendanceSetting || '9-6');
+        let rawAtt2 = emp.attendanceSetting || '9-5:30';
+        if (rawAtt2 === '9-6') rawAtt2 = '9-5:30';
+        let sTime2 = emp.startTime || '09:00';
+        let eTime2 = emp.endTime || '17:30';
+        if (rawAtt2.startsWith('Other') || (!['9-5:30', 'Flexible'].includes(rawAtt2) && rawAtt2.includes('-'))) {
+            setEditAttendanceSetting('Other');
+            const match2 = rawAtt2.match(/(\d{1,2}:\d{2})\s*[-–to]+\s*(\d{1,2}:\d{2})/);
+            if (match2) {
+                sTime2 = match2[1].padStart(5, '0');
+                eTime2 = match2[2].padStart(5, '0');
+            }
+        } else {
+            setEditAttendanceSetting(rawAtt2);
+        }
+        setEditStartTime(sTime2);
+        setEditEndTime(eTime2);
         setEditOvertime(emp.overtime || 'Eligible for overtime');
         setEditHolidayDetails(emp.holidayDetails || 'New Year');
         setEditExpensePolicies(emp.expensePolicies || 'Standard travel and food reimbursement policy');
         setEditCompensationGross(emp.compensationGross !== undefined ? emp.compensationGross : 240000);
+        setEditRevisionEffectiveDate(getNextMonthFirst());
+        setEditRevisionReason('Annual Appraisal');
         setEditPfEligible(emp.pfEligible !== undefined ? emp.pfEligible : true);
         setEditPfAmount(emp.pfAmount !== undefined && emp.pfAmount !== null ? emp.pfAmount : '');
         setShowEditEditPf(false);
@@ -505,7 +687,15 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
         setShowEditEditLwf(false);
         setShowEditEditPt(false);
         setEditTaxRegime(emp.taxRegime || 'New Regime (Section 115BAC)');
-        setEditDynamicFields(emp.customFields || {});
+        const cleanDynFieldsClick = {};
+        if (emp.customFields && typeof emp.customFields === 'object') {
+            Object.entries(emp.customFields).forEach(([k, v]) => {
+                if (!SYSTEM_CUSTOM_FIELD_KEYS.has(k)) {
+                    cleanDynFieldsClick[k] = v;
+                }
+            });
+        }
+        setEditDynamicFields(cleanDynFieldsClick);
         setShowAddForm(false); // Hide add form if open
     };
 
@@ -535,16 +725,21 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                 legalEntity: editLegalEntity,
                 department: editDepartment,
                 location: editLocation,
+                placeOfDuty: editPlaceOfDuty,
                 reportingManager: editReportingManager,
                 probationPolicy: editProbationPolicy,
                 noticePeriod: editNoticePeriod,
                 leaveSetting: editLeaveSetting,
                 weeklyOffs: editWeeklyOffs,
-                attendanceSetting: editAttendanceSetting,
+                attendanceSetting: editAttendanceSetting === 'Other' ? `Other (${editStartTime} - ${editEndTime})` : editAttendanceSetting,
+                startTime: editAttendanceSetting === 'Other' ? editStartTime : (editAttendanceSetting === '9-5:30' ? '09:00' : ''),
+                endTime: editAttendanceSetting === 'Other' ? editEndTime : (editAttendanceSetting === '9-5:30' ? '17:30' : ''),
                 overtime: editOvertime,
                 holidayDetails: editHolidayDetails,
                 expensePolicies: editExpensePolicies,
                 compensationGross: Number(editCompensationGross),
+                revisionEffectiveDate: editRevisionEffectiveDate,
+                revisionReason: editRevisionReason,
                 pfEligible: editPfEligible,
                 pfAmount: editPfEligible ? (editPfAmount !== '' && editPfAmount !== null && !isNaN(Number(editPfAmount)) ? Number(editPfAmount) : null) : 0,
                 vpfEligible: editVpfEligible,
@@ -563,19 +758,52 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                 bankName: editBankName,
                 bankAccountNo: editBankAccountNo,
                 bankIfscCode: editBankIfscCode,
-                bankBranchName: editBankBranchName
+                bankBranchName: editBankBranchName,
+                fatherName: editFatherName,
+                presentAddress: editPresentAddress,
+                permanentAddress: editPermanentAddress,
+                emergencyContact: editEmergencyContact,
+                highestQualification: {
+                    level: editHighestQualLevel,
+                    stream: editHighestQualStream,
+                    institution: editHighestQualInstitution,
+                    year: editHighestQualYear,
+                    percentage: editHighestQualPercent
+                },
+                aadhaarNumber: editAadhaarNumber,
+                panNumber: editPanNumber,
+                uanNumber: editUanNumber,
+                pfNumber: editPfNumber,
+                esiNumber: editEsiNumber
             });
 
             if (updated) {
                 setViewingEmployee(updated);
+                setEditFatherName(updated.fatherName || updated.father_name || '');
+                setEditPresentAddress(updated.presentAddress || updated.present_address || '');
+                setEditPermanentAddress(updated.permanentAddress || updated.permanent_address || '');
+                setEditEmergencyContact(updated.emergencyContact || updated.emergency_contact || '');
+                setEditAadhaarNumber(updated.aadhaarNumber || updated.aadharNumber || '');
+                setEditPanNumber(updated.panNumber || updated.pan || '');
+                setEditUanNumber(updated.uanNumber || updated.pfUan || '');
+                setEditPfNumber(updated.pfNumber || updated.pf_number || '');
+                setEditEsiNumber(updated.esiNumber || updated.esicNumber || '');
+                setEditPlaceOfDuty(updated.placeOfDuty || updated.place_of_duty || '');
+                if (updated.id) {
+                    localStorage.setItem('viewingEmployeeId', updated.id);
+                }
             }
 
-            alert("Employee updated successfully!");
-            handleCloseProfile();
+            setIsEditing(false);
+            localStorage.setItem('isEditingEmployee', 'false');
+            window.dispatchEvent(new CustomEvent('employee-updated', { detail: updated }));
 
+            // Background sync without freezing UI
             if (refreshEmployees) {
-                await refreshEmployees();
+                refreshEmployees().catch(() => {});
             }
+
+            alert("Employee profile updated successfully!");
         } catch (err) {
             alert(err.message || "Failed to update employee.");
         } finally {
@@ -595,6 +823,7 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
             if (refreshEmployees) {
                 await refreshEmployees();
             }
+            window.dispatchEvent(new CustomEvent('employee-updated', { detail: { id, action: 'delete' } }));
         } catch (err) {
             alert(err.message || "Failed to delete employee.");
         } finally {
@@ -647,6 +876,7 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
             if (refreshEmployees) {
                 await refreshEmployees();
             }
+            window.dispatchEvent(new CustomEvent('employee-updated', { detail: { id, action: 'activate' } }));
         } catch (err) {
             alert(err.message || "Failed to activate employee.");
         } finally {
@@ -673,6 +903,7 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
             if (refreshEmployees) {
                 await refreshEmployees();
             }
+            window.dispatchEvent(new CustomEvent('employee-updated', { detail: { id: exitEmployeeId, action: 'exit' } }));
         } catch (err) {
             alert(err.message || "Failed to process exit.");
         } finally {
@@ -974,13 +1205,16 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                 legalEntity,
                 department,
                 location,
+                placeOfDuty,
                 reportingManager,
                 probationPolicy,
                 noticePeriod,
                 leaveSetting,
                 holidayDetails,
                 weeklyOffs,
-                attendanceSetting,
+                attendanceSetting: attendanceSetting === 'Other' ? `Other (${startTime} - ${endTime})` : attendanceSetting,
+                startTime: attendanceSetting === 'Other' ? startTime : (attendanceSetting === '9-5:30' ? '09:00' : ''),
+                endTime: attendanceSetting === 'Other' ? endTime : (attendanceSetting === '9-5:30' ? '17:30' : ''),
                 overtime,
                 expensePolicies,
                 compensationGross: Number(compensationGross),
@@ -1002,7 +1236,23 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                 bankName,
                 bankAccountNo,
                 bankIfscCode,
-                bankBranchName
+                bankBranchName,
+                fatherName,
+                presentAddress,
+                permanentAddress,
+                emergencyContact,
+                highestQualification: {
+                    level: highestQualLevel,
+                    stream: highestQualStream,
+                    institution: highestQualInstitution,
+                    year: highestQualYear,
+                    percentage: highestQualPercent
+                },
+                aadhaarNumber,
+                panNumber,
+                uanNumber,
+                pfNumber,
+                esiNumber
             });
 
             alert("Employee added successfully!");
@@ -1012,6 +1262,20 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
             setEmail('');
             setPassword('');
             setDob('');
+            setFatherName('');
+            setPresentAddress('');
+            setPermanentAddress('');
+            setEmergencyContact('');
+            setHighestQualLevel('');
+            setHighestQualStream('');
+            setHighestQualInstitution('');
+            setHighestQualYear('');
+            setHighestQualPercent('');
+            setAadhaarNumber('');
+            setPanNumber('');
+            setUanNumber('');
+            setPfNumber('');
+            setEsiNumber('');
             setEmpCode('');
             setBankName('');
             setBankAccountNo('');
@@ -1034,7 +1298,9 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
             setLeaveSetting('Paid Leaves');
             setHolidayDetails('Chennai');
             setWeeklyOffs('Sunday');
-            setAttendanceSetting('9-6');
+            setAttendanceSetting('9-5:30');
+            setStartTime('09:00');
+            setEndTime('17:30');
             setOvertime('Eligible for overtime');
             setExpensePolicies('Standard travel and food reimbursement policy');
             setCompensationGross(240000);
@@ -1062,6 +1328,7 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
             if (refreshEmployees) {
                 await refreshEmployees();
             }
+            window.dispatchEvent(new CustomEvent('employee-updated', { detail: { action: 'add' } }));
         } catch (err) {
             alert(err.message || "Failed to add employee.");
         } finally {
@@ -1376,7 +1643,7 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
 
                                 <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
                                     <div className="form-group" style={{ flex: 1, minWidth: '200px', margin: 0 }}>
-                                        <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Designation / Track Type</label>
+                                        <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Track</label>
                                         <select value={designation} onChange={(e) => setDesignation(e.target.value)} style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} >
                                             <option value="FIELD">Field Employee (GPS Tracking active)</option>
                                             <option value="OFFICE">Office Employee</option>
@@ -1385,8 +1652,10 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                                     <div className="form-group" style={{ flex: 1, minWidth: '200px', margin: 0 }}>
                                         <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Access Role</label>
                                         <select value={role} onChange={(e) => setRole(e.target.value)} style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} >
-                                            <option value="EMPLOYEE">Employee</option>
-                                            <option value="ADMIN">Administrator</option>
+                                            <option value="EMPLOYEE">Employee (Mobile App Only)</option>
+                                            <option value="ADMIN">Administrator (Full Access)</option>
+                                            <option value="TRACKING_MANAGER">Tracking Manager (Tracking & Attendance)</option>
+                                            <option value="FIELD_INVOICE_MANAGER">Field & Invoice Manager (Tracking & Invoicing)</option>
                                         </select>
                                     </div>
                                     <div className="form-group" style={{ flex: 1, minWidth: '200px', margin: 0 }}>
@@ -1446,6 +1715,103 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                                         </div>
                                     </div>
                                 </div>
+
+                                <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
+                                    <div className="form-group" style={{ flex: 1, minWidth: '220px', margin: 0 }}>
+                                        <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Father / Spouse Name</label>
+                                        <input type="text" value={fatherName} onChange={(e) => setFatherName(e.target.value)} placeholder="Father or Spouse Name" style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} />
+                                    </div>
+                                    <div className="form-group" style={{ flex: 1, minWidth: '150px', margin: 0 }}>
+                                        <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Gender</label>
+                                        <select value={gender} onChange={(e) => setGender(e.target.value)} style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }}>
+                                            <option value="Male">Male</option>
+                                            <option value="Female">Female</option>
+                                            <option value="Other">Other</option>
+                                        </select>
+                                    </div>
+                                    <div className="form-group" style={{ flex: 2, minWidth: '300px', margin: 0 }}>
+                                        <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Present Residential Address</label>
+                                        <input type="text" value={presentAddress} onChange={(e) => setPresentAddress(e.target.value)} placeholder="Full street address, city, state" style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} />
+                                    </div>
+                                </div>
+
+                                <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
+                                    <div className="form-group" style={{ flex: 2, minWidth: '300px', margin: 0 }}>
+                                        <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Permanent Address</label>
+                                        <input type="text" value={permanentAddress} onChange={(e) => setPermanentAddress(e.target.value)} placeholder="Permanent residential address" style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} />
+                                    </div>
+                                    <div className="form-group" style={{ flex: 1, minWidth: '220px', margin: 0 }}>
+                                        <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Emergency Contact (Person & Phone)</label>
+                                        <input type="text" value={emergencyContact} onChange={(e) => setEmergencyContact(e.target.value)} placeholder="e.g. Father: +91 9876543210" style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} />
+                                    </div>
+                                </div>
+
+                                <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '14px', marginTop: '4px' }}>
+                                    <h5 style={{ margin: '0 0 12px 0', fontSize: '0.85rem', fontWeight: 700, color: '#4f46e5', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Highest Qualification</h5>
+                                    <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                                        <div className="form-group" style={{ flex: 1, minWidth: '200px', margin: 0 }}>
+                                            <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Qualification / Degree</label>
+                                            <select 
+                                                value={highestQualLevel} 
+                                                onChange={(e) => setHighestQualLevel(e.target.value)} 
+                                                style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }}
+                                            >
+                                                <option value="">Select Qualification</option>
+                                                <option value="10th / Secondary">10th / Secondary</option>
+                                                <option value="12th / Higher Secondary">12th / Higher Secondary</option>
+                                                <option value="Diploma">Diploma / Polytechnic</option>
+                                                <option value="Bachelor's Degree">Bachelor's Degree (B.E / B.Tech / B.Sc / B.Com / B.A / etc.)</option>
+                                                <option value="Master's Degree">Master's Degree (M.E / M.Tech / M.Sc / M.Com / MBA / etc.)</option>
+                                                <option value="Doctorate / Ph.D">Doctorate / Ph.D</option>
+                                                <option value="Other">Other</option>
+                                            </select>
+                                        </div>
+                                        <div className="form-group" style={{ flex: 1, minWidth: '200px', margin: 0 }}>
+                                            <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Field of Study / Specialization</label>
+                                            <input 
+                                                type="text" 
+                                                value={highestQualStream} 
+                                                onChange={(e) => setHighestQualStream(e.target.value)} 
+                                                placeholder="e.g. Mechanical Engg, Computer Science" 
+                                                style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} 
+                                            />
+                                        </div>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', marginTop: '12px' }}>
+                                        <div className="form-group" style={{ flex: 2, minWidth: '240px', margin: 0 }}>
+                                            <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>College / University / Board</label>
+                                            <input 
+                                                type="text" 
+                                                value={highestQualInstitution} 
+                                                onChange={(e) => setHighestQualInstitution(e.target.value)} 
+                                                placeholder="e.g. Anna University, IIT Madras, CBSE" 
+                                                style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} 
+                                            />
+                                        </div>
+                                        <div className="form-group" style={{ flex: 1, minWidth: '120px', margin: 0 }}>
+                                            <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Year of Passing</label>
+                                            <input 
+                                                type="number" 
+                                                min="1950" 
+                                                max="2035" 
+                                                value={highestQualYear} 
+                                                onChange={(e) => setHighestQualYear(e.target.value)} 
+                                                placeholder="e.g. 2022" 
+                                                style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} 
+                                            />
+                                        </div>
+                                        <div className="form-group" style={{ flex: 1, minWidth: '120px', margin: 0 }}>
+                                            <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Percentage / CGPA</label>
+                                            <input 
+                                                type="text" 
+                                                value={highestQualPercent} 
+                                                onChange={(e) => setHighestQualPercent(e.target.value)} 
+                                                placeholder="e.g. 82% or 8.5" 
+                                                style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} 
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         )}
 
@@ -1469,9 +1835,9 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                                 </div>
 
                                 <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
-                                    {/* Job Title Dropdown with Add New */}
+                                    {/* Designation Dropdown with Add New */}
                                     <div className="form-group" style={{ flex: 1, minWidth: '220px', margin: 0 }}>
-                                        <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Job Title</label>
+                                        <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Designation</label>
                                         <select 
                                             value={isCustomJobTitle ? 'ADD_NEW' : jobTitle} 
                                             onChange={(e) => {
@@ -1615,6 +1981,20 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                                                 }}>Cancel</button>
                                             </div>
                                         )}
+                                    </div>
+
+                                    {/* Place of Duty */}
+                                    <div className="form-group" style={{ flex: 1, minWidth: '220px', margin: 0 }}>
+                                        <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>
+                                            Place of Duty
+                                        </label>
+                                        <input 
+                                            type="text" 
+                                            placeholder="e.g. Noida / Chennai / Client Site" 
+                                            value={placeOfDuty} 
+                                            onChange={(e) => setPlaceOfDuty(e.target.value)} 
+                                            style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} 
+                                        />
                                     </div>
                                 </div>
                             </div>
@@ -1788,9 +2168,22 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                                     <div className="form-group" style={{ flex: 1, minWidth: '220px', margin: 0 }}>
                                         <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Attendance Setting</label>
                                         <select value={attendanceSetting} onChange={(e) => setAttendanceSetting(e.target.value)} style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} >
-                                            <option value="9-6">9-6 Fixed Work Hours</option>
+                                            <option value="9-5:30">9 to 5:30 Fixed Work Hours</option>
                                             <option value="Flexible">Flexible Work Hours</option>
+                                            <option value="Other">Other (Custom Hours)</option>
                                         </select>
+                                        {attendanceSetting === 'Other' && (
+                                            <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
+                                                <div style={{ flex: 1 }}>
+                                                    <label style={{ fontWeight: 600, fontSize: '0.78rem', color: '#6b7280' }}>Start Time</label>
+                                                    <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #d1d5db', outline: 'none' }} />
+                                                </div>
+                                                <div style={{ flex: 1 }}>
+                                                    <label style={{ fontWeight: 600, fontSize: '0.78rem', color: '#6b7280' }}>End Time</label>
+                                                    <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #d1d5db', outline: 'none' }} />
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                     <div className="form-group" style={{ flex: 1, minWidth: '220px', margin: 0 }}>
                                         <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Overtime Setting</label>
@@ -1803,7 +2196,7 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                         {/* STEP 5: BANK DETAILS */}
                         {formStep === 5 && (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-                                <h4 style={{ margin: 0, color: '#4f46e5', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>Step 5: Bank Details</h4>
+                                <h4 style={{ margin: 0, color: '#4f46e5', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>Step 5: Bank & Statutory Details</h4>
                                 <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
                                     <div className="form-group" style={{ flex: 1, minWidth: '220px', margin: 0 }}>
                                         <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Bank Name</label>
@@ -1822,6 +2215,28 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                                     <div className="form-group" style={{ flex: 1, minWidth: '220px', margin: 0 }}>
                                         <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Branch Name</label>
                                         <input type="text" value={bankBranchName} onChange={(e) => setBankBranchName(e.target.value)} placeholder="e.g. Noida Sector 62" style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} />
+                                    </div>
+                                </div>
+                                <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
+                                    <div className="form-group" style={{ flex: 1, minWidth: '200px', margin: 0 }}>
+                                        <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Aadhaar Card Number</label>
+                                        <input type="text" value={aadhaarNumber} onChange={(e) => setAadhaarNumber(e.target.value)} placeholder="e.g. 1234 5678 9012" maxLength={16} style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} />
+                                    </div>
+                                    <div className="form-group" style={{ flex: 1, minWidth: '200px', margin: 0 }}>
+                                        <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>PAN Card Number</label>
+                                        <input type="text" value={panNumber} onChange={(e) => setPanNumber(e.target.value.toUpperCase())} placeholder="e.g. ABCDE1234F" style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} />
+                                    </div>
+                                    <div className="form-group" style={{ flex: 1, minWidth: '200px', margin: 0 }}>
+                                        <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>EPF UAN Number</label>
+                                        <input type="text" value={uanNumber} onChange={(e) => setUanNumber(e.target.value)} placeholder="e.g. 100123456789" style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} />
+                                    </div>
+                                    <div className="form-group" style={{ flex: 1, minWidth: '200px', margin: 0 }}>
+                                        <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>PF Number / Member ID</label>
+                                        <input type="text" value={pfNumber} onChange={(e) => setPfNumber(e.target.value)} placeholder="e.g. MH/BAN/0012345/000/0000123" style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} />
+                                    </div>
+                                    <div className="form-group" style={{ flex: 1, minWidth: '200px', margin: 0 }}>
+                                        <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>ESIC Number / IP No</label>
+                                        <input type="text" value={esiNumber} onChange={(e) => setEsiNumber(e.target.value)} placeholder="e.g. 3100123456" style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} />
                                     </div>
                                 </div>
                             </div>
@@ -2251,9 +2666,106 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                                         <i className="fa-solid fa-arrow-left"></i> Directory
                                     </button>
 
-                                    <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: '#4338ca', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.15rem', fontWeight: 800, border: '2px solid rgba(255, 255, 255, 0.3)', textTransform: 'uppercase' }}>
-                                        {viewingEmployee.name ? viewingEmployee.name.charAt(0) : 'E'}
-                                    </div>
+                                     {(() => {
+                                         const rawPhoto = viewingEmployee.profilePhotoUrl || viewingEmployee.avatar;
+                                         const photoUrl = rawPhoto ? getFullUrl(rawPhoto) : null;
+                                         return (
+                                             <div style={{ position: 'relative', width: '42px', height: '42px', flexShrink: 0 }}>
+                                                 {photoUrl ? (
+                                                     <img 
+                                                         src={photoUrl} 
+                                                         alt={viewingEmployee.name}
+                                                         onClick={() => setPreviewImage({ url: photoUrl, title: viewingEmployee.name, subtitle: viewingEmployee.jobTitle || 'Employee Profile' })}
+                                                         title="Click to view full photo in same tab"
+                                                         style={{ width: '42px', height: '42px', borderRadius: '50%', objectFit: 'cover', border: '2px solid rgba(255, 255, 255, 0.6)', cursor: 'pointer' }}
+                                                         onError={(e) => {
+                                                             e.currentTarget.onerror = null;
+                                                             e.currentTarget.style.display = 'none';
+                                                             if (e.currentTarget.nextSibling) {
+                                                                 e.currentTarget.nextSibling.style.display = 'flex';
+                                                             }
+                                                         }}
+                                                         style={{ width: '42px', height: '42px', borderRadius: '50%', objectFit: 'cover', border: '2px solid rgba(255, 255, 255, 0.6)' }}
+                                                     />
+                                                 ) : null}
+                                                 <div style={{ 
+                                                     width: '42px', 
+                                                     height: '42px', 
+                                                     borderRadius: '50%', 
+                                                     background: '#4338ca', 
+                                                     color: '#ffffff', 
+                                                     display: photoUrl ? 'none' : 'flex', 
+                                                     alignItems: 'center', 
+                                                     justifyContent: 'center', 
+                                                     fontSize: '1.15rem', 
+                                                     fontWeight: 800, 
+                                                     border: '2px solid rgba(255, 255, 255, 0.6)', 
+                                                     textTransform: 'uppercase' 
+                                                 }}>
+                                                     {viewingEmployee.name ? viewingEmployee.name.charAt(0) : 'E'}
+                                                 </div>
+
+                                                 <label 
+                                                     title="Upload or Change Profile Photo"
+                                                     style={{
+                                                         position: 'absolute',
+                                                         bottom: '-2px',
+                                                         right: '-2px',
+                                                         background: '#4f46e5',
+                                                         color: '#ffffff',
+                                                         borderRadius: '50%',
+                                                         width: '18px',
+                                                         height: '18px',
+                                                         display: 'flex',
+                                                         alignItems: 'center',
+                                                         justify: 'center',
+                                                         cursor: 'pointer',
+                                                         fontSize: '9px',
+                                                         border: '1.5px solid #ffffff',
+                                                         boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
+                                                         zIndex: 10
+                                                     }}
+                                                 >
+                                                     <i className="fa-solid fa-camera"></i>
+                                                     <input 
+                                                         type="file" 
+                                                         accept="image/*" 
+                                                         onChange={async (e) => {
+                                                             const file = e.target.files?.[0];
+                                                             if (!file || !viewingEmployee) return;
+                                                             try {
+                                                                 const targetId = viewingEmployee.id;
+                                                                 let res;
+                                                                 if (api.uploadEmployeeProfilePhoto) {
+                                                                     res = await api.uploadEmployeeProfilePhoto(targetId, file).catch(() => api.uploadEmployeeAvatar(targetId, file));
+                                                                 } else if (api.uploadEmployeeAvatar) {
+                                                                     res = await api.uploadEmployeeAvatar(targetId, file);
+                                                                 }
+                                                                 const newPhotoUrl = res?.profilePhotoUrl || res?.avatar || res?.url;
+                                                                 if (newPhotoUrl) {
+                                                                     setViewingEmployee(prev => ({
+                                                                         ...prev,
+                                                                         profilePhotoUrl: newPhotoUrl,
+                                                                         avatar: newPhotoUrl
+                                                                     }));
+                                                                     setEmployees(prev => prev.map(emp => {
+                                                                         if (emp.id === targetId) {
+                                                                             return { ...emp, profilePhotoUrl: newPhotoUrl, avatar: newPhotoUrl };
+                                                                         }
+                                                                         return emp;
+                                                                     }));
+                                                                 }
+                                                             } catch (err) {
+                                                                 console.error('Failed to upload profile photo:', err);
+                                                                 alert('Upload error: ' + (err.message || 'Unknown error'));
+                                                             }
+                                                         }} 
+                                                         style={{ display: 'none' }} 
+                                                     />
+                                                 </label>
+                                             </div>
+                                         );
+                                     })()}
 
                                     <div>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -2263,6 +2775,21 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                                             <span style={{ background: 'rgba(255, 255, 255, 0.18)', color: '#ffffff', fontSize: '0.72rem', fontWeight: 700, padding: '2px 8px', borderRadius: '12px' }}>
                                                 {viewingEmployee.jobTitle || 'Field Staff'}
                                             </span>
+                                            {viewingEmployee.role === 'ADMIN' && (
+                                                <span style={{ background: 'rgba(234, 179, 8, 0.25)', color: '#fef08a', border: '1px solid rgba(234, 179, 8, 0.4)', fontSize: '0.7rem', fontWeight: 800, padding: '2px 8px', borderRadius: '12px' }}>
+                                                    👑 Administrator
+                                                </span>
+                                            )}
+                                            {viewingEmployee.role === 'TRACKING_MANAGER' && (
+                                                <span style={{ background: 'rgba(56, 189, 248, 0.25)', color: '#e0f2fe', border: '1px solid rgba(56, 189, 248, 0.4)', fontSize: '0.7rem', fontWeight: 800, padding: '2px 8px', borderRadius: '12px' }}>
+                                                    📍 Tracking Manager
+                                                </span>
+                                            )}
+                                            {viewingEmployee.role === 'FIELD_INVOICE_MANAGER' && (
+                                                <span style={{ background: 'rgba(249, 115, 22, 0.25)', color: '#ffedd5', border: '1px solid rgba(249, 115, 22, 0.4)', fontSize: '0.7rem', fontWeight: 800, padding: '2px 8px', borderRadius: '12px' }}>
+                                                    💼 Field & Invoice Manager
+                                                </span>
+                                            )}
                                             <span style={{ background: '#dcfce7', color: '#15803d', fontSize: '0.7rem', fontWeight: 800, padding: '2px 8px', borderRadius: '12px' }}>
                                                 ● PRESENT
                                             </span>
@@ -2282,6 +2809,16 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
 
                                 {/* Right Actions */}
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <button 
+                                        type="button"
+                                        onClick={() => {
+                                            setLeaveAdjustmentEmpId(viewingEmployee.id || viewingEmployee.empCode);
+                                            setShowLeaveAdjustmentModal(true);
+                                        }}
+                                        style={{ background: '#059669', color: '#ffffff', border: '1px solid rgba(255,255,255,0.3)', padding: '6px 14px', borderRadius: '6px', fontSize: '0.78rem', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer', boxShadow: '0 2px 6px rgba(0,0,0,0.2)' }}
+                                    >
+                                        + Add Opening Balance
+                                    </button>
                                     <button 
                                         type="button"
                                         onClick={() => setIsEditing(!isEditing)}
@@ -2380,64 +2917,106 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                             {/* TAB 1: PROFILE DETAILS */}
                             {profileTab === 'PROFILE' && (
                                 <div id="section-profile" style={{ display: 'flex', flexDirection: 'column', gap: '12px', width: '100%' }}>
-                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '12px', width: '100%' }}>
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '14px', width: '100%' }}>
                                         {/* Personal Details Card */}
-                                        <div style={{ border: '1px solid var(--border-glass)', padding: '14px 16px', borderRadius: '10px', backgroundColor: 'var(--bg-glass)', boxShadow: 'var(--shadow-sm)' }}>
+                                        <div style={{ border: '1px solid var(--border-glass)', padding: '14px 16px', borderRadius: '10px', backgroundColor: 'var(--bg-glass)', boxShadow: 'var(--shadow-sm)', minWidth: 0 }}>
                                             <h4 style={{ margin: '0 0 12px 0', fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)', borderLeft: '3px solid var(--accent-primary)', paddingLeft: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                                                 👤 Personal Information
                                             </h4>
                                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                                                <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px' }}>
+                                                <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px', minWidth: 0 }}>
                                                     <span style={{ display: 'block', color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.04em', marginBottom: '2px' }}>FULL NAME</span>
-                                                    <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem' }}>{viewingEmployee.name}</div>
+                                                    <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem', wordBreak: 'break-word' }}>{viewingEmployee.name}</div>
                                                 </div>
-                                                <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px' }}>
+                                                <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px', minWidth: 0 }}>
+                                                    <span style={{ display: 'block', color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.04em', marginBottom: '2px' }}>FATHER / SPOUSE NAME</span>
+                                                    <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem', wordBreak: 'break-word' }}>{viewingEmployee.fatherName || viewingEmployee.father_name || viewingEmployee.spouseName || '-'}</div>
+                                                </div>
+                                                <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px', minWidth: 0 }}>
                                                     <span style={{ display: 'block', color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.04em', marginBottom: '2px' }}>GENDER</span>
                                                     <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem' }}>{viewingEmployee.gender || 'Male'}</div>
                                                 </div>
-                                                <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px' }}>
+                                                <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px', minWidth: 0 }}>
                                                     <span style={{ display: 'block', color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.04em', marginBottom: '2px' }}>DATE OF BIRTH</span>
-                                                    <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem' }}>{viewingEmployee.dob || '-'}</div>
+                                                    <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem' }}>{formatDate(viewingEmployee.dob) || '-'}</div>
                                                 </div>
-                                                <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px' }}>
+                                                <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px', minWidth: 0 }}>
                                                     <span style={{ display: 'block', color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.04em', marginBottom: '2px' }}>NATIONALITY</span>
                                                     <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem' }}>{viewingEmployee.nationality || 'Indian'}</div>
                                                 </div>
-                                                <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px' }}>
+                                                <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px', minWidth: 0 }}>
                                                     <span style={{ display: 'block', color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.04em', marginBottom: '2px' }}>PRIMARY PHONE</span>
                                                     <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem' }}>{viewingEmployee.phoneNo || '-'}</div>
                                                 </div>
-                                                <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px' }}>
+                                                <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px', minWidth: 0 }}>
                                                     <span style={{ display: 'block', color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.04em', marginBottom: '2px' }}>ALT PHONE NUMBER</span>
                                                     <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem' }}>{viewingEmployee.altPhoneNo || '-'}</div>
                                                 </div>
-                                                <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px', gridColumn: 'span 2' }}>
+                                                <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px', minWidth: 0 }}>
                                                     <span style={{ display: 'block', color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.04em', marginBottom: '2px' }}>PRIMARY EMAIL ADDRESS</span>
-                                                    <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem' }}>{viewingEmployee.email}</div>
+                                                    <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem', wordBreak: 'break-all' }}>{viewingEmployee.email}</div>
                                                 </div>
                                             </div>
                                         </div>
 
                                         {/* Address & Emergency Contacts Card */}
-                                        <div style={{ border: '1px solid var(--border-glass)', padding: '14px 16px', borderRadius: '10px', backgroundColor: 'var(--bg-glass)', boxShadow: 'var(--shadow-sm)' }}>
+                                        <div style={{ border: '1px solid var(--border-glass)', padding: '14px 16px', borderRadius: '10px', backgroundColor: 'var(--bg-glass)', boxShadow: 'var(--shadow-sm)', minWidth: 0 }}>
                                             <h4 style={{ margin: '0 0 12px 0', fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)', borderLeft: '3px solid var(--accent-primary)', paddingLeft: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                                                 🏠 Address & Emergency Contacts
                                             </h4>
                                             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                                <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px' }}>
+                                                <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px', minWidth: 0 }}>
                                                     <span style={{ display: 'block', color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.04em', marginBottom: '2px' }}>CURRENT RESIDENTIAL ADDRESS</span>
-                                                    <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem' }}>{viewingEmployee.currentAddress || 'Sector 62, Noida, Uttar Pradesh, India'}</div>
+                                                    <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem', wordBreak: 'break-word' }}>{viewingEmployee.presentAddress || viewingEmployee.present_address || viewingEmployee.currentAddress || viewingEmployee.address || '-'}</div>
                                                 </div>
-                                                <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px' }}>
+                                                <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px', minWidth: 0 }}>
                                                     <span style={{ display: 'block', color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.04em', marginBottom: '2px' }}>PERMANENT ADDRESS</span>
-                                                    <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem' }}>{viewingEmployee.permanentAddress || 'Same as current address'}</div>
+                                                    <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem', wordBreak: 'break-word' }}>{viewingEmployee.permanentAddress || viewingEmployee.permanent_address || viewingEmployee.presentAddress || viewingEmployee.present_address || 'Same as current address'}</div>
                                                 </div>
-                                                <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px' }}>
+                                                <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px', minWidth: 0 }}>
                                                     <span style={{ display: 'block', color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.04em', marginBottom: '2px' }}>EMERGENCY CONTACT PERSON & RELATION</span>
-                                                    <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem' }}>{viewingEmployee.emergencyContact || 'Father: +91-9876543210'}</div>
+                                                    <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem', wordBreak: 'break-word' }}>{viewingEmployee.emergencyContact || viewingEmployee.emergency_contact || '-'}</div>
                                                 </div>
                                             </div>
                                         </div>
+
+                                        {/* Highest Qualification Card */}
+                                        {(() => {
+                                            let hqView = viewingEmployee.highestQualification;
+                                            if (typeof hqView === 'string') {
+                                                try { hqView = JSON.parse(hqView); } catch (e) { hqView = {}; }
+                                            }
+                                            hqView = hqView || viewingEmployee.customFields?.highestQualification || {};
+                                            return (
+                                                <div style={{ border: '1px solid var(--border-glass)', padding: '14px 16px', borderRadius: '10px', backgroundColor: 'var(--bg-glass)', boxShadow: 'var(--shadow-sm)', minWidth: 0 }}>
+                                                    <h4 style={{ margin: '0 0 12px 0', fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)', borderLeft: '3px solid var(--accent-primary)', paddingLeft: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                        🎓 Highest Educational Qualification
+                                                    </h4>
+                                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                                                        <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px', minWidth: 0 }}>
+                                                            <span style={{ display: 'block', color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.04em', marginBottom: '2px' }}>QUALIFICATION / DEGREE</span>
+                                                            <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem', wordBreak: 'break-word' }}>{hqView.level || '-'}</div>
+                                                        </div>
+                                                        <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px', minWidth: 0 }}>
+                                                            <span style={{ display: 'block', color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.04em', marginBottom: '2px' }}>FIELD OF STUDY / STREAM</span>
+                                                            <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem', wordBreak: 'break-word' }}>{hqView.stream || '-'}</div>
+                                                        </div>
+                                                        <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px', minWidth: 0, gridColumn: '1 / -1' }}>
+                                                            <span style={{ display: 'block', color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.04em', marginBottom: '2px' }}>COLLEGE / UNIVERSITY / BOARD</span>
+                                                            <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem', wordBreak: 'break-word' }}>{hqView.institution || '-'}</div>
+                                                        </div>
+                                                        <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px', minWidth: 0 }}>
+                                                            <span style={{ display: 'block', color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.04em', marginBottom: '2px' }}>YEAR OF PASSING</span>
+                                                            <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem' }}>{hqView.year || '-'}</div>
+                                                        </div>
+                                                        <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px', minWidth: 0 }}>
+                                                            <span style={{ display: 'block', color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.04em', marginBottom: '2px' }}>PERCENTAGE / CGPA</span>
+                                                            <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem' }}>{hqView.percentage || hqView.percent || '-'}</div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })()}
                                     </div>
                                 </div>
                             )}
@@ -2454,7 +3033,7 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                                                 <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px' }}>
                                                     <span style={{ display: 'block', color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.04em', marginBottom: '2px' }}>JOINING DATE</span>
-                                                    <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem' }}>{viewingEmployee.joiningDate || '-'}</div>
+                                                    <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem' }}>{formatDate(viewingEmployee.joiningDate) || '-'}</div>
                                                 </div>
                                                 <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px' }}>
                                                     <span style={{ display: 'block', color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.04em', marginBottom: '2px' }}>DESIGNATION</span>
@@ -2467,6 +3046,10 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                                                 <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px' }}>
                                                     <span style={{ display: 'block', color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.04em', marginBottom: '2px' }}>WORK LOCATION</span>
                                                     <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem' }}>{viewingEmployee.location || 'Headquarters'}</div>
+                                                </div>
+                                                <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px' }}>
+                                                    <span style={{ display: 'block', color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.04em', marginBottom: '2px' }}>PLACE OF DUTY</span>
+                                                    <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem' }}>{viewingEmployee.placeOfDuty || viewingEmployee.place_of_duty || '-'}</div>
                                                 </div>
                                                 <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px' }}>
                                                     <span style={{ display: 'block', color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.04em', marginBottom: '2px' }}>LEGAL ENTITY</span>
@@ -2501,11 +3084,65 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                                                 </div>
                                                 <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px' }}>
                                                     <span style={{ display: 'block', color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.04em', marginBottom: '2px' }}>ATTENDANCE SCHEME</span>
-                                                    <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem' }}>{viewingEmployee.attendanceSetting || '9-6 Fixed Work Hours'}</div>
+                                                    <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem' }}>
+                                                        {viewingEmployee.attendanceSetting === '9-6' || viewingEmployee.attendanceSetting === '9-5:30' 
+                                                            ? '9 to 5:30 Fixed Work Hours' 
+                                                            : (viewingEmployee.attendanceSetting || '9 to 5:30 Fixed Work Hours')}
+                                                    </div>
                                                 </div>
                                                 <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px' }}>
                                                     <span style={{ display: 'block', color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.04em', marginBottom: '2px' }}>WEEKLY OFFS</span>
                                                     <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem' }}>{viewingEmployee.weeklyOffs || 'Saturday, Sunday'}</div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Leave Balances Card */}
+                                        <div style={{ border: '1px solid var(--border-glass)', padding: '14px 16px', borderRadius: '10px', backgroundColor: 'var(--bg-glass)', boxShadow: 'var(--shadow-sm)' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                                                <h4 style={{ margin: 0, fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)', borderLeft: '3px solid #10b981', paddingLeft: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                    🏖️ Earned Leave Balance & Quotas
+                                                </h4>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setLeaveAdjustmentEmpId(viewingEmployee.id || viewingEmployee.empCode);
+                                                        setShowLeaveAdjustmentModal(true);
+                                                    }}
+                                                    style={{
+                                                        background: '#4f46e5',
+                                                        color: '#ffffff',
+                                                        border: 'none',
+                                                        borderRadius: '6px',
+                                                        padding: '5px 12px',
+                                                        fontSize: '0.74rem',
+                                                        fontWeight: 600,
+                                                        cursor: 'pointer'
+                                                    }}
+                                                >
+                                                    + Adjust Balance
+                                                </button>
+                                            </div>
+                                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: '8px' }}>
+                                                <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px', textAlign: 'center' }}>
+                                                    <span style={{ display: 'block', color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.65rem', textTransform: 'uppercase' }}>{viewingEmployee.leaveBalance ? `Earned since ${viewingEmployee.leaveBalance.ledgerStartMonth}` : 'Annual Quota'}</span>
+                                                    <div style={{ color: 'var(--text-primary)', fontWeight: 700, fontSize: '0.95rem', marginTop: '2px' }}>{viewingEmployee.leaveBalance ? Math.round((viewingEmployee.leaveBalance.credited - viewingEmployee.leaveBalance.opening) * 100) / 100 : (viewingEmployee.allowedLeaves || 0)} d</div>
+                                                </div>
+                                                <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px', textAlign: 'center' }}>
+                                                    <span style={{ display: 'block', color: '#4f46e5', fontWeight: 700, fontSize: '0.65rem', textTransform: 'uppercase' }}>Opening / Migrated</span>
+                                                    <div style={{ color: '#4f46e5', fontWeight: 700, fontSize: '0.95rem', marginTop: '2px' }}>{viewingEmployee.leaveBalance ? viewingEmployee.leaveBalance.opening : (viewingEmployee.openingLeaveBalance || viewingEmployee.earnedLeaves || 0)} d</div>
+                                                </div>
+                                                <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px', textAlign: 'center' }}>
+                                                    <span style={{ display: 'block', color: '#ef4444', fontWeight: 700, fontSize: '0.65rem', textTransform: 'uppercase' }}>Consumed</span>
+                                                    <div style={{ color: '#ef4444', fontWeight: 700, fontSize: '0.95rem', marginTop: '2px' }}>{viewingEmployee.leaveBalance ? viewingEmployee.leaveBalance.consumed : (viewingEmployee.consumedLeaves || 0)} d</div>
+                                                </div>
+                                                <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', padding: '8px 12px', borderRadius: '6px', textAlign: 'center' }}>
+                                                    <span style={{ display: 'block', color: '#047857', fontWeight: 700, fontSize: '0.65rem', textTransform: 'uppercase' }}>Net Available</span>
+                                                    <div style={{ color: '#059669', fontWeight: 800, fontSize: '1rem', marginTop: '2px' }}>
+                                                        {viewingEmployee.availableLeaves !== undefined 
+                                                            ? viewingEmployee.availableLeaves 
+                                                            : Math.max(0, (Number(viewingEmployee.allowedLeaves || 0) + Number(viewingEmployee.openingLeaveBalance || viewingEmployee.earnedLeaves || 0)) - Number(viewingEmployee.consumedLeaves || 0))} d
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>
@@ -2539,6 +3176,26 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                                                     <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px' }}>
                                                         <span style={{ display: 'block', color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.04em', marginBottom: '2px' }}>BRANCH</span>
                                                         <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem' }}>{viewingEmployee.bankBranchName || '-'}</div>
+                                                    </div>
+                                                    <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px' }}>
+                                                        <span style={{ display: 'block', color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.04em', marginBottom: '2px' }}>AADHAAR CARD NUMBER</span>
+                                                        <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem' }}>{viewingEmployee.aadhaarNumber || viewingEmployee.aadharNumber || viewingEmployee.customFields?.aadhaarNumber || '-'}</div>
+                                                    </div>
+                                                    <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px' }}>
+                                                        <span style={{ display: 'block', color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.04em', marginBottom: '2px' }}>PAN CARD NUMBER</span>
+                                                        <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem' }}>{viewingEmployee.panNumber || viewingEmployee.pan || '-'}</div>
+                                                    </div>
+                                                    <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px' }}>
+                                                        <span style={{ display: 'block', color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.04em', marginBottom: '2px' }}>EPF UAN NUMBER</span>
+                                                        <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem' }}>{viewingEmployee.uanNumber || viewingEmployee.pfUan || '-'}</div>
+                                                    </div>
+                                                    <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px' }}>
+                                                        <span style={{ display: 'block', color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.04em', marginBottom: '2px' }}>PF NUMBER / MEMBER ID</span>
+                                                        <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem' }}>{viewingEmployee.pfNumber || viewingEmployee.pf_number || '-'}</div>
+                                                    </div>
+                                                    <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-glass)', padding: '8px 12px', borderRadius: '6px' }}>
+                                                        <span style={{ display: 'block', color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.04em', marginBottom: '2px' }}>ESIC NUMBER / IP NO</span>
+                                                        <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.84rem' }}>{viewingEmployee.esiNumber || viewingEmployee.esicNumber || '-'}</div>
                                                     </div>
                                                 </div>
                                             </div>
@@ -2661,11 +3318,387 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                                             })()}
                                         </div>
                                     ) : (
-                                        <div style={{ border: '1px solid var(--border-glass)', padding: '16px', borderRadius: '10px', backgroundColor: 'var(--bg-glass)', boxShadow: 'var(--shadow-sm)' }}>
-                                            <h4 style={{ margin: '0 0 10px 0', fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)', borderLeft: '3px solid var(--accent-primary)', paddingLeft: '8px' }}>
-                                                📈 Salary Revision History
-                                            </h4>
-                                            <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>No past salary revisions recorded for this employee.</p>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '100%' }}>
+                                            {/* Header Bar */}
+                                            <div style={{
+                                                display: 'flex',
+                                                justifyContent: 'space-between',
+                                                alignItems: 'center',
+                                                padding: '12px 16px',
+                                                borderRadius: '10px',
+                                                backgroundColor: 'var(--bg-glass)',
+                                                border: '1px solid var(--border-glass)',
+                                                boxShadow: 'var(--shadow-sm)',
+                                                flexWrap: 'wrap',
+                                                gap: '12px'
+                                            }}>
+                                                <div>
+                                                    <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                        📈 Salary Revision & Increment History
+                                                    </h4>
+                                                    <p style={{ margin: '4px 0 0 0', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                                                        Complete audit trail of compensation adjustments, promotions, and appraisal milestones.
+                                                    </p>
+                                                </div>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => fetchSalaryHistory(viewingEmployee.id)}
+                                                        disabled={loadingSalaryHistory}
+                                                        style={{
+                                                            display: 'inline-flex',
+                                                            alignItems: 'center',
+                                                            gap: '6px',
+                                                            padding: '6px 12px',
+                                                            fontSize: '0.78rem',
+                                                            fontWeight: 600,
+                                                            borderRadius: '6px',
+                                                            border: '1px solid var(--border-glass)',
+                                                            backgroundColor: 'var(--input-bg)',
+                                                            color: 'var(--text-primary)',
+                                                            cursor: loadingSalaryHistory ? 'not-allowed' : 'pointer'
+                                                        }}
+                                                    >
+                                                        <span style={{ display: 'inline-block', transform: loadingSalaryHistory ? 'rotate(180deg)' : 'none', transition: 'transform 0.5s' }}>🔄</span>
+                                                        {loadingSalaryHistory ? 'Refreshing...' : 'Refresh History'}
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            {loadingSalaryHistory ? (
+                                                <div style={{ padding: '36px', textAlign: 'center', backgroundColor: 'var(--bg-glass)', borderRadius: '10px', border: '1px solid var(--border-glass)' }}>
+                                                    <div style={{ fontSize: '1.2rem', marginBottom: '8px' }}>⏳</div>
+                                                    <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 500 }}>Loading salary revision history...</div>
+                                                </div>
+                                            ) : (() => {
+                                                const summary = salaryHistoryData?.summary;
+                                                const history = salaryHistoryData?.history || [];
+                                                const empCompensation = Number(viewingEmployee.compensationGross || viewingEmployee.salary || 0);
+                                                const currentCtcVal = summary?.currentCtc || empCompensation;
+                                                const initialCtcVal = summary?.initialCtc || currentCtcVal;
+                                                const growthAmt = summary?.totalGrowthAmount !== undefined ? summary.totalGrowthAmount : (currentCtcVal - initialCtcVal);
+                                                const growthPct = summary?.totalGrowthPercent !== undefined ? summary.totalGrowthPercent : (initialCtcVal > 0 ? Number(((growthAmt / initialCtcVal) * 100).toFixed(2)) : 0);
+
+                                                const todayStr = new Date().toISOString().split('T')[0];
+
+                                                return (
+                                                    <>
+                                                        {/* Upcoming Revision Scheduled Callout Banner */}
+                                                        {summary?.hasUpcomingRevision && summary?.upcomingRevision && (
+                                                            <div style={{
+                                                                padding: '14px 18px',
+                                                                borderRadius: '10px',
+                                                                backgroundColor: 'rgba(59, 130, 246, 0.07)',
+                                                                border: '1.5px solid rgba(59, 130, 246, 0.35)',
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'space-between',
+                                                                flexWrap: 'wrap',
+                                                                gap: '12px',
+                                                                boxShadow: 'var(--shadow-sm)'
+                                                            }}>
+                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                                                    <span style={{ fontSize: '1.6rem' }}>📅</span>
+                                                                    <div>
+                                                                        <div style={{ fontWeight: 800, fontSize: '0.92rem', color: '#1e40af', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                            <span>Upcoming Salary Revision Scheduled for Next Month</span>
+                                                                            <span style={{ fontSize: '0.68rem', fontWeight: 700, padding: '2px 8px', borderRadius: '10px', backgroundColor: '#3b82f6', color: '#ffffff' }}>
+                                                                                EFFECTIVE {summary.upcomingRevision.effectiveDate}
+                                                                            </span>
+                                                                        </div>
+                                                                        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '3px' }}>
+                                                                            Annual CTC will revise to <strong style={{ color: 'var(--text-primary)' }}>INR {formatCurrency(summary.upcomingRevision.newCtc)}</strong> ({summary.upcomingRevision.diffAmount >= 0 ? `+INR ${formatCurrency(summary.upcomingRevision.diffAmount)}` : `-INR ${formatCurrency(Math.abs(summary.upcomingRevision.diffAmount))}`} / {summary.upcomingRevision.diffPercent >= 0 ? `+${summary.upcomingRevision.diffPercent}%` : `${summary.upcomingRevision.diffPercent}%`}) for <em>{summary.upcomingRevision.reason}</em>.
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                                <div style={{ fontSize: '0.74rem', color: '#1e40af', fontWeight: 600, background: '#ffffff', padding: '6px 12px', borderRadius: '6px', border: '1px solid rgba(59, 130, 246, 0.25)' }}>
+                                                                    Current month payroll locked at INR {formatCurrency(currentCtcVal)}
+                                                                </div>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Executive KPI Summary Row */}
+                                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+                                                            <div style={{ padding: '12px 14px', borderRadius: '10px', backgroundColor: 'var(--bg-glass)', border: '1px solid var(--border-glass)', boxShadow: 'var(--shadow-sm)' }}>
+                                                                <span style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Current Active Annual CTC</span>
+                                                                <div style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--accent-primary)', marginTop: '4px' }}>
+                                                                    INR {formatCurrency(currentCtcVal)}
+                                                                </div>
+                                                                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Monthly Gross: INR {formatCurrency(Math.round(currentCtcVal / 12))}</span>
+                                                            </div>
+
+                                                            <div style={{ padding: '12px 14px', borderRadius: '10px', backgroundColor: 'var(--bg-glass)', border: '1px solid var(--border-glass)', boxShadow: 'var(--shadow-sm)' }}>
+                                                                <span style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Starting / Initial CTC</span>
+                                                                <div style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)', marginTop: '4px' }}>
+                                                                    INR {formatCurrency(initialCtcVal)}
+                                                                </div>
+                                                                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Effective from joining</span>
+                                                            </div>
+
+                                                            <div style={{ padding: '12px 14px', borderRadius: '10px', backgroundColor: 'var(--bg-glass)', border: '1px solid var(--border-glass)', boxShadow: 'var(--shadow-sm)' }}>
+                                                                <span style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Career Growth</span>
+                                                                <div style={{
+                                                                    fontSize: '1.15rem',
+                                                                    fontWeight: 800,
+                                                                    color: growthAmt > 0 ? '#10b981' : growthAmt < 0 ? '#ef4444' : 'var(--text-primary)',
+                                                                    marginTop: '4px',
+                                                                    display: 'flex',
+                                                                    alignItems: 'center',
+                                                                    gap: '6px'
+                                                                }}>
+                                                                    {growthAmt >= 0 ? `+INR ${formatCurrency(growthAmt)}` : `-INR ${formatCurrency(Math.abs(growthAmt))}`}
+                                                                    <span style={{
+                                                                        fontSize: '0.72rem',
+                                                                        fontWeight: 700,
+                                                                        padding: '2px 6px',
+                                                                        borderRadius: '12px',
+                                                                        backgroundColor: growthAmt >= 0 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                                                                        color: growthAmt >= 0 ? '#10b981' : '#ef4444'
+                                                                    }}>
+                                                                        {growthAmt >= 0 ? `+${growthPct}%` : `${growthPct}%`}
+                                                                    </span>
+                                                                </div>
+                                                                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Cumulative increment delta</span>
+                                                            </div>
+
+                                                            <div style={{ padding: '12px 14px', borderRadius: '10px', backgroundColor: 'var(--bg-glass)', border: '1px solid var(--border-glass)', boxShadow: 'var(--shadow-sm)' }}>
+                                                                <span style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Total Revisions</span>
+                                                                <div style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)', marginTop: '4px' }}>
+                                                                    {history.length > 0 ? history.length : (summary?.totalRevisions || 1)}
+                                                                </div>
+                                                                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                                                                    {summary?.lastRevisionDate ? `Last: ${summary.lastRevisionDate}` : `Since ${viewingEmployee.joiningDate || 'Joining'}`}
+                                                                </span>
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Timeline & Revisions Breakdown */}
+                                                        {history.length === 0 ? (
+                                                            <div style={{ border: '1px solid var(--border-glass)', padding: '24px', borderRadius: '10px', backgroundColor: 'var(--bg-glass)', textAlign: 'center' }}>
+                                                                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>
+                                                                    No historical revisions recorded yet. When this employee's salary is revised via Edit Employee, versions and increment percentages will appear here automatically.
+                                                                </p>
+                                                            </div>
+                                                        ) : (
+                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                                                                {/* Version cards timeline */}
+                                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                                                    {[...history].reverse().map((rev, idx) => {
+                                                                        const isScheduled = rev.isScheduled || rev.status === 'SCHEDULED' || (rev.effectiveFrom && rev.effectiveFrom > todayStr);
+                                                                        const isActive = !isScheduled && (rev.isCurrentActive || rev.status === 'ACTIVE');
+                                                                        const isSuperseded = !isScheduled && !isActive;
+
+                                                                        const annualCtcVal = Number(rev.annualCtc || rev.ctc || rev.grossSalary || 0);
+                                                                        const monthlyGrossVal = Number(rev.monthlyGross || Math.round(annualCtcVal / 12) || 0);
+                                                                        const incAmt = rev.diffAmount !== undefined ? Number(rev.diffAmount) : Number(rev.incrementAmount || 0);
+                                                                        const incPct = rev.diffPercent !== undefined ? Number(rev.diffPercent) : Number(rev.incrementPercentage || 0);
+                                                                        const hasIncrement = incAmt !== 0;
+                                                                        const isPositive = incAmt >= 0;
+                                                                        const basicVal = Math.round(annualCtcVal * 0.5);
+                                                                        const hraVal = Math.round(annualCtcVal * 0.3);
+                                                                        const otherVal = Math.max(0, annualCtcVal - basicVal - hraVal);
+
+                                                                        return (
+                                                                            <div
+                                                                                key={rev.id || idx}
+                                                                                style={{
+                                                                                    border: isScheduled ? '1.5px dashed #3b82f6' : isActive ? '1.5px solid var(--accent-primary)' : '1px solid var(--border-glass)',
+                                                                                    borderRadius: '10px',
+                                                                                    padding: '14px 18px',
+                                                                                    backgroundColor: isScheduled ? 'rgba(59, 130, 246, 0.04)' : isActive ? 'rgba(99, 102, 241, 0.04)' : 'var(--bg-glass)',
+                                                                                    boxShadow: 'var(--shadow-sm)',
+                                                                                    position: 'relative'
+                                                                                }}
+                                                                            >
+                                                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '10px', marginBottom: '10px' }}>
+                                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                                                                                        <span style={{
+                                                                                            padding: '3px 8px',
+                                                                                            borderRadius: '6px',
+                                                                                            fontSize: '0.75rem',
+                                                                                            fontWeight: 700,
+                                                                                            backgroundColor: isScheduled ? '#3b82f6' : isActive ? 'var(--accent-primary)' : 'var(--input-bg)',
+                                                                                            color: (isScheduled || isActive) ? '#ffffff' : 'var(--text-muted)',
+                                                                                            border: (isScheduled || isActive) ? 'none' : '1px solid var(--border-glass)'
+                                                                                        }}>
+                                                                                            {rev.revisionLabel || `Revision ${rev.version}`}
+                                                                                        </span>
+                                                                                        <span style={{
+                                                                                            padding: '2px 8px',
+                                                                                            borderRadius: '12px',
+                                                                                            fontSize: '0.7rem',
+                                                                                            fontWeight: 700,
+                                                                                            backgroundColor: isScheduled ? 'rgba(59, 130, 246, 0.15)' : isActive ? 'rgba(16, 185, 129, 0.15)' : 'rgba(156, 163, 175, 0.15)',
+                                                                                            color: isScheduled ? '#2563eb' : isActive ? '#10b981' : 'var(--text-muted)'
+                                                                                        }}>
+                                                                                            {isScheduled ? `📅 SCHEDULED (EFFECTIVE ${rev.effectiveFrom})` : isActive ? '● CURRENT ACTIVE' : 'SUPERSEDED'}
+                                                                                        </span>
+                                                                                        <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                                                                                            {rev.revisionReason || (idx === history.length - 1 ? 'Initial Joining Salary' : 'Salary Revision')}
+                                                                                        </span>
+                                                                                    </div>
+
+                                                                                    <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
+                                                                                        Effective: <strong style={{ color: 'var(--text-primary)' }}>{rev.effectiveFrom || '-'}</strong>
+                                                                                        {rev.effectiveTo ? (
+                                                                                            <> to <strong style={{ color: 'var(--text-primary)' }}>{rev.effectiveTo}</strong></>
+                                                                                        ) : isScheduled ? (
+                                                                                            <span style={{ color: '#2563eb', fontWeight: 600 }}> (Upcoming Next Month)</span>
+                                                                                        ) : (
+                                                                                            <span style={{ color: '#10b981', fontWeight: 600 }}> (Present)</span>
+                                                                                        )}
+                                                                                    </div>
+                                                                                </div>
+
+                                                                                {/* Metrics Row */}
+                                                                                <div style={{
+                                                                                    display: 'grid',
+                                                                                    gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+                                                                                    gap: '8px',
+                                                                                    background: 'var(--input-bg)',
+                                                                                    border: '1px solid var(--border-glass)',
+                                                                                    padding: '10px 14px',
+                                                                                    borderRadius: '8px',
+                                                                                    marginBottom: '10px'
+                                                                                }}>
+                                                                                    <div>
+                                                                                        <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 600 }}>ANNUAL CTC</div>
+                                                                                        <div style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                                                                                            INR {formatCurrency(annualCtcVal)}
+                                                                                        </div>
+                                                                                    </div>
+                                                                                    <div>
+                                                                                        <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 600 }}>MONTHLY GROSS</div>
+                                                                                        <div style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                                                                                            INR {formatCurrency(monthlyGrossVal)}
+                                                                                        </div>
+                                                                                    </div>
+                                                                                    <div>
+                                                                                        <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 600 }}>INCREMENT (₹)</div>
+                                                                                        <div style={{
+                                                                                            fontSize: '0.95rem',
+                                                                                            fontWeight: 700,
+                                                                                            color: hasIncrement ? (isPositive ? '#10b981' : '#ef4444') : 'var(--text-muted)'
+                                                                                        }}>
+                                                                                            {hasIncrement ? (isPositive ? `+INR ${formatCurrency(incAmt)}` : `-INR ${formatCurrency(Math.abs(incAmt))}`) : '—'}
+                                                                                        </div>
+                                                                                    </div>
+                                                                                    <div>
+                                                                                        <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 600 }}>INCREMENT (%)</div>
+                                                                                        <div style={{
+                                                                                            fontSize: '0.95rem',
+                                                                                            fontWeight: 700,
+                                                                                            color: hasIncrement ? (isPositive ? '#10b981' : '#ef4444') : 'var(--text-muted)'
+                                                                                        }}>
+                                                                                            {hasIncrement ? (isPositive ? `+${incPct}%` : `${incPct}%`) : '—'}
+                                                                                        </div>
+                                                                                    </div>
+                                                                                </div>
+
+                                                                                {/* Components Breakdown pill row */}
+                                                                                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', fontSize: '0.73rem', color: 'var(--text-muted)' }}>
+                                                                                    <span style={{ padding: '3px 8px', borderRadius: '4px', background: 'var(--bg-glass)', border: '1px solid var(--border-glass)' }}>
+                                                                                        Basic: <strong style={{ color: 'var(--text-primary)' }}>INR {formatCurrency(basicVal)}</strong>
+                                                                                    </span>
+                                                                                    <span style={{ padding: '3px 8px', borderRadius: '4px', background: 'var(--bg-glass)', border: '1px solid var(--border-glass)' }}>
+                                                                                        HRA: <strong style={{ color: 'var(--text-primary)' }}>INR {formatCurrency(hraVal)}</strong>
+                                                                                    </span>
+                                                                                    <span style={{ padding: '3px 8px', borderRadius: '4px', background: 'var(--bg-glass)', border: '1px solid var(--border-glass)' }}>
+                                                                                        Allowances: <strong style={{ color: 'var(--text-primary)' }}>INR {formatCurrency(otherVal)}</strong>
+                                                                                    </span>
+                                                                                </div>
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                </div>
+
+                                                                {/* Comparison Table */}
+                                                                <div style={{ border: '1px solid var(--border-glass)', borderRadius: '10px', backgroundColor: 'var(--bg-glass)', overflow: 'hidden' }}>
+                                                                    <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-glass)', fontWeight: 700, fontSize: '0.85rem', color: 'var(--text-primary)' }}>
+                                                                        📊 Detailed Revision Audit Log
+                                                                    </div>
+                                                                    <div style={{ overflowX: 'auto' }}>
+                                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem', textAlign: 'left' }}>
+                                                                            <thead>
+                                                                                <tr style={{ backgroundColor: 'var(--table-header)', borderBottom: '1px solid var(--border-glass)' }}>
+                                                                                    <th style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--text-muted)' }}>VERSION</th>
+                                                                                    <th style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--text-muted)' }}>EFFECTIVE FROM</th>
+                                                                                    <th style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--text-muted)' }}>EFFECTIVE TO</th>
+                                                                                    <th style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--text-muted)' }}>REASON / EVENT</th>
+                                                                                    <th style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--text-muted)', textAlign: 'right' }}>ANNUAL CTC</th>
+                                                                                    <th style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--text-muted)', textAlign: 'right' }}>MONTHLY</th>
+                                                                                    <th style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--text-muted)', textAlign: 'right' }}>CHANGE (₹)</th>
+                                                                                    <th style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--text-muted)', textAlign: 'right' }}>CHANGE (%)</th>
+                                                                                    <th style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--text-muted)', textAlign: 'center' }}>STATUS</th>
+                                                                                </tr>
+                                                                            </thead>
+                                                                            <tbody>
+                                                                                {history.map((rev, idx) => {
+                                                                                    const isScheduled = rev.isScheduled || rev.status === 'SCHEDULED' || (rev.effectiveFrom && rev.effectiveFrom > todayStr);
+                                                                                    const isActive = !isScheduled && (rev.isCurrentActive || rev.status === 'ACTIVE');
+                                                                                    const isSuperseded = !isScheduled && !isActive;
+
+                                                                                    const annualCtcVal = Number(rev.annualCtc || rev.ctc || rev.grossSalary || 0);
+                                                                                    const monthlyGrossVal = Number(rev.monthlyGross || Math.round(annualCtcVal / 12) || 0);
+                                                                                    const incAmt = rev.diffAmount !== undefined ? Number(rev.diffAmount) : Number(rev.incrementAmount || 0);
+                                                                                    const incPct = rev.diffPercent !== undefined ? Number(rev.diffPercent) : Number(rev.incrementPercentage || 0);
+                                                                                    const hasIncrement = incAmt !== 0;
+                                                                                    const isPositive = incAmt >= 0;
+                                                                                    return (
+                                                                                        <tr key={rev.id || idx} style={{ borderBottom: '1px solid var(--border-glass)' }}>
+                                                                                            <td style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                                                                                                {rev.versionLabel || `v${rev.version}`}
+                                                                                            </td>
+                                                                                            <td style={{ padding: '8px 12px', color: 'var(--text-primary)' }}>{rev.effectiveFrom || '-'}</td>
+                                                                                            <td style={{ padding: '8px 12px', color: 'var(--text-muted)' }}>{rev.effectiveTo || (isScheduled ? 'Future' : 'Present')}</td>
+                                                                                            <td style={{ padding: '8px 12px', color: 'var(--text-primary)' }}>{rev.revisionReason || '-'}</td>
+                                                                                            <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600, color: 'var(--text-primary)' }}>
+                                                                                                INR {formatCurrency(annualCtcVal)}
+                                                                                            </td>
+                                                                                            <td style={{ padding: '8px 12px', textAlign: 'right', color: 'var(--text-primary)' }}>
+                                                                                                INR {formatCurrency(monthlyGrossVal)}
+                                                                                            </td>
+                                                                                            <td style={{
+                                                                                                padding: '8px 12px',
+                                                                                                textAlign: 'right',
+                                                                                                fontWeight: 600,
+                                                                                                color: hasIncrement ? (isPositive ? '#10b981' : '#ef4444') : 'var(--text-muted)'
+                                                                                            }}>
+                                                                                                {hasIncrement ? (isPositive ? `+INR ${formatCurrency(incAmt)}` : `-INR ${formatCurrency(Math.abs(incAmt))}`) : '-'}
+                                                                                            </td>
+                                                                                            <td style={{
+                                                                                                padding: '8px 12px',
+                                                                                                textAlign: 'right',
+                                                                                                fontWeight: 600,
+                                                                                                color: hasIncrement ? (isPositive ? '#10b981' : '#ef4444') : 'var(--text-muted)'
+                                                                                            }}>
+                                                                                                {hasIncrement ? (isPositive ? `+${incPct}%` : `${incPct}%`) : '-'}
+                                                                                            </td>
+                                                                                            <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                                                                                                <span style={{
+                                                                                                    display: 'inline-block',
+                                                                                                    padding: '2px 8px',
+                                                                                                    borderRadius: '10px',
+                                                                                                    fontSize: '0.68rem',
+                                                                                                    fontWeight: 700,
+                                                                                                    backgroundColor: isScheduled ? 'rgba(59, 130, 246, 0.15)' : isActive ? 'rgba(16, 185, 129, 0.15)' : 'rgba(156, 163, 175, 0.15)',
+                                                                                                    color: isScheduled ? '#2563eb' : isActive ? '#10b981' : 'var(--text-muted)'
+                                                                                                }}>
+                                                                                                    {isScheduled ? 'Scheduled' : isActive ? 'Active' : 'Superseded'}
+                                                                                                </span>
+                                                                                            </td>
+                                                                                        </tr>
+                                                                                    );
+                                                                                })}
+                                                                            </tbody>
+                                                                        </table>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </>
+                                                );
+                                            })()}
                                         </div>
                                     )}
                                 </div>
@@ -2814,7 +3847,7 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                                                     {displayedDocs.map((doc, idx) => {
                                                         const isIssuedByAdmin = String(doc.uploaderId || '').toLowerCase() === 'admin' || (doc.targetUserId && (doc.targetUserId === viewingEmployee.id || doc.targetUserId === viewingEmployee.empCode));
                                                         const isPdf = doc.fileType === 'pdf' || String(doc.filePath || '').endsWith('.pdf') || String(doc.filePath || '').endsWith('.html');
-                                                        const fullUrl = getFullUrl(doc.filePath);
+                                                        const fullUrl = `${getFullUrl(doc.filePath)}?_t=${Date.now()}`;
 
                                                         return (
                                                              <div 
@@ -2962,6 +3995,14 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                                         <input type="date" value={editDob} onChange={(e) => setEditDob(e.target.value)} style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} />
                                     </div>
                                     <div className="form-group" style={{ flex: 1, minWidth: '150px', margin: 0 }}>
+                                        <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Gender</label>
+                                        <select value={editGender} onChange={(e) => setEditGender(e.target.value)} style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }}>
+                                            <option value="Male">Male</option>
+                                            <option value="Female">Female</option>
+                                            <option value="Other">Other</option>
+                                        </select>
+                                    </div>
+                                    <div className="form-group" style={{ flex: 1, minWidth: '150px', margin: 0 }}>
                                         <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>EMP Code</label>
                                         <input type="text" value={editEmpCode} onChange={(e) => setEditEmpCode(e.target.value)} style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} />
                                     </div>
@@ -3010,6 +4051,96 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                                         <input type="number" value={editAllowedLeaves} onChange={(e) => setEditAllowedLeaves(e.target.value)} min="0" style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} />
                                     </div>
                                 </div>
+                                <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', marginTop: '12px' }}>
+                                    <div className="form-group" style={{ flex: 1, minWidth: '220px', margin: 0 }}>
+                                        <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Father / Spouse Name</label>
+                                        <input type="text" value={editFatherName} onChange={(e) => setEditFatherName(e.target.value)} placeholder="Father or Spouse Name" style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} />
+                                    </div>
+                                    <div className="form-group" style={{ flex: 2, minWidth: '280px', margin: 0 }}>
+                                        <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Present Residential Address</label>
+                                        <input type="text" value={editPresentAddress} onChange={(e) => setEditPresentAddress(e.target.value)} placeholder="e.g. Flat 101, Galaxy Apts, Sector 62, Noida" style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} />
+                                    </div>
+                                </div>
+                                <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', marginTop: '12px' }}>
+                                    <div className="form-group" style={{ flex: 2, minWidth: '280px', margin: 0 }}>
+                                        <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Permanent Address</label>
+                                        <input type="text" value={editPermanentAddress} onChange={(e) => setEditPermanentAddress(e.target.value)} placeholder="Permanent Address (Leave blank if same as residential)" style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} />
+                                    </div>
+                                    <div className="form-group" style={{ flex: 1, minWidth: '220px', margin: 0 }}>
+                                        <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Emergency Contact Person & Phone</label>
+                                        <input type="text" value={editEmergencyContact} onChange={(e) => setEditEmergencyContact(e.target.value)} placeholder="e.g. Dinesh Mishra (+91-9876543210)" style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} />
+                                    </div>
+                                </div>
+
+                                {/* Highest Qualification Subsection */}
+                                <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '14px', marginTop: '14px' }}>
+                                    <h5 style={{ margin: '0 0 12px 0', fontSize: '0.85rem', fontWeight: 700, color: '#4f46e5', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                        Highest Qualification Details
+                                    </h5>
+                                    <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
+                                        <div className="form-group" style={{ flex: 1, minWidth: '220px', margin: 0 }}>
+                                            <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Highest Qualification / Degree</label>
+                                            <select 
+                                                value={editHighestQualLevel} 
+                                                onChange={(e) => setEditHighestQualLevel(e.target.value)} 
+                                                style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }}
+                                            >
+                                                <option value="">Select Qualification</option>
+                                                <option value="10th / Secondary">10th / Secondary</option>
+                                                <option value="12th / Higher Secondary">12th / Higher Secondary</option>
+                                                <option value="Diploma">Diploma / Polytechnic</option>
+                                                <option value="Bachelor's Degree">Bachelor's Degree (B.E / B.Tech / B.Sc / B.Com / B.A / etc.)</option>
+                                                <option value="Master's Degree">Master's Degree (M.E / M.Tech / M.Sc / M.Com / MBA / etc.)</option>
+                                                <option value="Doctorate / Ph.D">Doctorate / Ph.D</option>
+                                                <option value="Other">Other</option>
+                                            </select>
+                                        </div>
+                                        <div className="form-group" style={{ flex: 1, minWidth: '220px', margin: 0 }}>
+                                            <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Field of Study / Specialization</label>
+                                            <input 
+                                                type="text" 
+                                                value={editHighestQualStream} 
+                                                onChange={(e) => setEditHighestQualStream(e.target.value)} 
+                                                placeholder="e.g. Mechanical Engineering, Computer Science" 
+                                                style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} 
+                                            />
+                                        </div>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', marginTop: '12px' }}>
+                                        <div className="form-group" style={{ flex: 2, minWidth: '280px', margin: 0 }}>
+                                            <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>College / University / Board</label>
+                                            <input 
+                                                type="text" 
+                                                value={editHighestQualInstitution} 
+                                                onChange={(e) => setEditHighestQualInstitution(e.target.value)} 
+                                                placeholder="e.g. Anna University, IIT Madras, CBSE" 
+                                                style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} 
+                                            />
+                                        </div>
+                                        <div className="form-group" style={{ flex: 1, minWidth: '140px', margin: 0 }}>
+                                            <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Year of Passing</label>
+                                            <input 
+                                                type="number" 
+                                                min="1950" 
+                                                max="2035" 
+                                                value={editHighestQualYear} 
+                                                onChange={(e) => setEditHighestQualYear(e.target.value)} 
+                                                placeholder="e.g. 2022" 
+                                                style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} 
+                                            />
+                                        </div>
+                                        <div className="form-group" style={{ flex: 1, minWidth: '140px', margin: 0 }}>
+                                            <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Percentage / CGPA</label>
+                                            <input 
+                                                type="text" 
+                                                value={editHighestQualPercent} 
+                                                onChange={(e) => setEditHighestQualPercent(e.target.value)} 
+                                                placeholder="e.g. 82% or 8.5" 
+                                                style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} 
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
 
                             {/* Job Details */}
@@ -3017,7 +4148,7 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                                 <h4 style={{ margin: '0 0 15px 0', color: '#4f46e5', borderBottom: '1px solid #e2e8f0', paddingBottom: '6px' }}>Edit Job & Workplace Settings</h4>
                                 <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
                                     <div className="form-group" style={{ flex: 1, minWidth: '200px', margin: 0 }}>
-                                        <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Designation / Track</label>
+                                        <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Track</label>
                                         <select value={editDesignation} onChange={(e) => setEditDesignation(e.target.value)} style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }}>
                                             <option value="FIELD">Field Employee (GPS Tracking active)</option>
                                             <option value="OFFICE">Office Employee</option>
@@ -3026,8 +4157,10 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                                     <div className="form-group" style={{ flex: 1, minWidth: '200px', margin: 0 }}>
                                         <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Access Role</label>
                                         <select value={editRole} onChange={(e) => setEditRole(e.target.value)} style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }}>
-                                            <option value="EMPLOYEE">Employee</option>
-                                            <option value="ADMIN">Administrator</option>
+                                            <option value="EMPLOYEE">Employee (Mobile App Only)</option>
+                                            <option value="ADMIN">Administrator (Full Access)</option>
+                                            <option value="TRACKING_MANAGER">Tracking Manager (Tracking & Attendance)</option>
+                                            <option value="FIELD_INVOICE_MANAGER">Field & Invoice Manager (Tracking & Invoicing)</option>
                                         </select>
                                     </div>
                                     <div className="form-group" style={{ flex: 1, minWidth: '200px', margin: 0 }}>
@@ -3045,7 +4178,7 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
 
                                 <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', marginTop: '12px' }}>
                                     <div className="form-group" style={{ flex: 1, minWidth: '200px', margin: 0 }}>
-                                        <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Job Title</label>
+                                        <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Designation</label>
                                         <input type="text" value={editJobTitle} onChange={(e) => setEditJobTitle(e.target.value)} style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} />
                                     </div>
                                     <div className="form-group" style={{ flex: 1, minWidth: '200px', margin: 0 }}>
@@ -3081,6 +4214,16 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                                     <div className="form-group" style={{ flex: 1, minWidth: '200px', margin: 0 }}>
                                         <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Reporting Manager</label>
                                         <input type="text" value={editReportingManager} onChange={(e) => setEditReportingManager(e.target.value)} style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} />
+                                    </div>
+                                    <div className="form-group" style={{ flex: 1, minWidth: '200px', margin: 0 }}>
+                                        <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Place of Duty</label>
+                                        <input 
+                                            type="text" 
+                                            value={editPlaceOfDuty} 
+                                            onChange={(e) => setEditPlaceOfDuty(e.target.value)} 
+                                            placeholder="e.g. Noida / Chennai / Client Site" 
+                                            style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} 
+                                        />
                                     </div>
                                 </div>
                             </div>
@@ -3122,9 +4265,32 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                                     <div className="form-group" style={{ flex: 1, minWidth: '220px', margin: 0 }}>
                                         <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Attendance Setting</label>
                                         <select value={editAttendanceSetting} onChange={(e) => setEditAttendanceSetting(e.target.value)} style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }}>
-                                            <option value="9-6">9-6 Fixed Work Hours</option>
+                                            <option value="9-5:30">9 to 5:30 Fixed Work Hours</option>
                                             <option value="Flexible">Flexible Work Hours</option>
+                                            <option value="Other">Other (Custom Hours)</option>
                                         </select>
+                                        {editAttendanceSetting === 'Other' && (
+                                            <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
+                                                <div style={{ flex: 1 }}>
+                                                    <label style={{ fontWeight: 600, fontSize: '0.78rem', color: '#6b7280' }}>Start Time</label>
+                                                    <input 
+                                                        type="time" 
+                                                        value={editStartTime} 
+                                                        onChange={(e) => setEditStartTime(e.target.value)} 
+                                                        style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #d1d5db', outline: 'none' }} 
+                                                    />
+                                                </div>
+                                                <div style={{ flex: 1 }}>
+                                                    <label style={{ fontWeight: 600, fontSize: '0.78rem', color: '#6b7280' }}>End Time</label>
+                                                    <input 
+                                                        type="time" 
+                                                        value={editEndTime} 
+                                                        onChange={(e) => setEditEndTime(e.target.value)} 
+                                                        style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #d1d5db', outline: 'none' }} 
+                                                    />
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                                 <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', marginTop: '12px' }}>
@@ -3254,7 +4420,7 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
 
                             {/* Bank Details */}
                             <div id="section-finances" style={{ border: '1px solid #e2e8f0', padding: '16px', borderRadius: '8px' }}>
-                                <h4 style={{ margin: '0 0 15px 0', color: '#4f46e5', borderBottom: '1px solid #e2e8f0', paddingBottom: '6px' }}>Edit Bank Details</h4>
+                                <h4 style={{ margin: '0 0 15px 0', color: '#4f46e5', borderBottom: '1px solid #e2e8f0', paddingBottom: '6px' }}>Edit Bank & Statutory Details</h4>
                                 <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
                                     <div className="form-group" style={{ flex: 1, minWidth: '220px', margin: 0 }}>
                                         <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Bank Name</label>
@@ -3275,6 +4441,28 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                                         <input type="text" value={editBankBranchName} onChange={(e) => setEditBankBranchName(e.target.value)} style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} />
                                     </div>
                                 </div>
+                                <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', marginTop: '12px' }}>
+                                    <div className="form-group" style={{ flex: 1, minWidth: '200px', margin: 0 }}>
+                                        <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Aadhaar Card Number</label>
+                                        <input type="text" value={editAadhaarNumber} onChange={(e) => setEditAadhaarNumber(e.target.value)} placeholder="e.g. 1234 5678 9012" maxLength={16} style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} />
+                                    </div>
+                                    <div className="form-group" style={{ flex: 1, minWidth: '200px', margin: 0 }}>
+                                        <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>PAN Card Number</label>
+                                        <input type="text" value={editPanNumber} onChange={(e) => setEditPanNumber(e.target.value.toUpperCase())} placeholder="e.g. ABCDE1234F" style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} />
+                                    </div>
+                                    <div className="form-group" style={{ flex: 1, minWidth: '200px', margin: 0 }}>
+                                        <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>EPF UAN Number</label>
+                                        <input type="text" value={editUanNumber} onChange={(e) => setEditUanNumber(e.target.value)} placeholder="e.g. 100123456789" style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} />
+                                    </div>
+                                    <div className="form-group" style={{ flex: 1, minWidth: '200px', margin: 0 }}>
+                                        <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>PF Number / Member ID</label>
+                                        <input type="text" value={editPfNumber} onChange={(e) => setEditPfNumber(e.target.value)} placeholder="e.g. MH/BAN/0012345/000/0000123" style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} />
+                                    </div>
+                                    <div className="form-group" style={{ flex: 1, minWidth: '200px', margin: 0 }}>
+                                        <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>ESIC Number / IP No</label>
+                                        <input type="text" value={editEsiNumber} onChange={(e) => setEditEsiNumber(e.target.value)} placeholder="e.g. 3100123456" style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }} />
+                                    </div>
+                                </div>
                             </div>
 
                             {/* Compensation & Statutory */}
@@ -3286,6 +4474,118 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                                             <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Annual Gross Salary (INR)</label>
                                             <input type="number" value={editCompensationGross} onChange={(e) => setEditCompensationGross(e.target.value)} style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none', fontWeight: 600 }} />
                                         </div>
+                                        {Number(editCompensationGross) !== Number(viewingEmployee?.compensationGross || 0) && (
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', background: 'rgba(79, 70, 229, 0.04)', border: '1px solid rgba(79, 70, 229, 0.25)', padding: '12px 14px', borderRadius: '8px' }}>
+                                                {/* Date Selector Header & Presets */}
+                                                <div>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                                                        <label style={{ fontWeight: 700, fontSize: '0.74rem', color: 'var(--accent-primary)', margin: 0 }}>
+                                                            Revision Effective Date
+                                                        </label>
+                                                        <div style={{ display: 'flex', gap: '6px' }}>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setEditRevisionEffectiveDate(getNextMonthFirst())}
+                                                                style={{
+                                                                    padding: '2px 8px',
+                                                                    fontSize: '0.68rem',
+                                                                    fontWeight: 600,
+                                                                    borderRadius: '4px',
+                                                                    border: editRevisionEffectiveDate === getNextMonthFirst() ? '1px solid var(--accent-primary)' : '1px solid #d1d5db',
+                                                                    backgroundColor: editRevisionEffectiveDate === getNextMonthFirst() ? 'var(--accent-primary)' : '#ffffff',
+                                                                    color: editRevisionEffectiveDate === getNextMonthFirst() ? '#ffffff' : 'var(--text-primary)',
+                                                                    cursor: 'pointer'
+                                                                }}
+                                                            >
+                                                                📅 1st of Next Month
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setEditRevisionEffectiveDate(new Date().toISOString().split('T')[0])}
+                                                                style={{
+                                                                    padding: '2px 8px',
+                                                                    fontSize: '0.68rem',
+                                                                    fontWeight: 600,
+                                                                    borderRadius: '4px',
+                                                                    border: editRevisionEffectiveDate === new Date().toISOString().split('T')[0] ? '1px solid var(--accent-primary)' : '1px solid #d1d5db',
+                                                                    backgroundColor: editRevisionEffectiveDate === new Date().toISOString().split('T')[0] ? 'var(--accent-primary)' : '#ffffff',
+                                                                    color: editRevisionEffectiveDate === new Date().toISOString().split('T')[0] ? '#ffffff' : 'var(--text-primary)',
+                                                                    cursor: 'pointer'
+                                                                }}
+                                                            >
+                                                                ⚡ Today
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                                                        <input 
+                                                            type="date" 
+                                                            value={editRevisionEffectiveDate} 
+                                                            onChange={(e) => setEditRevisionEffectiveDate(e.target.value)} 
+                                                            style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #d1d5db', outline: 'none', fontSize: '0.82rem' }} 
+                                                        />
+                                                        <select 
+                                                            value={editRevisionReason} 
+                                                            onChange={(e) => setEditRevisionReason(e.target.value)} 
+                                                            style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #d1d5db', outline: 'none', fontSize: '0.82rem' }}
+                                                        >
+                                                            <option value="Annual Appraisal">Annual Appraisal</option>
+                                                            <option value="Promotion / Role Change">Promotion / Role Change</option>
+                                                            <option value="Market Correction">Market Correction</option>
+                                                            <option value="Performance Adjustment">Performance Adjustment</option>
+                                                            <option value="Salary Revision">Salary Revision</option>
+                                                        </select>
+                                                    </div>
+                                                </div>
+
+                                                {/* Informative Schedule Alert */}
+                                                {(() => {
+                                                    const todayStr = new Date().toISOString().split('T')[0];
+                                                    const isFuture = editRevisionEffectiveDate > todayStr;
+                                                    const curSalary = Number(viewingEmployee?.compensationGross || 0);
+                                                    const newSalary = Number(editCompensationGross || 0);
+                                                    let effMonthName = 'Next Month';
+                                                    try {
+                                                        effMonthName = new Date(editRevisionEffectiveDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+                                                    } catch (e) {}
+                                                    const curMonthName = new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+                                                    return (
+                                                        <div style={{
+                                                            padding: '8px 12px',
+                                                            borderRadius: '6px',
+                                                            fontSize: '0.72rem',
+                                                            lineHeight: 1.45,
+                                                            backgroundColor: isFuture ? 'rgba(59, 130, 246, 0.08)' : 'rgba(16, 185, 129, 0.08)',
+                                                            border: isFuture ? '1px solid rgba(59, 130, 246, 0.25)' : '1px solid rgba(16, 185, 129, 0.25)',
+                                                            color: isFuture ? '#1e40af' : '#065f46'
+                                                        }}>
+                                                            {isFuture ? (
+                                                                <>
+                                                                    <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '3px' }}>
+                                                                        <span>📅</span> <span>Scheduled for Next Month (Effective {editRevisionEffectiveDate}):</span>
+                                                                    </div>
+                                                                    <div>
+                                                                        • <strong>{curMonthName}</strong> payroll remains locked at current CTC of <strong>INR {formatCurrency(curSalary)}</strong>.
+                                                                        <br />
+                                                                        • <strong>{effMonthName}</strong> payroll will automatically transition to revised CTC of <strong>INR {formatCurrency(newSalary)}</strong>.
+                                                                    </div>
+                                                                </>
+                                                            ) : (
+                                                                <>
+                                                                    <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '3px' }}>
+                                                                        <span>⚡</span> <span>Immediate Revision (Effective {editRevisionEffectiveDate}):</span>
+                                                                    </div>
+                                                                    <div>
+                                                                        This revision takes effect immediately from {editRevisionEffectiveDate} and applies to the current payroll cycle.
+                                                                    </div>
+                                                                </>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })()}
+                                            </div>
+                                        )}
                                         <div className="form-group" style={{ margin: 0 }}>
                                             <label style={{ fontWeight: 600, fontSize: '0.82rem' }}>Tax Regime</label>
                                             <select value={editTaxRegime} onChange={(e) => setEditTaxRegime(e.target.value)} style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }}>
@@ -3597,7 +4897,7 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                                     </button>
                                 </div>
                                 <div style={{ display: 'flex', gap: '15px', flexWrap: 'wrap' }}>
-                                    {Object.entries(editDynamicFields).map(([lbl, val]) => (
+                                    {Object.entries(editDynamicFields).filter(([lbl]) => !SYSTEM_CUSTOM_FIELD_KEYS.has(lbl)).map(([lbl, val]) => (
                                         <div key={lbl} className="form-group" style={{ flex: '1 1 200px', margin: 0 }}>
                                             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                                                 <label style={{ fontWeight: 600, fontSize: '0.8rem' }}>{lbl}</label>
@@ -3626,7 +4926,7 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                                             />
                                         </div>
                                     ))}
-                                    {Object.entries(editDynamicFields).length === 0 && (
+                                    {Object.entries(editDynamicFields).filter(([lbl]) => !SYSTEM_CUSTOM_FIELD_KEYS.has(lbl)).length === 0 && (
                                         <span style={{ fontStyle: 'italic', color: '#9ca3af', fontSize: '0.8rem' }}>No custom fields added.</span>
                                     )}
                                 </div>
@@ -3808,28 +5108,34 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                                     <td style={{ fontWeight: 600 }}>{emp.empCode || emp.id}</td>
                                     <td style={{ fontWeight: 500 }}>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                            {emp.profilePhotoUrl ? (
+                                            {(emp.profilePhotoUrl || emp.avatar) && getFullUrl(emp.profilePhotoUrl || emp.avatar) ? (
                                                 <img 
-                                                    src={`http://${window.location.hostname}:8000/storage/${emp.profilePhotoUrl}`} 
+                                                    src={getFullUrl(emp.profilePhotoUrl || emp.avatar)} 
                                                     alt={emp.name} 
+                                                    onError={(e) => {
+                                                        e.currentTarget.onerror = null;
+                                                        e.currentTarget.style.display = 'none';
+                                                        if (e.currentTarget.nextSibling) {
+                                                            e.currentTarget.nextSibling.style.display = 'flex';
+                                                        }
+                                                    }}
                                                     style={{ width: '32px', height: '32px', borderRadius: '50%', objectFit: 'cover', border: '1px solid #cbd5e1' }}
                                                 />
-                                            ) : (
-                                                <div style={{ 
-                                                    width: '32px', 
-                                                    height: '32px', 
-                                                    borderRadius: '50%', 
-                                                    backgroundColor: '#6366f1', 
-                                                    color: '#fff', 
-                                                    display: 'flex', 
-                                                    alignItems: 'center', 
-                                                    justifyContent: 'center', 
-                                                    fontWeight: 600,
-                                                    fontSize: '0.82rem'
-                                                }}>
-                                                    {emp.name ? emp.name.charAt(0).toUpperCase() : '?'}
-                                                </div>
-                                            )}
+                                            ) : null}
+                                            <div style={{ 
+                                                width: '32px', 
+                                                height: '32px', 
+                                                borderRadius: '50%', 
+                                                backgroundColor: '#6366f1', 
+                                                color: '#fff', 
+                                                display: ((emp.profilePhotoUrl || emp.avatar) && getFullUrl(emp.profilePhotoUrl || emp.avatar)) ? 'none' : 'flex', 
+                                                alignItems: 'center', 
+                                                justifyContent: 'center', 
+                                                fontWeight: 600,
+                                                fontSize: '0.82rem'
+                                            }}>
+                                                {emp.name ? emp.name.charAt(0).toUpperCase() : '?'}
+                                            </div>
                                             {emp.name}
                                         </div>
                                     </td>
@@ -3862,17 +5168,34 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                                         <>
                                             <td style={{ color: 'var(--text-secondary)' }}>{emp.email}</td>
                                             <td>
-                                                <span style={{ 
-                                                    padding: '4px 8px', 
-                                                    borderRadius: '6px', 
-                                                    fontSize: '0.75rem', 
-                                                    fontWeight: 600,
-                                                    backgroundColor: emp.designation === 'FIELD' ? 'rgba(37, 99, 235, 0.15)' : 'rgba(255, 255, 255, 0.06)',
-                                                    color: emp.designation === 'FIELD' ? '#60a5fa' : 'var(--text-secondary)',
-                                                    border: emp.designation === 'FIELD' ? '1px solid rgba(37, 99, 235, 0.3)' : '1px solid var(--border-glass)'
-                                                }}>
-                                                    {emp.designation === 'FIELD' ? 'Field Officer' : 'Office Officer'}
-                                                </span>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                                    <span style={{ 
+                                                        padding: '3px 8px', 
+                                                        borderRadius: '6px', 
+                                                        fontSize: '0.74rem', 
+                                                        fontWeight: 600,
+                                                        backgroundColor: emp.designation === 'FIELD' ? 'rgba(37, 99, 235, 0.15)' : 'rgba(255, 255, 255, 0.06)',
+                                                        color: emp.designation === 'FIELD' ? '#60a5fa' : 'var(--text-secondary)',
+                                                        border: emp.designation === 'FIELD' ? '1px solid rgba(37, 99, 235, 0.3)' : '1px solid var(--border-glass)'
+                                                    }}>
+                                                        {emp.designation === 'FIELD' ? 'Field Officer' : 'Office Officer'}
+                                                    </span>
+                                                    {emp.role === 'ADMIN' && (
+                                                        <span style={{ padding: '3px 7px', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 700, backgroundColor: 'rgba(147, 51, 234, 0.15)', color: '#c084fc', border: '1px solid rgba(147, 51, 234, 0.35)' }}>
+                                                            👑 Admin
+                                                        </span>
+                                                    )}
+                                                    {emp.role === 'TRACKING_MANAGER' && (
+                                                        <span style={{ padding: '3px 7px', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 700, backgroundColor: 'rgba(6, 182, 212, 0.15)', color: '#22d3ee', border: '1px solid rgba(6, 182, 212, 0.35)' }}>
+                                                            📍 Tracking Mgr
+                                                        </span>
+                                                    )}
+                                                    {emp.role === 'FIELD_INVOICE_MANAGER' && (
+                                                        <span style={{ padding: '3px 7px', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 700, backgroundColor: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.35)' }}>
+                                                            💼 Field Mgr
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </td>
                                         </>
                                     )}
@@ -4070,7 +5393,7 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                             </div>
                             <div style={{ marginLeft: 'auto', textAlign: 'right', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
                                 <div><strong style={{ color: 'var(--text-primary)' }}>Dept:</strong> {exitEmployeeDept || '-'}</div>
-                                <div><strong style={{ color: '#475569' }}>DOJ:</strong> {exitEmployeeJoining || '-'}</div>
+                                <div><strong style={{ color: '#475569' }}>DOJ:</strong> {formatDate(exitEmployeeJoining) || '-'}</div>
                             </div>
                         </div>
 
@@ -4227,6 +5550,131 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                     </div>
                 </div>
             )}
+
+            {/* Fullscreen Image Preview Lightbox Modal (Same Tab, Cut / Close Option) */}
+            {previewImage && (
+                <div 
+                    onClick={() => setPreviewImage(null)}
+                    style={{
+                        position: 'fixed',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        backgroundColor: 'rgba(15, 23, 42, 0.88)',
+                        backdropFilter: 'blur(10px)',
+                        zIndex: 99999,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justify: 'center',
+                        padding: '24px',
+                        animation: 'fadeIn 0.2s ease-out'
+                    }}
+                >
+                    <div 
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                            position: 'relative',
+                            maxHeight: '85vh',
+                            maxWidth: '90vw',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            gap: '16px',
+                            background: 'rgba(30, 41, 59, 0.95)',
+                            border: '1px solid rgba(255, 255, 255, 0.2)',
+                            borderRadius: '20px',
+                            padding: '28px 36px',
+                            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6)'
+                        }}
+                    >
+                        {/* Close / Cut ('✕') Button */}
+                        <button
+                            type="button"
+                            onClick={() => setPreviewImage(null)}
+                            style={{
+                                position: 'absolute',
+                                top: '14px',
+                                right: '14px',
+                                width: '36px',
+                                height: '36px',
+                                borderRadius: '50%',
+                                background: 'rgba(255, 255, 255, 0.15)',
+                                border: '1px solid rgba(255, 255, 255, 0.25)',
+                                color: '#ffffff',
+                                fontSize: '18px',
+                                fontWeight: '800',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s ease',
+                                zIndex: 10
+                            }}
+                            title="Close Preview (Esc)"
+                            onMouseEnter={(e) => { e.currentTarget.style.background = '#ef4444'; e.currentTarget.style.borderColor = '#ef4444'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255, 255, 255, 0.15)'; e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.25)'; }}
+                        >
+                            ✕
+                        </button>
+
+                        {/* Full Size Preview Image */}
+                        <img 
+                            src={previewImage.url} 
+                            alt={previewImage.title || 'Profile Photo'} 
+                            style={{
+                                maxHeight: '60vh',
+                                maxWidth: '75vw',
+                                borderRadius: '14px',
+                                objectFit: 'contain',
+                                border: '3px solid rgba(255, 255, 255, 0.3)',
+                                boxShadow: '0 15px 30px rgba(0,0,0,0.4)'
+                            }}
+                        />
+
+                        {/* Title & Info */}
+                        {previewImage.title && (
+                            <div style={{ textAlign: 'center' }}>
+                                <h3 style={{ margin: '0 0 4px 0', fontSize: '1.25rem', fontWeight: 800, color: '#ffffff', letterSpacing: '-0.01em' }}>
+                                    {previewImage.title}
+                                </h3>
+                                {previewImage.subtitle && (
+                                    <span style={{ fontSize: '0.85rem', color: '#94a3b8', fontWeight: 600 }}>
+                                        {previewImage.subtitle}
+                                    </span>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* Leave Balance Adjustment Modal */}
+            <LeaveAdjustmentModal
+                isOpen={showLeaveAdjustmentModal}
+                onClose={() => {
+                    setShowLeaveAdjustmentModal(false);
+                    setLeaveAdjustmentEmpId(null);
+                }}
+                employees={employees}
+                defaultEmployeeId={leaveAdjustmentEmpId}
+                onSuccess={async (updatedEmp) => {
+                    if (refreshEmployees) {
+                        await refreshEmployees();
+                    }
+                    if (viewingEmployee && updatedEmp && (viewingEmployee.id === updatedEmp.id || viewingEmployee.empCode === updatedEmp.empCode)) {
+                        setViewingEmployee(prev => ({
+                            ...prev,
+                            openingLeaveBalance: updatedEmp.openingLeaveBalance,
+                            earnedLeaves: updatedEmp.openingLeaveBalance,
+                            allowedLeaves: updatedEmp.allowedLeaves,
+                            availableLeaves: updatedEmp.availableLeaves,
+                            leaveBalance: updatedEmp.leaveBalance
+                        }));
+                    }
+                }}
+            />
         </div>
     );
 }

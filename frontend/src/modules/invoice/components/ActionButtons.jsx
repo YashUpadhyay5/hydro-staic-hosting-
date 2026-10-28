@@ -5,6 +5,7 @@ function ActionButtons({
   onDownloadExcel,
   onPrint,
   onRetry,
+  onOpenRetryModal,
   onDelete,
   selectedDocument,
   isSaving,
@@ -18,17 +19,21 @@ function ActionButtons({
   return (
     <div className="action-bar-wrapper" style={{ justifyContent: "flex-end" }}>
 
-      {/* Retry button — only visible for Failed documents */}
-      {isFailed && (
+      {/* Re-upload / Retry Button — available for any selected document */}
+      {selectedDocument && (
         <button
-          className="btn btn-secondary"
-          onClick={onRetry}
-          disabled={isRetrying}
-          title="Re-queue this document for OCR processing"
+          className="btn btn-secondary btn-retry"
+          onClick={onOpenRetryModal || onRetry}
+          disabled={isRetrying || isSaving}
+          title="Re-send this invoice file to RunPod OCR to re-extract all fields and line items"
           style={{
-            color: "#b91c1c",
-            borderColor: "rgba(185,28,28,0.35)",
-            background: "rgba(185,28,28,0.07)",
+            color: "#dc2626",
+            borderColor: "rgba(220, 38, 38, 0.4)",
+            background: "rgba(220, 38, 38, 0.06)",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "6px",
+            fontWeight: "600",
           }}
         >
           {isRetrying ? (
@@ -37,7 +42,7 @@ function ActionButtons({
                 <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" style={{ opacity: 0.25 }}></circle>
                 <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
-              Retrying…
+              <span>Extracting…</span>
             </>
           ) : (
             <>
@@ -45,7 +50,7 @@ function ActionButtons({
                 <polyline points="1 4 1 10 7 10"></polyline>
                 <path d="M3.51 15a9 9 0 1 0 .49-3.5"></path>
               </svg>
-              Retry OCR
+              <span>Re-upload to RunPod</span>
             </>
           )}
         </button>

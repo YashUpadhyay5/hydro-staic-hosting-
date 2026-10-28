@@ -70,17 +70,18 @@ class ProfessionalTaxService {
     }
 
     // 2. Resolve Active State Configuration
-    const stateIdentifier = employee.ptStateId || employee.ptStateCode;
+    // The state code is what HR selects on the employee profile; pt_state_id is never set by the UI and can be stale
+    const stateIdentifier = employee.ptStateCode || employee.ptStateId;
     let state = null;
 
     if (stateIdentifier) {
+      // Only compare against the UUID primary key when the identifier is a UUID (Postgres rejects 'TN' = uuid)
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(stateIdentifier));
       state = await ProfessionalTaxState.findOne({
         where: {
-          [Op.or]: [
-            { id: stateIdentifier },
-            { stateCode: stateIdentifier },
-            { stateName: stateIdentifier }
-          ],
+          [Op.or]: isUuid
+            ? [{ id: stateIdentifier }]
+            : [{ stateCode: stateIdentifier }, { stateName: stateIdentifier }],
           isEnabled: true
         }
       });

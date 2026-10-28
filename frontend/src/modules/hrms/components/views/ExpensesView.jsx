@@ -1,13 +1,14 @@
-import ExcelJS from 'exceljs';
+
 import LoadingSpinner from '../LoadingSpinner';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { api } from '../../services/api';
-import { formatDate, getFullUrl, forceDownload } from '../../utils/helpers';
+import { formatDate, getFullUrl, forceDownload, isActiveEmployee } from '../../utils/helpers';
 
 export default function ExpensesView({ employees = [] }) {
-    const [expenses, setExpenses] = useState([]);
+    const cachedExpenses = api.getCached('/expenses');
+    const [expenses, setExpenses] = useState(() => Array.isArray(cachedExpenses) ? cachedExpenses : []);
     const [tab, setTab] = useState('all'); // 'all', 'approved', 'pending', 'rejected', or 'history'
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(() => !cachedExpenses);
     const [error, setError] = useState(false);
     const [modalImage, setModalImage] = useState(null); // State for image modal
 
@@ -26,6 +27,11 @@ export default function ExpensesView({ employees = [] }) {
     const [saveLoading, setSaveLoading] = useState(false);
     const [zoomLevel, setZoomLevel] = useState(100);
     const [rotation, setRotation] = useState(0);
+    const [isDragging, setIsDragging] = useState(false);
+    const [dragStart, setDragStart] = useState({ x: 0, y: 0, scrollLeft: 0, scrollTop: 0 });
+    const [baseDimensions, setBaseDimensions] = useState(null);
+    const viewerContainerRef = useRef(null);
+    const imgRef = useRef(null);
 
     // Add Expense Modal State
     const [showAddExpenseModal, setShowAddExpenseModal] = useState(false);
@@ -51,15 +57,15 @@ export default function ExpensesView({ employees = [] }) {
     const itemsPerPage = 15;
 
     const fetchExpenses = async () => {
-        setLoading(true);
+        if (!expenses.length) setLoading(true);
         try {
             const data = await api.getExpenses();
             setExpenses(Array.isArray(data) ? data : []);
         } catch (err) {
             console.error('Failed to load expenses:', err);
-            setError(true);
+            if (!expenses.length) setError(true);
         } finally {
-            setTimeout(() => setLoading(false), 300);
+            setLoading(false);
         }
     };
 
@@ -102,7 +108,74 @@ export default function ExpensesView({ employees = [] }) {
         setEditFile(null);
         setZoomLevel(100);
         setRotation(0);
+        setBaseDimensions(null);
+        if (viewerContainerRef.current) {
+            viewerContainerRef.current.scrollTop = 0;
+            viewerContainerRef.current.scrollLeft = 0;
+        }
     };
+
+    const handleResetZoom = () => {
+        setZoomLevel(100);
+        setRotation(0);
+        if (viewerContainerRef.current) {
+            viewerContainerRef.current.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+        }
+    };
+
+    const handleMouseDown = (e) => {
+        if (e.button !== 0 || !viewerContainerRef.current) return;
+        setIsDragging(true);
+        setDragStart({
+            x: e.clientX,
+            y: e.clientY,
+            scrollLeft: viewerContainerRef.current.scrollLeft,
+            scrollTop: viewerContainerRef.current.scrollTop
+        });
+    };
+
+    useEffect(() => {
+        if (!isDragging) return;
+        const handleMouseMove = (e) => {
+            if (!viewerContainerRef.current) return;
+            const dx = e.clientX - dragStart.x;
+            const dy = e.clientY - dragStart.y;
+            viewerContainerRef.current.scrollLeft = dragStart.scrollLeft - dx;
+            viewerContainerRef.current.scrollTop = dragStart.scrollTop - dy;
+        };
+        const handleMouseUp = () => {
+            setIsDragging(false);
+        };
+        window.addEventListener('mousemove', handleMouseMove);
+        window.addEventListener('mouseup', handleMouseUp);
+        return () => {
+            window.removeEventListener('mousemove', handleMouseMove);
+            window.removeEventListener('mouseup', handleMouseUp);
+        };
+    }, [isDragging, dragStart]);
+
+    useEffect(() => {
+        const el = viewerContainerRef.current;
+        if (!el) return;
+        const onWheel = (e) => {
+            if (e.ctrlKey || e.metaKey) {
+                e.preventDefault();
+                const delta = e.deltaY < 0 ? 25 : -25;
+                setZoomLevel(z => Math.max(50, Math.min(500, z + delta)));
+            }
+        };
+        el.addEventListener('wheel', onWheel, { passive: false });
+        return () => el.removeEventListener('wheel', onWheel);
+    }, [selectedExpense]);
+
+    useEffect(() => {
+        if (imgRef.current && imgRef.current.complete && imgRef.current.naturalWidth && !baseDimensions) {
+            setBaseDimensions({
+                width: imgRef.current.offsetWidth || imgRef.current.naturalWidth,
+                height: imgRef.current.offsetHeight || imgRef.current.naturalHeight
+            });
+        }
+    }, [selectedExpense, baseDimensions]);
 
     const handleSaveVerificationDetails = async (e) => {
         if (e) e.preventDefault();
@@ -129,12 +202,17 @@ export default function ExpensesView({ employees = [] }) {
             formData.append('billNo', editBillNo || '');
             formData.append('merchantName', editMerchantName || '');
             formData.append('description', editDescription || '');
+            const adminName = getCurrentAdminName();
             formData.append('status', editStatus);
+            if (editStatus === 'approved' || editStatus === 'rejected') {
+                formData.append('actionBy', adminName);
+            }
             if (editFile) {
                 formData.append('file', editFile);
             }
 
             await api.updateExpense(selectedExpense.id, formData);
+            window.dispatchEvent(new CustomEvent('hrms-badge-sync'));
 
             // Toast feedback
             const toast = document.createElement('div');
@@ -167,13 +245,33 @@ export default function ExpensesView({ employees = [] }) {
         }
     };
 
+    // Helper to get current acting admin name
+    const getCurrentAdminName = () => {
+        try {
+            const raw = localStorage.getItem('adminUser');
+            if (raw) {
+                const admin = JSON.parse(raw);
+                if (admin.name && admin.name.trim()) return admin.name.trim();
+                if (admin.empCode && admin.empCode.trim()) return admin.empCode.trim();
+                if (admin.email && admin.email.trim()) return admin.email.split('@')[0];
+            }
+            const username = localStorage.getItem('username');
+            if (username && username.trim()) return username.trim();
+        } catch (e) {}
+        return 'Admin';
+    };
+
     const handleUpdateStatus = async (id, status) => {
         if (!confirm(`Are you sure you want to ${status} this expense?`)) return;
+        const adminName = getCurrentAdminName();
+        setExpenses(prev => prev.map(exp => exp.id === id ? { ...exp, status, actionBy: adminName } : exp));
         try {
-            await api.updateExpenseStatus(id, status);
+            await api.updateExpenseStatus(id, status, adminName);
+            window.dispatchEvent(new CustomEvent('hrms-badge-sync'));
             fetchExpenses();
         } catch (err) {
             alert('Failed to update expense status: ' + err.message);
+            fetchExpenses();
         }
     };
 
@@ -225,6 +323,7 @@ export default function ExpensesView({ employees = [] }) {
             setShowAddExpenseModal(false);
             
             // Refresh list
+            window.dispatchEvent(new CustomEvent('hrms-badge-sync'));
             fetchExpenses();
         } catch (err) {
             alert('Failed to upload expense: ' + (err.response?.data?.error || err.message));
@@ -300,6 +399,8 @@ export default function ExpensesView({ employees = [] }) {
         }
 
         try {
+            // Dynamic import — ExcelJS (1.3 MB) only loads when user clicks Export
+            const { default: ExcelJS } = await import('exceljs');
             const workbook = new ExcelJS.Workbook();
             const createExpenseWorksheet = (sheetTitle, items, summaryLabel) => {
                 const ws = workbook.addWorksheet(sheetTitle);
@@ -465,6 +566,12 @@ window.URL.revokeObjectURL(downloadUrl);
         }
     };
 
+    const isRotated90 = rotation === 90 || rotation === 270;
+    const baseW = baseDimensions?.width || 380;
+    const baseH = baseDimensions?.height || 550;
+    const currentWidth = Math.round((baseW * zoomLevel) / 100);
+    const currentHeight = Math.round((baseH * zoomLevel) / 100);
+
     return (
         <div id="expenses-view" className="view active" style={{ height: '100%', minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: '16px', overflow: 'hidden' }}>
             {selectedExpense ? (
@@ -488,6 +595,11 @@ window.URL.revokeObjectURL(downloadUrl);
                                     <span className={`badge-status badge-${String(editStatus || selectedExpense.status || '').toLowerCase()}`}>
                                         {String(editStatus || selectedExpense.status || '').toUpperCase()}
                                     </span>
+                                    {selectedExpense.actionBy && String(editStatus || selectedExpense.status || '').toLowerCase() !== 'pending' && (
+                                        <span style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 600 }}>
+                                            by <strong style={{ color: '#4f46e5' }}>{selectedExpense.actionBy}</strong>
+                                        </span>
+                                    )}
                                 </h3>
                                 <p style={{ margin: '2px 0 0 0', fontSize: '0.8rem', color: '#64748b' }}>
                                     Submitted by <strong style={{ color: '#334155' }}>{getEmployeeDisplayInfo(selectedExpense).empName}</strong> <span style={{ background: '#e0e7ff', color: '#3730a3', padding: '1px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, marginLeft: '4px' }}>{getEmployeeDisplayInfo(selectedExpense).empCode}</span> {selectedExpense.createdAt ? `on ${formatDate(selectedExpense.createdAt)}` : ''}
@@ -539,20 +651,28 @@ window.URL.revokeObjectURL(downloadUrl);
                                         type="button" 
                                         className="btn btn-outline" 
                                         style={{ padding: '4px 8px', fontSize: '0.75rem' }} 
-                                        onClick={() => setZoomLevel(z => Math.max(50, z - 20))}
-                                        title="Zoom Out"
+                                        onClick={() => setZoomLevel(z => Math.max(50, z - 25))}
+                                        disabled={zoomLevel <= 50}
+                                        title="Zoom Out (Min: 50%)"
                                     >
                                         <i className="fa-solid fa-magnifying-glass-minus"></i>
                                     </button>
-                                    <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', minWidth: '38px', textAlign: 'center' }}>
+                                    <button
+                                        type="button"
+                                        className="btn btn-outline"
+                                        onClick={handleResetZoom}
+                                        style={{ padding: '4px 8px', fontSize: '0.75rem', fontWeight: 600, color: zoomLevel === 100 ? 'var(--text-muted)' : '#60a5fa', minWidth: '46px', textAlign: 'center', cursor: 'pointer' }}
+                                        title="Click to Reset Zoom (100%)"
+                                    >
                                         {zoomLevel}%
-                                    </span>
+                                    </button>
                                     <button 
                                         type="button" 
                                         className="btn btn-outline" 
                                         style={{ padding: '4px 8px', fontSize: '0.75rem' }} 
-                                        onClick={() => setZoomLevel(z => Math.min(250, z + 20))}
-                                        title="Zoom In"
+                                        onClick={() => setZoomLevel(z => Math.min(500, z + 25))}
+                                        disabled={zoomLevel >= 500}
+                                        title="Zoom In (Max: 500%)"
                                     >
                                         <i className="fa-solid fa-magnifying-glass-plus"></i>
                                     </button>
@@ -560,8 +680,17 @@ window.URL.revokeObjectURL(downloadUrl);
                                         type="button" 
                                         className="btn btn-outline" 
                                         style={{ padding: '4px 8px', fontSize: '0.75rem' }} 
+                                        onClick={handleResetZoom}
+                                        title="Reset Zoom & Orientation (100%)"
+                                    >
+                                        <i className="fa-solid fa-arrows-rotate"></i>
+                                    </button>
+                                    <button 
+                                        type="button" 
+                                        className="btn btn-outline" 
+                                        style={{ padding: '4px 8px', fontSize: '0.75rem' }} 
                                         onClick={() => setRotation(r => (r + 90) % 360)}
-                                        title="Rotate"
+                                        title="Rotate 90°"
                                     >
                                         <i className="fa-solid fa-rotate-right"></i>
                                     </button>
@@ -591,19 +720,80 @@ window.URL.revokeObjectURL(downloadUrl);
                                 </div>
                             </div>
 
-                            {/* Image Container */}
-                            <div style={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-dark)', padding: '16px' }}>
+                            {/* Image Container with Full-Resolution Layout Zoom and Smooth Drag-to-Pan */}
+                            <div 
+                                ref={viewerContainerRef}
+                                onMouseDown={handleMouseDown}
+                                style={{ 
+                                    flex: 1, 
+                                    minHeight: 0, 
+                                    overflow: 'auto', 
+                                    background: 'var(--bg-dark)', 
+                                    padding: '20px', 
+                                    position: 'relative',
+                                    cursor: isDragging ? 'grabbing' : (zoomLevel > 100 ? 'grab' : 'default'),
+                                    userSelect: 'none',
+                                    WebkitUserSelect: 'none',
+                                }}
+                            >
                                 {selectedExpense.invoiceUrl || selectedExpense.cloudinaryUrl ? (
-                                    <div style={{ transform: `scale(${zoomLevel / 100}) rotate(${rotation}deg)`, transition: 'transform 0.2s ease', maxWidth: '100%', maxHeight: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                        <img 
-                                            src={selectedExpense.cloudinaryUrl || getFullUrl(selectedExpense.invoiceUrl)} 
-                                            alt="Invoice Bill" 
-                                            style={{ maxWidth: '100%', maxHeight: '60vh', objectFit: 'contain', borderRadius: '8px', boxShadow: '0 8px 24px rgba(0,0,0,0.4)' }}
-                                            onError={(e) => {
-                                                e.target.onerror = null;
-                                                e.target.src = 'https://via.placeholder.com/600x400?text=Invoice+Image+Not+Available';
+                                    <div 
+                                        style={{ 
+                                            display: 'flex', 
+                                            alignItems: 'flex-start', 
+                                            justifyContent: 'center', 
+                                            minWidth: '100%', 
+                                            minHeight: '100%', 
+                                            width: 'max-content',
+                                            margin: '0 auto',
+                                        }}
+                                    >
+                                        <div 
+                                            style={{
+                                                minWidth: isRotated90 ? `${currentHeight}px` : `${currentWidth}px`,
+                                                minHeight: isRotated90 ? `${currentWidth}px` : `${currentHeight}px`,
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                transition: isDragging ? 'none' : 'min-width 0.15s ease, min-height 0.15s ease',
+                                                position: 'relative',
                                             }}
-                                        />
+                                        >
+                                            <img 
+                                                ref={imgRef}
+                                                src={selectedExpense.cloudinaryUrl || getFullUrl(selectedExpense.invoiceUrl)} 
+                                                alt="Invoice Bill" 
+                                                draggable={false}
+                                                onLoad={(e) => {
+                                                    const el = e.target;
+                                                    if (el) {
+                                                        const w = el.offsetWidth || el.naturalWidth || 400;
+                                                        const h = el.offsetHeight || el.naturalHeight || 600;
+                                                        setBaseDimensions({ width: w, height: h });
+                                                    }
+                                                }}
+                                                style={{ 
+                                                    width: zoomLevel === 100 ? 'auto' : `${currentWidth}px`,
+                                                    height: zoomLevel === 100 ? 'auto' : `${currentHeight}px`,
+                                                    maxWidth: zoomLevel === 100 ? '100%' : 'none',
+                                                    maxHeight: zoomLevel === 100 ? '62vh' : 'none',
+                                                    objectFit: 'contain',
+                                                    borderRadius: '8px', 
+                                                    boxShadow: '0 8px 30px rgba(0,0,0,0.5)',
+                                                    transform: `rotate(${rotation}deg)`,
+                                                    transformOrigin: 'center center',
+                                                    transition: isDragging ? 'none' : 'transform 0.2s ease, width 0.15s ease, height 0.15s ease',
+                                                    imageRendering: 'high-quality',
+                                                    WebkitFontSmoothing: 'subpixel-antialiased',
+                                                    display: 'block',
+                                                    pointerEvents: isDragging ? 'none' : 'auto'
+                                                }}
+                                                onError={(e) => {
+                                                    e.target.onerror = null;
+                                                    e.target.src = 'https://via.placeholder.com/600x400?text=Invoice+Image+Not+Available';
+                                                }}
+                                            />
+                                        </div>
                                     </div>
                                 ) : (
                                     <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '40px' }}>
@@ -1092,7 +1282,16 @@ window.URL.revokeObjectURL(downloadUrl);
                                                     </div>
                                                 ) : '-'}
                                             </td>
-                                            <td><span className={`badge-status badge-${String(exp.status || '').toLowerCase()}`}>{String(exp.status || '').toUpperCase()}</span></td>
+                                            <td>
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'flex-start' }}>
+                                                    <span className={`badge-status badge-${String(exp.status || '').toLowerCase()}`}>{String(exp.status || '').toUpperCase()}</span>
+                                                    {exp.actionBy && String(exp.status || '').toLowerCase() !== 'pending' && (
+                                                        <span style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600 }}>
+                                                            by <strong style={{ color: '#4f46e5' }}>{exp.actionBy}</strong>
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </td>
                                             <td onClick={(e) => e.stopPropagation()}>
                                                 {String(exp.status || '').toLowerCase() === 'pending' ? (
                                                     <div style={{ display: 'flex', gap: '5px' }}>
@@ -1167,7 +1366,7 @@ window.URL.revokeObjectURL(downloadUrl);
                                     style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border-glass)', background: 'var(--input-bg)', color: 'var(--text-primary)', outline: 'none' }}
                                 >
                                     <option value="">Select Employee</option>
-                                    {employees.map(emp => (
+                                    {employees.filter(isActiveEmployee).map(emp => (
                                         <option key={emp.id || emp._id} value={emp.id || emp._id}>
                                              {emp.name} ({emp.empCode || emp.id || emp._id})
                                         </option>

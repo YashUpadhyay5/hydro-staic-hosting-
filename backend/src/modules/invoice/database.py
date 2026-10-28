@@ -5,15 +5,25 @@ from sqlalchemy.orm import declarative_base
 from config import Config
 
 
-engine = create_engine(
-    Config.DATABASE_URL,
-    pool_pre_ping=True,       # Check connection liveness before every use
-    pool_recycle=300,         # Recycle connections every 5 min (not 1 hour)
-    pool_size=5,              # Keep 5 connections in pool
-    max_overflow=10,          # Allow 10 extra connections under load
-    pool_timeout=30,          # Wait max 30s for a connection from pool
-    echo=False
-)
+from sqlalchemy.pool import NullPool
+
+if Config.DATABASE_URL.startswith("sqlite"):
+    engine = create_engine(
+        Config.DATABASE_URL,
+        connect_args={"check_same_thread": False, "timeout": 30},
+        poolclass=NullPool,
+        echo=False
+    )
+else:
+    engine = create_engine(
+        Config.DATABASE_URL,
+        pool_pre_ping=True,
+        pool_recycle=300,
+        pool_size=5,
+        max_overflow=10,
+        pool_timeout=30,
+        echo=False
+    )
 
 SessionLocal = sessionmaker(
     autocommit=False,

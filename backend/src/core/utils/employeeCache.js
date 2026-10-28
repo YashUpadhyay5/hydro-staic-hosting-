@@ -24,6 +24,26 @@ async function getCachedEmployees() {
       aliases.add(s.toLowerCase());
       aliases.add(s.toUpperCase());
     });
+
+    // Dynamically extract legacy codes and aliases from employee customFields
+    let legacyList = [];
+    try {
+      const rawCf = emp.customFields || emp.custom_fields || {};
+      const cf = typeof rawCf === 'string' ? JSON.parse(rawCf) : rawCf;
+      if (Array.isArray(cf.legacyCodes)) legacyList.push(...cf.legacyCodes);
+      if (Array.isArray(cf.aliases)) legacyList.push(...cf.aliases);
+      if (cf.legacyId) legacyList.push(cf.legacyId);
+      if (cf.oldCode) legacyList.push(cf.oldCode);
+    } catch (e) {}
+
+    legacyList.filter(Boolean).forEach(v => {
+      const s = String(v).trim();
+      aliases.add(s);
+      aliases.add(s.toLowerCase());
+      aliases.add(s.toUpperCase());
+      empMap.set(s.toLowerCase(), emp);
+    });
+
     if (emp.id) empMap.set(String(emp.id).toLowerCase(), emp);
     if (emp.empCode) empMap.set(String(emp.empCode).toLowerCase(), emp);
     if (emp.emp_code) empMap.set(String(emp.emp_code).toLowerCase(), emp);
@@ -46,6 +66,43 @@ async function getCachedEmployees() {
   return { employees, empMap, empAliasesMap };
 }
 
+/**
+ * Dynamically resolves any raw identifier (legacy code, alias, name, ID)
+ * to its authoritative canonical employee representation.
+ *
+ * @param {string} rawId - e.g. 'EMP0128', 'HMPL39', 'D04'
+ * @param {Map} [empMap] - optional preloaded empMap from getCachedEmployees()
+ * @returns {Promise<{ employee: Object, canonicalId: string, canonicalName: string } | null>}
+ */
+async function resolveCanonicalEmployee(rawId, empMap = null) {
+  if (!rawId) return null;
+  const key = String(rawId).trim().toLowerCase();
+
+  let map = empMap;
+  if (!map) {
+    const cached = await getCachedEmployees();
+    map = cached.empMap;
+  }
+
+  let emp = map.get(key);
+  if (!emp) {
+    // Try refreshing cache if key was not found
+    const cached = await getCachedEmployees();
+    emp = cached.empMap.get(key);
+  }
+
+  if (!emp) return null;
+
+  const canonicalId = String(emp.empCode || emp.emp_code || emp.id).trim();
+  const canonicalName = String(emp.name || '').trim();
+
+  return {
+    employee: emp,
+    canonicalId,
+    canonicalName
+  };
+}
+
 function invalidateEmployeeCache() {
   cachedEmployees = null;
   cachedEmpMap = null;
@@ -55,5 +112,6 @@ function invalidateEmployeeCache() {
 
 module.exports = {
   getCachedEmployees,
+  resolveCanonicalEmployee,
   invalidateEmployeeCache
 };

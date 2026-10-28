@@ -1,9 +1,10 @@
 import LoadingSpinner from '../LoadingSpinner';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { api } from '../../services/api';
+import { getFullUrl } from '../../utils/helpers';
 import HolidayCalendarModal from './HolidayCalendarModal';
 
-export default function DashboardView({ totalEmployees, onViewChange }) {
+export default function DashboardView({ employees: propEmployees = [], totalEmployees, onViewChange }) {
     const adminUser = (() => {
         try {
             return JSON.parse(localStorage.getItem('adminUser'));
@@ -13,9 +14,49 @@ export default function DashboardView({ totalEmployees, onViewChange }) {
     })();
     const isTrackingManager = ['TRACKING_MANAGER', 'FIELD_INVOICE_MANAGER'].includes(String(adminUser?.role || 'ADMIN').toUpperCase());
 
+    // Instant SWR Cache for Stat Cards (Frame 0 render, survives page reload)
+    const cachedSummary = (() => {
+        try {
+            if (typeof sessionStorage !== 'undefined') {
+                const raw = sessionStorage.getItem('swr:GET:/dashboard/summary');
+                if (raw) return JSON.parse(raw).data;
+            }
+        } catch {}
+        return null;
+    })();
+
+    const computeActiveCount = (list) => {
+        if (!Array.isArray(list) || list.length === 0) return 0;
+        return list.filter(e => String(e?.status || 'ACTIVE').toUpperCase() === 'ACTIVE' && !e?.isSystemAccount && !e?.is_system_account).length;
+    };
+
+    const [todayCount, setTodayCount] = useState(() => cachedSummary?.todayAttendanceCount ?? 0);
+    const [pendingLeavesCount, setPendingLeavesCount] = useState(() => cachedSummary?.pendingLeavesCount ?? 0);
+    const [pendingExpensesCount, setPendingExpensesCount] = useState(() => cachedSummary?.pendingExpensesCount ?? 0);
+    const [workforceCount, setWorkforceCount] = useState(() => {
+        if (cachedSummary?.activeEmployeesCount != null && Number(cachedSummary.activeEmployeesCount) > 0) {
+            return Number(cachedSummary.activeEmployeesCount);
+        }
+        if (totalEmployees && totalEmployees > 0) return totalEmployees;
+        const fromProps = computeActiveCount(propEmployees);
+        return fromProps > 0 ? fromProps : 0;
+    });
+
+    useEffect(() => {
+        if (totalEmployees && totalEmployees > 0) {
+            setWorkforceCount(totalEmployees);
+        } else if (propEmployees && propEmployees.length > 0) {
+            const count = computeActiveCount(propEmployees);
+            if (count > 0) setWorkforceCount(count);
+        }
+    }, [totalEmployees, propEmployees]);
+
     const [pendingLeaves, setPendingLeaves] = useState([]);
     const [pendingExpenses, setPendingExpenses] = useState([]);
     const [todayAttendance, setTodayAttendance] = useState([]);
+    const isFetchingRef = useRef(false);
+    const isFetchingDetailedRef = useRef(false);
+    const lastFetchTimeRef = useRef(0);
     
     // Dynamic feeds state
     const [announcements, setAnnouncements] = useState([]);
@@ -38,6 +79,19 @@ export default function DashboardView({ totalEmployees, onViewChange }) {
     // Holiday Calendar Modal state
     const [showHolidayModal, setShowHolidayModal] = useState(false);
 
+    // Fullscreen Image Lightbox Preview State
+    const [previewImage, setPreviewImage] = useState(null); // { url, title, subtitle }
+
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            if (e.key === 'Escape') setPreviewImage(null);
+        };
+        if (previewImage) {
+            window.addEventListener('keydown', handleKeyDown);
+        }
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [previewImage]);
+
     const formatRelativeTime = (dateStr) => {
         if (!dateStr) return 'Just Now';
         const diffMs = new Date() - new Date(dateStr);
@@ -51,7 +105,6 @@ export default function DashboardView({ totalEmployees, onViewChange }) {
         return `${diffDays} days ago`;
     };
 
-    const [workforceCount, setWorkforceCount] = useState(0);
     const [wishingEmpId, setWishingEmpId] = useState(null);
 
     const handleWishBirthday = async (item) => {
@@ -133,141 +186,220 @@ export default function DashboardView({ totalEmployees, onViewChange }) {
         return clean;
     };
 
-    const fetchDashboardData = async () => {
-        const today = getAuthoritativeISTDate();
-        const results = await Promise.allSettled([
-            api.getLeaves(),
-            api.getExpenses(),
-            api.getAttendance ? api.getAttendance({ limit: 1000 }) : Promise.resolve([]),
-            api.getEmployees ? api.getEmployees() : Promise.resolve([]),
-            api.getLatestAllFootprints ? api.getLatestAllFootprints() : Promise.resolve([])
-        ]);
-
-        const leaves = results[0].status === 'fulfilled' ? results[0].value : [];
-        const expenses = results[1].status === 'fulfilled' ? results[1].value : [];
-        const attendanceRes = results[2].status === 'fulfilled' ? results[2].value : [];
-        const empsRes = results[3].status === 'fulfilled' ? results[3].value : [];
-        const footprintsRes = results[4].status === 'fulfilled' ? results[4].value : [];
-
-        const pendingL = Array.isArray(leaves) ? leaves.filter(l => l && l.status === 'pending') : [];
-        const pendingE = Array.isArray(expenses) ? expenses.filter(e => e && e.status === 'pending') : [];
-        
-        const attendance = Array.isArray(attendanceRes) ? attendanceRes : (attendanceRes && attendanceRes.data ? attendanceRes.data : []);
-        const emps = Array.isArray(empsRes) ? empsRes : (empsRes && empsRes.data ? empsRes.data : []);
-        const footprints = Array.isArray(footprintsRes) ? footprintsRes : (footprintsRes && footprintsRes.data ? footprintsRes.data : []);
-
-        setPendingLeaves(pendingL);
-        setPendingExpenses(pendingE);
-        
-        if (emps && emps.length > 0) {
-            setWorkforceCount(emps.length);
+    const fetchSummaryCounts = async () => {
+        try {
+            const summary = await api.getDashboardSummary();
+            if (summary) {
+                if (summary.todayAttendanceCount !== undefined) setTodayCount(Number(summary.todayAttendanceCount));
+                if (summary.pendingLeavesCount !== undefined) setPendingLeavesCount(Number(summary.pendingLeavesCount));
+                if (summary.pendingExpensesCount !== undefined) setPendingExpensesCount(Number(summary.pendingExpensesCount));
+                if (summary.activeEmployeesCount !== undefined) setWorkforceCount(Number(summary.activeEmployeesCount));
+            }
+        } catch (err) {
+            console.warn('Dashboard summary fetch failed:', err);
         }
+    };
 
-        const todaysRecords = attendance.filter(a => {
-            if (!a) return false;
-            const normDate = normalizeToIsoDate(a.date);
-            if (normDate === today) return true;
-            if (a.date && getAuthoritativeISTDate(a.date) === today) return true;
-            if (a.createdAt && (normalizeToIsoDate(a.createdAt) === today || getAuthoritativeISTDate(a.createdAt) === today)) return true;
-            return false;
-        });
+    const fetchApprovals = async () => {
+        try {
+            const [leavesRes, expensesRes] = await Promise.allSettled([
+                api.getLeaves(),
+                api.getExpenses()
+            ]);
+            const leaves = leavesRes.status === 'fulfilled' ? leavesRes.value : [];
+            const expenses = expensesRes.status === 'fulfilled' ? expensesRes.value : [];
+            const pendingL = Array.isArray(leaves) ? leaves.filter(l => l && l.status === 'pending') : [];
+            const pendingE = Array.isArray(expenses) ? expenses.filter(e => e && e.status === 'pending') : [];
+            setPendingLeaves(pendingL);
+            setPendingExpenses(pendingE);
+            setPendingLeavesCount(pendingL.length);
+            setPendingExpensesCount(pendingE.length);
+        } catch (err) {
+            console.warn('Approvals fetch error:', err);
+        }
+    };
 
-        const uniqueAttendance = [];
-        const seenUsers = new Set();
+    const fetchDetailedAttendance = async () => {
+        if (isFetchingDetailedRef.current) return;
+        isFetchingDetailedRef.current = true;
+        try {
+            const today = getAuthoritativeISTDate();
+            const empsPromise = (propEmployees && propEmployees.length > 0)
+                ? Promise.resolve(propEmployees)
+                : (api.getEmployees ? api.getEmployees({ limit: 1000 }) : Promise.resolve([]));
 
-        todaysRecords.forEach(record => {
-            const rId = String(record.userId || '').trim().toLowerCase();
-            const rName = String(record.userName || '').trim().toLowerCase();
-            const rCode = String(record.empCode || record.employeeId || '').trim().toLowerCase();
+            const results = await Promise.allSettled([
+                api.getAttendance ? api.getAttendance({ date: today }) : Promise.resolve([]),
+                empsPromise,
+                api.getLatestAllFootprints ? api.getLatestAllFootprints() : Promise.resolve([])
+            ]);
 
-            const matchedEmp = record.employee || emps.find(e => {
-                if (!e) return false;
-                const eId = String(e.id || '').trim().toLowerCase();
-                const eCode = String(e.empCode || e.emp_code || e.employeeId || e.empId || '').trim().toLowerCase();
-                const eName = String(e.name || '').trim().toLowerCase();
+            const attendanceRes = results[0].status === 'fulfilled' ? results[0].value : [];
+            const empsRes = results[1].status === 'fulfilled' ? results[1].value : [];
+            const footprintsRes = results[2].status === 'fulfilled' ? results[2].value : [];
 
-                return (eId && (eId === rId || eId === rName || eId === rCode)) || 
-                       (eCode && (eCode === rId || eCode === rName || eCode === rCode)) || 
-                       (eName && (eName === rName || eName === rId || eName === rCode));
+            const attendance = Array.isArray(attendanceRes) ? attendanceRes : (attendanceRes && attendanceRes.data ? attendanceRes.data : []);
+            const emps = Array.isArray(empsRes) ? empsRes : (empsRes && empsRes.data ? empsRes.data : []);
+            const footprints = Array.isArray(footprintsRes) ? footprintsRes : (footprintsRes && footprintsRes.data ? footprintsRes.data : []);
+
+            if (emps && emps.length > 0) {
+                setWorkforceCount(computeActiveCount(emps));
+                computeBirthdays(emps);
+            }
+
+            const todaysRecords = attendance.filter(a => {
+                if (!a) return false;
+                const normDate = normalizeToIsoDate(a.date);
+                if (normDate) return normDate === today;
+                if (a.date) return getAuthoritativeISTDate(a.date) === today;
+                if (a.createdAt) return normalizeToIsoDate(a.createdAt) === today || getAuthoritativeISTDate(a.createdAt) === today;
+                return false;
             });
 
-            const canonicalKey = matchedEmp?.id || matchedEmp?.empCode || record.empCode || record.userId || record.userName;
-            const canonicalLower = String(canonicalKey).trim().toLowerCase();
+            const uniqueAttendance = [];
+            const seenUsers = new Set();
 
-            if (canonicalLower && !seenUsers.has(canonicalLower)) {
-                seenUsers.add(canonicalLower);
-                if (rId) seenUsers.add(rId);
-                if (rName) seenUsers.add(rName);
-                if (rCode) seenUsers.add(rCode);
-
-                if (matchedEmp) {
-                    if (matchedEmp.id) seenUsers.add(String(matchedEmp.id).trim().toLowerCase());
-                    if (matchedEmp.empCode) seenUsers.add(String(matchedEmp.empCode).trim().toLowerCase());
-                    if (matchedEmp.emp_code) seenUsers.add(String(matchedEmp.emp_code).trim().toLowerCase());
-                    if (matchedEmp.name) seenUsers.add(String(matchedEmp.name).trim().toLowerCase());
-                }
-
-                uniqueAttendance.push({
-                    ...record,
-                    matchedEmp: matchedEmp || record.employee
-                });
-            }
-        });
-
-        // Fallback: Also include any actively transmitting employees from footprints today
-        footprints.forEach(f => {
-            if (!f) return;
-            const fId = String(f.userId || '').trim().toLowerCase();
-            const fName = String(f.userName || '').trim().toLowerCase();
-            const fCode = String(f.empCode || '').trim().toLowerCase();
-
-            const isAlreadyIncluded = (fId && seenUsers.has(fId)) || (fName && seenUsers.has(fName)) || (fCode && seenUsers.has(fCode));
-            if (!isAlreadyIncluded) {
-                const matchedEmp = f.employee || emps.find(e => {
+            const findEmpByAnyCode = (searchId, empList) => {
+                if (!searchId || !empList) return null;
+                const target = String(searchId).trim().toLowerCase();
+                return empList.find(e => {
                     if (!e) return false;
                     const eId = String(e.id || '').trim().toLowerCase();
                     const eCode = String(e.empCode || e.emp_code || e.employeeId || e.empId || '').trim().toLowerCase();
                     const eName = String(e.name || '').trim().toLowerCase();
-                    return (eId && (eId === fId || eId === fCode || eId === fName)) ||
-                           (eCode && (eCode === fId || eCode === fCode || eCode === fName)) ||
-                           (eName && (eName === fName || eName === fId || eName === fCode));
-                });
+                    if (eId === target || eCode === target || eName === target) return true;
 
-                const canonicalKey = matchedEmp?.id || matchedEmp?.empCode || f.empCode || f.userId || f.userName;
+                    // Check legacy codes or aliases from customFields
+                    try {
+                        const rawCf = e.customFields || e.custom_fields || {};
+                        const cf = typeof rawCf === 'string' ? JSON.parse(rawCf) : rawCf;
+                        const leg = [...(cf.legacyCodes || []), ...(cf.aliases || []), cf.legacyId, cf.oldCode].filter(Boolean);
+                        if (leg.some(l => String(l).trim().toLowerCase() === target)) return true;
+                    } catch (err) {}
+                    return false;
+                });
+            };
+
+            todaysRecords.forEach(record => {
+                const rId = String(record.userId || '').trim().toLowerCase();
+                const rName = String(record.userName || '').trim().toLowerCase();
+                const rCode = String(record.empCode || record.employeeId || '').trim().toLowerCase();
+
+                const matchedEmp = record.employee || findEmpByAnyCode(rId, emps) || findEmpByAnyCode(rCode, emps) || findEmpByAnyCode(rName, emps);
+
+                const canonicalKey = matchedEmp?.id || matchedEmp?.empCode || record.empCode || record.userId || record.userName;
                 const canonicalLower = String(canonicalKey).trim().toLowerCase();
 
                 if (canonicalLower && !seenUsers.has(canonicalLower)) {
                     seenUsers.add(canonicalLower);
-                    if (fId) seenUsers.add(fId);
-                    if (fName) seenUsers.add(fName);
-                    if (fCode) seenUsers.add(fCode);
+                    if (rId) seenUsers.add(rId);
+                    if (rName) seenUsers.add(rName);
+                    if (rCode) seenUsers.add(rCode);
 
                     if (matchedEmp) {
                         if (matchedEmp.id) seenUsers.add(String(matchedEmp.id).trim().toLowerCase());
                         if (matchedEmp.empCode) seenUsers.add(String(matchedEmp.empCode).trim().toLowerCase());
                         if (matchedEmp.emp_code) seenUsers.add(String(matchedEmp.emp_code).trim().toLowerCase());
                         if (matchedEmp.name) seenUsers.add(String(matchedEmp.name).trim().toLowerCase());
+                        try {
+                            const rawCf = matchedEmp.customFields || matchedEmp.custom_fields || {};
+                            const cf = typeof rawCf === 'string' ? JSON.parse(rawCf) : rawCf;
+                            const leg = [...(cf.legacyCodes || []), ...(cf.aliases || []), cf.legacyId, cf.oldCode].filter(Boolean);
+                            leg.forEach(l => seenUsers.add(String(l).trim().toLowerCase()));
+                        } catch (err) {}
                     }
 
                     uniqueAttendance.push({
-                        id: f.id,
-                        userId: matchedEmp?.empCode || matchedEmp?.id || f.empCode || f.userId,
-                        userName: matchedEmp?.name || f.userName,
-                        empCode: matchedEmp?.empCode || matchedEmp?.emp_code || f.empCode || f.userId,
-                        date: f.date || today,
-                        checkIn: f.checkIn || (f.timestamp ? new Date(Number(f.timestamp)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Active Today'),
-                        checkOut: null,
-                        workMode: (f.workMode || matchedEmp?.workMode || matchedEmp?.primaryWorkMode || matchedEmp?.designation || 'OFFICE').toUpperCase(),
-                        matchedEmp: matchedEmp || f.employee,
-                        employee: matchedEmp || f.employee,
-                        address: f.address
+                        ...record,
+                        matchedEmp: matchedEmp || record.employee
                     });
                 }
+            });
+
+            // Fallback: Also include any actively transmitting employees from footprints today
+            footprints.forEach(f => {
+                if (!f) return;
+                const fId = String(f.userId || '').trim().toLowerCase();
+                const fName = String(f.userName || '').trim().toLowerCase();
+                const fCode = String(f.empCode || '').trim().toLowerCase();
+                const fRaw = String(f.rawUserId || '').trim().toLowerCase();
+
+                const isAlreadyIncluded = (fId && seenUsers.has(fId)) || 
+                                          (fName && seenUsers.has(fName)) || 
+                                          (fCode && seenUsers.has(fCode)) ||
+                                          (fRaw && seenUsers.has(fRaw));
+                if (!isAlreadyIncluded) {
+                    const matchedEmp = f.employee || findEmpByAnyCode(fId, emps) || findEmpByAnyCode(fCode, emps) || findEmpByAnyCode(fRaw, emps) || findEmpByAnyCode(fName, emps);
+
+                    const canonicalKey = matchedEmp?.id || matchedEmp?.empCode || f.empCode || f.userId || f.userName;
+                    const canonicalLower = String(canonicalKey).trim().toLowerCase();
+
+                    if (canonicalLower && !seenUsers.has(canonicalLower)) {
+                        seenUsers.add(canonicalLower);
+                        if (fId) seenUsers.add(fId);
+                        if (fName) seenUsers.add(fName);
+                        if (fCode) seenUsers.add(fCode);
+                        if (fRaw) seenUsers.add(fRaw);
+
+                        if (matchedEmp) {
+                            if (matchedEmp.id) seenUsers.add(String(matchedEmp.id).trim().toLowerCase());
+                            if (matchedEmp.empCode) seenUsers.add(String(matchedEmp.empCode).trim().toLowerCase());
+                            if (matchedEmp.emp_code) seenUsers.add(String(matchedEmp.emp_code).trim().toLowerCase());
+                            if (matchedEmp.name) seenUsers.add(String(matchedEmp.name).trim().toLowerCase());
+                            try {
+                                const rawCf = matchedEmp.customFields || matchedEmp.custom_fields || {};
+                                const cf = typeof rawCf === 'string' ? JSON.parse(rawCf) : rawCf;
+                                const leg = [...(cf.legacyCodes || []), ...(cf.aliases || []), cf.legacyId, cf.oldCode].filter(Boolean);
+                                leg.forEach(l => seenUsers.add(String(l).trim().toLowerCase()));
+                            } catch (err) {}
+                        }
+
+                        uniqueAttendance.push({
+                            id: f.id,
+                            userId: matchedEmp?.empCode || matchedEmp?.id || f.empCode || f.userId,
+                            userName: matchedEmp?.name || f.userName,
+                            empCode: matchedEmp?.empCode || matchedEmp?.emp_code || f.empCode || f.userId,
+                            date: f.date || today,
+                            checkIn: f.checkIn || (f.timestamp ? new Date(Number(f.timestamp)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Active Today'),
+                            checkOut: null,
+                            workMode: (f.workMode || matchedEmp?.workMode || matchedEmp?.primaryWorkMode || matchedEmp?.designation || 'OFFICE').toUpperCase(),
+                            matchedEmp: matchedEmp || f.employee,
+                            employee: matchedEmp || f.employee,
+                            address: f.address
+                        });
+                    }
+                }
+            });
+
+            setTodayAttendance(uniqueAttendance);
+            if (uniqueAttendance.length > 0) {
+                setTodayCount(uniqueAttendance.length);
             }
-        });
-        
-        setTodayAttendance(uniqueAttendance);
-        computeBirthdays(emps);
+        } catch (fetchErr) {
+            console.error('Detailed attendance fetch error:', fetchErr);
+        } finally {
+            isFetchingDetailedRef.current = false;
+        }
+    };
+
+    const fetchDashboardData = async () => {
+        if (isFetchingRef.current) return;
+        isFetchingRef.current = true;
+        lastFetchTimeRef.current = Date.now();
+        try {
+            await Promise.allSettled([
+                fetchSummaryCounts(),
+                fetchApprovals()
+            ]);
+            // Non-blocking idle fetch for detailed modal data
+            if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+                window.requestIdleCallback(() => fetchDetailedAttendance(), { timeout: 4000 });
+            } else {
+                setTimeout(() => fetchDetailedAttendance(), 400);
+            }
+        } finally {
+            isFetchingRef.current = false;
+        }
     };
 
     const computeBirthdays = (empList) => {
@@ -339,6 +471,12 @@ export default function DashboardView({ totalEmployees, onViewChange }) {
         bdays.sort((a, b) => a.diffDays - b.diffDays);
         setBirthdays(bdays);
     };
+
+    useEffect(() => {
+        if (propEmployees && propEmployees.length > 0) {
+            computeBirthdays(propEmployees);
+        }
+    }, [propEmployees]);
 
     const loadHolidays = (overrideHolidays = null) => {
         let calendarHolidays = [];
@@ -413,7 +551,7 @@ export default function DashboardView({ totalEmployees, onViewChange }) {
     const fetchAnnouncements = async () => {
         setLoadingHighlights(true);
         try {
-            const res = await api.getNotificationHistory();
+            const res = await api.getNotificationHistory({ limit: 15 });
             let history = [];
             if (res && res.data && Array.isArray(res.data)) {
                 history = res.data;
@@ -439,18 +577,47 @@ export default function DashboardView({ totalEmployees, onViewChange }) {
             });
 
             const formatted = nonChatHistory.map(item => {
-                let payloadType = '';
+                let payloadObj = {};
                 if (item.payload) {
                     if (typeof item.payload === 'string') {
                         try {
-                            const parsed = JSON.parse(item.payload);
-                            payloadType = (parsed.type || '').toUpperCase();
+                            payloadObj = JSON.parse(item.payload);
                         } catch {}
                     } else if (typeof item.payload === 'object') {
-                        payloadType = (item.payload.type || '').toUpperCase();
+                        payloadObj = item.payload;
                     }
                 }
+                const payloadType = (payloadObj.type || '').toUpperCase();
                 const cat = payloadType || item.target || 'ANNOUNCEMENT';
+
+                // Recipient resolution
+                let recipientLabel = item.recipientName || '';
+                if (!recipientLabel && item.recipient?.name) {
+                    recipientLabel = `${item.recipient.name} (${item.recipient.empCode || item.recipient.id || ''})`;
+                }
+                if (!recipientLabel && payloadObj.employeeName) {
+                    recipientLabel = `${payloadObj.employeeName} (${payloadObj.empCode || payloadObj.employeeId || ''})`;
+                }
+                if (!recipientLabel && item.targetId) {
+                    const matchedEmp = (propEmployees || []).find(e => e.id === item.targetId || e.empCode === item.targetId);
+                    if (matchedEmp) {
+                        recipientLabel = `${matchedEmp.name} (${matchedEmp.empCode || matchedEmp.id})`;
+                    } else if (item.target === 'ALL') {
+                        recipientLabel = 'All Employees';
+                    } else {
+                        recipientLabel = String(item.targetId);
+                    }
+                }
+
+                // Breach location context
+                let breachText = '';
+                const nearestGf = item.breachDetails?.nearestGeofence || payloadObj.nearestGeofence;
+                const distM = item.breachDetails?.distanceMeters || payloadObj.distanceMeters;
+                if (nearestGf) {
+                    const distKm = distM ? ` (~${(distM / 1000).toFixed(1)} km outside)` : '';
+                    breachText = `${nearestGf}${distKm}`;
+                }
+
                 return {
                     id: item.id,
                     type: 'ANNOUNCEMENT',
@@ -458,7 +625,10 @@ export default function DashboardView({ totalEmployees, onViewChange }) {
                     title: item.title || 'System Notification',
                     body: item.body || item.message || '',
                     time: formatRelativeTime(item.createdAt),
-                    createdAt: new Date(item.createdAt).getTime()
+                    createdAt: new Date(item.createdAt).getTime(),
+                    recipient: recipientLabel,
+                    breach: breachText,
+                    target: item.target
                 };
             });
 
@@ -514,19 +684,16 @@ export default function DashboardView({ totalEmployees, onViewChange }) {
         fetchAnnouncements();
         loadHolidays();
 
-        // Immediate secondary sync at 1.5s to ensure instant render after auth hydration
-        const initialSyncTimer = setTimeout(() => {
-            fetchDashboardData();
-        }, 1500);
-
-        // Real-time high-speed background auto-refresh every 5 seconds (zero-cache)
+        // Controlled background auto-refresh every 60 seconds only if tab is visible and not busy
         const intervalId = setInterval(() => {
-            fetchDashboardData();
-        }, 5000);
+            if (document.visibilityState === 'visible' && !isFetchingRef.current) {
+                fetchDashboardData();
+            }
+        }, 60000);
 
-        // Immediate refresh when admin tab gains focus or visibility
+        // Smart refresh when admin tab gains focus or visibility (throttled to at least 5s since last fetch)
         const handleFocus = () => {
-            if (document.visibilityState === 'visible') {
+            if (document.visibilityState === 'visible' && !isFetchingRef.current && (Date.now() - lastFetchTimeRef.current > 5000)) {
                 fetchDashboardData();
             }
         };
@@ -535,7 +702,6 @@ export default function DashboardView({ totalEmployees, onViewChange }) {
         document.addEventListener('visibilitychange', handleFocus);
 
         return () => {
-            clearTimeout(initialSyncTimer);
             clearInterval(intervalId);
             window.removeEventListener('focus', handleFocus);
             document.removeEventListener('visibilitychange', handleFocus);
@@ -566,6 +732,9 @@ export default function DashboardView({ totalEmployees, onViewChange }) {
 
     const getBadgeStyle = (cat) => {
         const catUpper = (cat || '').toUpperCase();
+        if (catUpper.includes('OUTSIDE_GEOFENCE') || catUpper.includes('GEOFENCE')) {
+            return { color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.08)', border: 'rgba(245, 158, 11, 0.25)', icon: '⚠️' };
+        }
         if (catUpper.includes('FCM') || catUpper.includes('SYSTEM')) {
             return { color: '#10b981', bg: 'rgba(16, 185, 129, 0.08)', border: 'rgba(16, 185, 129, 0.2)', icon: '🟢' };
         }
@@ -615,13 +784,16 @@ export default function DashboardView({ totalEmployees, onViewChange }) {
                     </div>
                     <div className="stat-details">
                         <p style={{ color: 'var(--text-muted)', fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: '4px' }}>Total Workforce</p>
-                        <h3 style={{ fontSize: '30px', fontWeight: '800', color: 'var(--text-primary)', margin: 0, letterSpacing: '-0.5px' }}>{(totalEmployees && totalEmployees > 0) ? totalEmployees : (workforceCount || '--')}</h3>
+                        <h3 style={{ fontSize: '30px', fontWeight: '800', color: 'var(--text-primary)', margin: 0, letterSpacing: '-0.5px' }}>{workforceCount > 0 ? workforceCount : ((totalEmployees && totalEmployees > 0) ? totalEmployees : '--')}</h3>
                     </div>
                 </div>
 
                 <div 
                     className="stat-card glass" 
-                    onClick={() => setShowPresentModal(true)} 
+                    onClick={() => { 
+                        setShowPresentModal(true); 
+                        if (todayAttendance.length === 0) fetchDetailedAttendance(); 
+                    }} 
                     style={{ 
                         cursor: 'pointer', 
                         padding: '22px 24px', 
@@ -641,7 +813,7 @@ export default function DashboardView({ totalEmployees, onViewChange }) {
                     </div>
                     <div className="stat-details">
                         <p style={{ color: 'var(--text-muted)', fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: '4px' }}>Present Today</p>
-                        <h3 style={{ fontSize: '30px', fontWeight: '800', color: 'var(--text-primary)', margin: 0, letterSpacing: '-0.5px' }}>{todayAttendance.length}</h3>
+                        <h3 style={{ fontSize: '30px', fontWeight: '800', color: 'var(--text-primary)', margin: 0, letterSpacing: '-0.5px' }}>{todayCount}</h3>
                     </div>
                 </div>
 
@@ -651,7 +823,7 @@ export default function DashboardView({ totalEmployees, onViewChange }) {
                     </div>
                     <div className="stat-details">
                         <p style={{ color: 'var(--text-muted)', fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: '4px' }}>Pending Leaves</p>
-                        <h3 style={{ fontSize: '30px', fontWeight: '800', color: 'var(--text-primary)', margin: 0, letterSpacing: '-0.5px' }}>{pendingLeaves.length}</h3>
+                        <h3 style={{ fontSize: '30px', fontWeight: '800', color: 'var(--text-primary)', margin: 0, letterSpacing: '-0.5px' }}>{pendingLeavesCount}</h3>
                     </div>
                 </div>
 
@@ -661,7 +833,7 @@ export default function DashboardView({ totalEmployees, onViewChange }) {
                     </div>
                     <div className="stat-details">
                         <p style={{ color: 'var(--text-muted)', fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: '4px' }}>Pending Expenses</p>
-                        <h3 style={{ fontSize: '30px', fontWeight: '800', color: 'var(--text-primary)', margin: 0, letterSpacing: '-0.5px' }}>{pendingExpenses.length}</h3>
+                        <h3 style={{ fontSize: '30px', fontWeight: '800', color: 'var(--text-primary)', margin: 0, letterSpacing: '-0.5px' }}>{pendingExpensesCount}</h3>
                     </div>
                 </div>
 
@@ -841,11 +1013,26 @@ export default function DashboardView({ totalEmployees, onViewChange }) {
                                                     fontSize: '18px',
                                                     boxShadow: '0 4px 10px rgba(236, 72, 153, 0.3)'
                                                 }}>
-                                                    {item.avatar ? (
-                                                        <img src={item.avatar} alt={item.name} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
-                                                    ) : (
-                                                        item.name ? item.name.charAt(0).toUpperCase() : '🎂'
-                                                    )}
+                                                    {item.avatar && getFullUrl(item.avatar) ? (
+                                                        <img 
+                                                            src={getFullUrl(item.avatar)} 
+                                                            alt={item.name}
+                                                            onClick={() => setPreviewImage({ url: getFullUrl(item.avatar), title: item.name, subtitle: item.designation })}
+                                                            title="Click to view full photo in same tab"
+                                                            style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover', cursor: 'pointer' }} 
+                                                            onError={(e) => {
+                                                                e.currentTarget.onerror = null;
+                                                                e.currentTarget.style.display = 'none';
+                                                                if (e.currentTarget.nextSibling) {
+                                                                    e.currentTarget.nextSibling.style.display = 'inline';
+                                                                }
+                                                            }}
+                                                            style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} 
+                                                        />
+                                                    ) : null}
+                                                    <span style={{ display: (item.avatar && getFullUrl(item.avatar)) ? 'none' : 'inline' }}>
+                                                        {item.name ? item.name.charAt(0).toUpperCase() : '🎂'}
+                                                    </span>
                                                 </div>
                                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                                                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -952,6 +1139,7 @@ export default function DashboardView({ totalEmployees, onViewChange }) {
                                 // 3. ADMIN ANNOUNCEMENT FEED CARD
                                 // -------------------------------------------------------------
                                 const styleInfo = getBadgeStyle(item.category);
+                                const isGeofenceAlert = item.category === 'OUTSIDE_GEOFENCE' || (item.title && item.title.includes('Geofence'));
                                 return (
                                     <div key={`ann-${item.id}-${idx}`} style={{
                                         padding: '16px',
@@ -962,13 +1150,39 @@ export default function DashboardView({ totalEmployees, onViewChange }) {
                                         flexDirection: 'column',
                                         gap: '8px'
                                     }}>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                            <span style={{ fontSize: '11px', fontWeight: '800', color: styleInfo.color, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                                                {styleInfo.icon} {item.category}
-                                            </span>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                                <span style={{ fontSize: '11px', fontWeight: '800', color: styleInfo.color, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                                    {styleInfo.icon} {item.category}
+                                                </span>
+                                                {item.recipient && (
+                                                    <span style={{ 
+                                                        fontSize: '11px', 
+                                                        fontWeight: '700', 
+                                                        background: 'rgba(99, 102, 241, 0.15)', 
+                                                        color: '#818cf8', 
+                                                        padding: '2px 8px', 
+                                                        borderRadius: '12px', 
+                                                        border: '1px solid rgba(99, 102, 241, 0.3)',
+                                                        display: 'inline-flex',
+                                                        alignItems: 'center',
+                                                        gap: '4px'
+                                                    }}>
+                                                        <i className="fa-solid fa-user" style={{ fontSize: '9px' }}></i> {item.recipient}
+                                                    </span>
+                                                )}
+                                            </div>
                                             <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600' }}>{item.time}</span>
                                         </div>
-                                        <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)' }}>{item.title}</h4>
+                                        {item.breach && (
+                                            <div style={{ fontSize: '11px', color: '#f59e0b', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                <i className="fa-solid fa-location-dot"></i> Breached Boundary: <b>{item.breach}</b>
+                                            </div>
+                                        )}
+                                        <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)' }}>
+                                            {item.title}
+                                            {isGeofenceAlert && item.recipient ? ` — ${item.recipient}` : ''}
+                                        </h4>
                                         <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>{item.body}</p>
                                     </div>
                                 );
@@ -1173,16 +1387,38 @@ export default function DashboardView({ totalEmployees, onViewChange }) {
                                         Present Employees Today
                                     </h3>
                                     <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 600 }}>
-                                        {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })} • <b style={{ color: '#10b981' }}>{todayAttendance.length} Staff Present</b>
+                                        {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })} • <b style={{ color: '#10b981' }}>{todayAttendance.length || todayCount} Staff Present</b>
                                     </span>
                                 </div>
                             </div>
-                            <button 
-                                onClick={() => setShowPresentModal(false)}
-                                style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--bg-glass)', border: '1px solid var(--border-glass)', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: '14px' }}
-                            >
-                                ✕
-                            </button>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <button 
+                                    onClick={() => fetchDetailedAttendance()}
+                                    title="Refresh attendance records"
+                                    style={{ 
+                                        height: '32px', 
+                                        padding: '0 12px', 
+                                        borderRadius: '8px', 
+                                        background: 'rgba(37, 99, 235, 0.1)', 
+                                        border: '1px solid rgba(37, 99, 235, 0.25)', 
+                                        color: '#2563eb', 
+                                        display: 'flex', 
+                                        alignItems: 'center', 
+                                        gap: '6px', 
+                                        cursor: 'pointer', 
+                                        fontSize: '12.5px', 
+                                        fontWeight: 600 
+                                    }}
+                                >
+                                    <i className="fa-solid fa-arrows-rotate"></i> Sync
+                                </button>
+                                <button 
+                                    onClick={() => setShowPresentModal(false)}
+                                    style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--bg-glass)', border: '1px solid var(--border-glass)', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: '14px' }}
+                                >
+                                    ✕
+                                </button>
+                            </div>
                         </div>
 
                         {/* Search Filter Bar */}
@@ -1202,6 +1438,14 @@ export default function DashboardView({ totalEmployees, onViewChange }) {
                         {/* Present Employees List */}
                         <div style={{ padding: '20px 24px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '12px' }}>
                             {(() => {
+                                if (todayAttendance.length === 0 && todayCount > 0) {
+                                    return (
+                                        <div style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                                            <LoadingSpinner size={32} message="Loading present employees roster..." minHeight="100px" />
+                                        </div>
+                                    );
+                                }
+
                                 const filtered = todayAttendance.filter(item => {
                                     const emp = item.matchedEmp || {};
                                     const name = (emp.name || item.userName || item.name || item.userId || '').toLowerCase();
@@ -1238,7 +1482,8 @@ export default function DashboardView({ totalEmployees, onViewChange }) {
                                         ? emp.jobTitle 
                                         : (emp.department || (item.designation && item.designation !== 'OFFICE' && item.designation !== 'FIELD' ? item.designation : 'Team Member'));
 
-                                    const photoUrl = emp.profilePhotoUrl || emp.avatar || item.profilePhotoUrl;
+                                    const rawPhoto = emp.profilePhotoUrl || emp.avatar || item.profilePhotoUrl;
+                                    const photoUrl = rawPhoto ? getFullUrl(rawPhoto) : null;
 
                                     return (
                                         <div 
@@ -1260,13 +1505,22 @@ export default function DashboardView({ totalEmployees, onViewChange }) {
                                                     <img 
                                                         src={photoUrl} 
                                                         alt={empName}
+                                                        onClick={() => setPreviewImage({ url: photoUrl, title: empName, subtitle: empCode ? `${empCode} • ${jobTitleText}` : jobTitleText })}
+                                                        title="Click to view full photo in same tab"
+                                                        style={{ width: '40px', height: '40px', borderRadius: '50%', objectFit: 'cover', border: '2px solid #2563eb', flexShrink: 0, cursor: 'pointer' }}
+                                                        onError={(e) => {
+                                                            e.currentTarget.onerror = null;
+                                                            e.currentTarget.style.display = 'none';
+                                                            if (e.currentTarget.nextSibling) {
+                                                                e.currentTarget.nextSibling.style.display = 'flex';
+                                                            }
+                                                        }}
                                                         style={{ width: '40px', height: '40px', borderRadius: '50%', objectFit: 'cover', border: '2px solid #2563eb', flexShrink: 0 }}
                                                     />
-                                                ) : (
-                                                    <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: '#2563eb', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '15px', flexShrink: 0 }}>
-                                                        {empName.charAt(0).toUpperCase()}
-                                                    </div>
-                                                )}
+                                                ) : null}
+                                                <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: '#2563eb', color: '#ffffff', display: photoUrl ? 'none' : 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '15px', flexShrink: 0 }}>
+                                                    {empName.charAt(0).toUpperCase()}
+                                                </div>
                                                 <div>
                                                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                                         <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>{empName}</h4>
@@ -1296,12 +1550,29 @@ export default function DashboardView({ totalEmployees, onViewChange }) {
                                                     {isFieldWorker ? '🚗 Field Duty' : '🏢 Office'}
                                                 </span>
 
-                                                {/* Check-In Time Badge */}
+                                                {/* Check-In / Check-Out Time Badge */}
                                                 <div style={{ textAlign: 'right' }}>
-                                                    <span style={{ fontSize: '12px', fontWeight: 700, color: '#10b981', display: 'block' }}>
-                                                        🟢 {checkInTime}
-                                                    </span>
-                                                    <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 600 }}>Clocked In</span>
+                                                    {(() => {
+                                                        const hasCheckedOut = item.checkOut && item.checkOut !== 'null' && item.checkOut !== 'undefined' && String(item.checkOut).trim() !== '' && String(item.checkOut).trim() !== '-';
+                                                        if (hasCheckedOut) {
+                                                            return (
+                                                                <>
+                                                                    <span style={{ fontSize: '12px', fontWeight: 700, color: '#f59e0b', display: 'block' }}>
+                                                                        🔴 {item.checkOut}
+                                                                    </span>
+                                                                    <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 600 }}>Clocked Out (In: {checkInTime})</span>
+                                                                </>
+                                                            );
+                                                        }
+                                                        return (
+                                                            <>
+                                                                <span style={{ fontSize: '12px', fontWeight: 700, color: '#10b981', display: 'block' }}>
+                                                                    🟢 {checkInTime}
+                                                                </span>
+                                                                <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 600 }}>Clocked In</span>
+                                                            </>
+                                                        );
+                                                    })()}
                                                 </div>
                                             </div>
                                         </div>
@@ -1348,6 +1619,105 @@ export default function DashboardView({ totalEmployees, onViewChange }) {
                 onClose={() => setShowHolidayModal(false)}
                 onHolidaysUpdated={(hols) => loadHolidays(hols)}
             />
+
+            {/* Fullscreen Image Preview Lightbox Modal (Same Tab, Cut / Close Option) */}
+            {previewImage && (
+                <div 
+                    onClick={() => setPreviewImage(null)}
+                    style={{
+                        position: 'fixed',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        backgroundColor: 'rgba(15, 23, 42, 0.88)',
+                        backdropFilter: 'blur(10px)',
+                        zIndex: 99999,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justify: 'center',
+                        padding: '24px',
+                        animation: 'fadeIn 0.2s ease-out'
+                    }}
+                >
+                    <div 
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                            position: 'relative',
+                            maxHeight: '85vh',
+                            maxWidth: '90vw',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            gap: '16px',
+                            background: 'rgba(30, 41, 59, 0.95)',
+                            border: '1px solid rgba(255, 255, 255, 0.2)',
+                            borderRadius: '20px',
+                            padding: '28px 36px',
+                            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6)'
+                        }}
+                    >
+                        {/* Close / Cut ('✕') Button */}
+                        <button
+                            type="button"
+                            onClick={() => setPreviewImage(null)}
+                            style={{
+                                position: 'absolute',
+                                top: '14px',
+                                right: '14px',
+                                width: '36px',
+                                height: '36px',
+                                borderRadius: '50%',
+                                background: 'rgba(255, 255, 255, 0.15)',
+                                border: '1px solid rgba(255, 255, 255, 0.25)',
+                                color: '#ffffff',
+                                fontSize: '18px',
+                                fontWeight: '800',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s ease',
+                                zIndex: 10
+                            }}
+                            title="Close Preview (Esc)"
+                            onMouseEnter={(e) => { e.currentTarget.style.background = '#ef4444'; e.currentTarget.style.borderColor = '#ef4444'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255, 255, 255, 0.15)'; e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.25)'; }}
+                        >
+                            ✕
+                        </button>
+
+                        {/* Full Size Preview Image */}
+                        <img 
+                            src={previewImage.url} 
+                            alt={previewImage.title || 'Profile Photo'} 
+                            style={{
+                                maxHeight: '60vh',
+                                maxWidth: '75vw',
+                                borderRadius: '14px',
+                                objectFit: 'contain',
+                                border: '3px solid rgba(255, 255, 255, 0.3)',
+                                boxShadow: '0 15px 30px rgba(0,0,0,0.4)'
+                            }}
+                        />
+
+                        {/* Title & Info */}
+                        {previewImage.title && (
+                            <div style={{ textAlign: 'center' }}>
+                                <h3 style={{ margin: '0 0 4px 0', fontSize: '1.25rem', fontWeight: 800, color: '#ffffff', letterSpacing: '-0.01em' }}>
+                                    {previewImage.title}
+                                </h3>
+                                {previewImage.subtitle && (
+                                    <span style={{ fontSize: '0.85rem', color: '#94a3b8', fontWeight: 600 }}>
+                                        {previewImage.subtitle}
+                                    </span>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

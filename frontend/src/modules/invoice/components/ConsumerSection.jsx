@@ -31,6 +31,11 @@ function ConsumerSection({ data, onChange }) {
             <label className="form-label" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
                 <span>GSTIN</span>
+                {(!data.gstin || String(data.gstin).trim().length === 0) && (
+                  <span style={{ fontSize: "11px", color: "#d97706", backgroundColor: "rgba(245, 158, 11, 0.12)", border: "1px solid rgba(245, 158, 11, 0.35)", padding: "1px 6px", borderRadius: "4px", fontWeight: 700 }}>
+                    ⚠️ Missing / Not Present
+                  </span>
+                )}
                 {data.gstin && String(data.gstin).trim().length > 0 && String(data.gstin).trim().length !== 15 && (
                   <span style={{ fontSize: "11px", color: "#d97706", backgroundColor: "rgba(245, 158, 11, 0.12)", border: "1px solid rgba(245, 158, 11, 0.35)", padding: "1px 6px", borderRadius: "4px", fontWeight: 700 }}>
                     ⚠️ {String(data.gstin).trim().length}/15

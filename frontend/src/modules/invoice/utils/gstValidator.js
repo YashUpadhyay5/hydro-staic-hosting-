@@ -168,20 +168,25 @@ export function validateGSTIN(gstinInput, declaredState = null) {
   const actualCheckDigit = len === 15 ? clean[14] : null;
   let expectedCheckDigit = null;
   let isChecksumValid = false;
+  let correctedGstin = clean;
 
   if (len === 15) {
     expectedCheckDigit = calculateGstCheckDigit(clean.substring(0, 14));
-    isChecksumValid = (actualCheckDigit === expectedCheckDigit);
-    if (!isChecksumValid && expectedCheckDigit) {
-      errors.push(`Checksum mismatch: check digit is '${actualCheckDigit}', expected '${expectedCheckDigit}'.`);
+    if (expectedCheckDigit) {
+      correctedGstin = clean.substring(0, 14) + expectedCheckDigit;
+      isChecksumValid = (actualCheckDigit === expectedCheckDigit);
     }
   }
 
-  const isValid = errors.length === 0;
+  // Structural validity: Valid 15 chars, valid State Code, valid PAN format, 14th char 'Z'
+  const isStructuralValid = len === 15 && Boolean(stateName) && isPanValid && isZValid;
+  const isValid = isStructuralValid;
 
   return {
     hasValue: true,
     isValid,
+    isChecksumValid,
+    correctedGstin,
     length: len,
     cleanGstin: clean,
     errors,

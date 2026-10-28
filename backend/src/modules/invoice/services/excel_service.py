@@ -67,11 +67,17 @@ class ExcelService:
             if not sec.get("enabled", True):
                 continue
             sec_id = sec["id"]
-            if sec_id in ["item_details", "items"]:
+            if sec_id in ["tax_summary", "tax_details"]:
+                # Exclude default tax_summary section; Y to AG columns explicitly handle item & invoice taxes
+                continue
+            elif sec_id in ["item_details", "items"]:
                 items_section_id = sec_id
                 for field in sec.get("fields", []):
                     if not field.get("hidden", False):
                         f_key = field["key"]
+                        # Exclude duplicate tax/total fields from item_details so Col Y starts cleanly
+                        if f_key in ["total_amount", "taxable_amount", "tax_rate", "tax_amount", "cgst", "sgst", "igst", "discount_amount"]:
+                            continue
                         col_label = f"Item - {field['label']}"
                         columns_mapping.append((sec_id, f_key, col_label, field.get("type", "Text")))
             else:
@@ -110,6 +116,22 @@ class ExcelService:
             ext = doc.final_extraction or (doc.ocr_result.get("extraction") if doc.ocr_result else {}) or {}
             ext = ext or {}
 
+            # Vendor & Consumer GSTIN State Code Analysis (Intra-state vs Inter-state)
+            vendor_details = ext.get("vendor_details", {}) or {}
+            consumer_details = ext.get("consumer_details", {}) or {}
+            invoice_details = ext.get("invoice_details", {}) or {}
+
+            v_gst = str(vendor_details.get("gstin") or vendor_details.get("gst_number") or "").strip().upper()
+            c_gst = str(consumer_details.get("gstin") or consumer_details.get("gst_number") or "").strip().upper()
+            pos = str(invoice_details.get("place_of_supply") or "").strip().upper()
+
+            v_state = v_gst[:2] if len(v_gst) >= 2 and v_gst[:2].isdigit() else ""
+            c_state = c_gst[:2] if len(c_gst) >= 2 and c_gst[:2].isdigit() else (pos[:2] if len(pos) >= 2 and pos[:2].isdigit() else "")
+
+            # Intra-state: Same State Code -> CGST & SGST apply (IGST = 0)
+            # Inter-state: Different State Code -> IGST applies (CGST & SGST = 0)
+            is_intra_state = (v_state != "" and c_state != "" and v_state == c_state) or (c_state != "" and pos != "" and c_state == pos)
+
             # Invoice-level tax summary
             tax_sum = ext.get("tax_summary", {}) or {}
             inv_subtotal = safe_float(tax_sum.get("subtotal") or tax_sum.get("taxable_amount"))
@@ -122,11 +144,20 @@ class ExcelService:
             if inv_grand_total == 0.0 and inv_subtotal > 0:
                 inv_grand_total = inv_subtotal + inv_cgst + inv_sgst + inv_igst + inv_cess
 
+            # If invoice-level tax breakdown is 0 but total tax is present, auto-split based on intra/inter-state
+            total_inv_tax = inv_cgst + inv_sgst + inv_igst
+            if total_inv_tax > 0:
+                if is_intra_state and inv_cgst == 0 and inv_sgst == 0 and inv_igst > 0:
+                    half = round(inv_igst / 2.0, 2)
+                    inv_cgst, inv_sgst, inv_igst = half, half, 0.0
+                elif not is_intra_state and inv_igst == 0 and (inv_cgst > 0 or inv_sgst > 0):
+                    inv_igst = inv_cgst + inv_sgst
+                    inv_cgst, inv_sgst = 0.0, 0.0
+
             total_value += inv_grand_total
             total_tax += (inv_cgst + inv_sgst + inv_igst + inv_cess)
 
             # Track unique vendors
-            vendor_details = ext.get("vendor_details", {}) or {}
             v_name = vendor_details.get("name", "")
             if v_name:
                 unique_vendors.add(v_name)
@@ -143,18 +174,53 @@ class ExcelService:
                     item = {}
                 is_last_item = (item_idx == total_items_in_doc - 1)
 
-                # 1. Parse quantity
+                # 1. Parse quantity & unit price
                 raw_qty = item.get("quantity", "")
                 raw_price = item.get("unit_price", "")
                 qty_num = parse_numeric(raw_qty)
                 price_num = parse_numeric(raw_price)
                 extracted_item_subtotal = safe_float(item.get("taxable_amount"))
 
-                # OCR trailing zero correction (e.g. 2400.000 NOS -> 2400000.0 vs taxable 235200 with unit price 98)
+                # OCR trailing zero correction
                 if qty_num > 0 and price_num > 0 and extracted_item_subtotal > 0:
                     computed_raw = qty_num * price_num
                     if abs(computed_raw - extracted_item_subtotal * 1000) < 1.0:
                         qty_num = round(qty_num / 1000.0, 3)
+
+                # Calculate Item Subtotal (Col Y)
+                if qty_num > 0 and price_num > 0:
+                    item_subtotal = round(qty_num * price_num, 2)
+                elif extracted_item_subtotal > 0:
+                    item_subtotal = extracted_item_subtotal
+                else:
+                    item_subtotal = safe_float(item.get("total_amount"))
+
+                # Calculate Item Taxes (Col Z, AA, AB)
+                item_rate = safe_float(item.get("tax_rate") or item.get("gst_rate"))
+                item_tax_amt = safe_float(item.get("tax_amount") or item.get("gst_amount"))
+                if item_tax_amt == 0.0 and item_rate > 0 and item_subtotal > 0:
+                    item_tax_amt = round(item_subtotal * (item_rate / 100.0), 2)
+
+                explicit_cgst = safe_float(item.get("cgst") or item.get("cgst_amount"))
+                explicit_sgst = safe_float(item.get("sgst") or item.get("sgst_amount"))
+                explicit_igst = safe_float(item.get("igst") or item.get("igst_amount"))
+
+                if explicit_cgst > 0 or explicit_sgst > 0 or explicit_igst > 0:
+                    item_cgst = explicit_cgst
+                    item_sgst = explicit_sgst
+                    item_igst = explicit_igst
+                elif is_intra_state:
+                    half = round(item_tax_amt / 2.0, 2)
+                    item_cgst = half
+                    item_sgst = half
+                    item_igst = 0.0
+                else:
+                    item_cgst = 0.0
+                    item_sgst = 0.0
+                    item_igst = item_tax_amt
+
+                # Item Total Amount (Col AC)
+                item_total_amount = round(item_subtotal + item_cgst + item_sgst + item_igst, 2)
 
                 # 2. Construct Row dictionary
                 row_dict = {}
@@ -162,9 +228,7 @@ class ExcelService:
                     if sec_id in ["item_details", "items"]:
                         val = item.get(f_key, "")
                     elif sec_id in ["tax_summary", "tax_details"]:
-                        # Invoice level totals are ONLY shown on the last row of the invoice
                         if is_last_item:
-                            sec_val = ext.get(sec_id, {}) or {}
                             if f_key == "subtotal" or f_key == "taxable_amount":
                                 val = inv_subtotal
                             elif f_key == "cgst":
@@ -177,6 +241,10 @@ class ExcelService:
                                 val = inv_cess
                             elif f_key == "grand_total":
                                 val = inv_grand_total
+                            else:
+                                val = ""
+                        else:
+                            val = ""
                     elif sec_id == "bank_details":
                         sec_val = ext.get(sec_id, {}) or {}
                         if not isinstance(sec_val, dict):
@@ -194,7 +262,26 @@ class ExcelService:
                         val = sec_val.get(f_key, "") if isinstance(sec_val, dict) else ""
                     
                     row_dict[col_header] = val
-                
+
+                # Explicitly add requested Columns Y to AG
+                row_dict["Taxable Amount"] = item_subtotal
+                row_dict["Item SGST"] = item_sgst
+                row_dict["Item CGST"] = item_cgst
+                row_dict["Item IGST"] = item_igst
+                row_dict["Item Total Amount"] = item_total_amount
+
+                # Invoice Totals (Columns AD to AG) - Only on the last item row of each invoice
+                if is_last_item:
+                    row_dict["Total SGST"] = inv_sgst
+                    row_dict["Total CGST"] = inv_cgst
+                    row_dict["Total IGST"] = inv_igst
+                    row_dict["Total Price"] = inv_grand_total
+                else:
+                    row_dict["Total SGST"] = ""
+                    row_dict["Total CGST"] = ""
+                    row_dict["Total IGST"] = ""
+                    row_dict["Total Price"] = ""
+
                 rows.append(row_dict)
                 total_qty += qty_num
                 total_records_count += 1

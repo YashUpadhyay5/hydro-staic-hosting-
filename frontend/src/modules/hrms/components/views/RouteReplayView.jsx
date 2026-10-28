@@ -175,7 +175,7 @@ export default function RouteReplayView({ employees }) {
 
             if (allFootprintCoords.length === 0) {
                 alert('No location history found for this date.');
-                setTimeout(() => setLoading(false), 300);
+                setLoading(false);
                 return;
             }
 

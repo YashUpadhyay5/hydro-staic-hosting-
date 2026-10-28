@@ -16,7 +16,8 @@ export default function LiveTrackingView({ employees }) {
     const [selectedEmp, setSelectedEmp] = useState('all');
     const [workMode, setWorkMode] = useState('ALL');
     const [selectedState, setSelectedState] = useState('ALL');
-    const [liveLogs, setLiveLogs] = useState([]);
+    const cachedFootprints = api.getCached('/footprints/latest-all');
+    const [liveLogs, setLiveLogs] = useState(() => Array.isArray(cachedFootprints) ? cachedFootprints : []);
     const [searchQuery, setSearchQuery] = useState('');
     
     const mapRef = useRef(null);
@@ -42,7 +43,6 @@ export default function LiveTrackingView({ employees }) {
     const fetchLiveTracking = async () => {
         if (!mapInstance.current || !layerGroupRef.current) return;
         layerGroupRef.current.clearLayers();
-        setLiveLogs([]);
         markersRef.current = {};
 
         try {
@@ -268,9 +268,8 @@ export default function LiveTrackingView({ employees }) {
                 };
             });
 
-            // Save to state for left panel
             setLiveLogs(processedFootprints);
-            setTimeout(() => setLoading(false), 300);
+            setLoading(false);
 
             if (!window.L) return;
 

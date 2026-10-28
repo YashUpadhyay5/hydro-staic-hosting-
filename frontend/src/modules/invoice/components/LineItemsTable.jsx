@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 
-const formatDynamicKey = (key) => {
+export const formatDynamicKey = (key) => {
+  if (!key) return "";
   return key
     .replace(/_/g, " ")
     .replace(/([A-Z])/g, " $1")
@@ -8,6 +9,107 @@ const formatDynamicKey = (key) => {
     .split(" ")
     .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
     .join(" ");
+};
+
+export const getColMinWidth = (key) => {
+  switch (key) {
+    case "description":
+    case "description_of_goods":
+    case "item_name":
+    case "product_name":
+    case "particulars":
+      return "380px";
+    case "total_amount":
+    case "taxable_amount":
+    case "amount":
+      return "140px";
+    case "tax_amount":
+    case "cgst_amount":
+    case "sgst_amount":
+    case "igst_amount":
+    case "cess_amount":
+    case "discount_amount":
+      return "130px";
+    case "quantity":
+    case "qty":
+      return "100px";
+    case "unit_price":
+    case "rate":
+    case "price":
+      return "130px";
+    case "hsn_code":
+    case "hsn":
+    case "sac_code":
+      return "130px";
+    case "unit":
+    case "uom":
+      return "90px";
+    case "tax_rate":
+    case "cgst_rate":
+    case "sgst_rate":
+    case "igst_rate":
+    case "cess_rate":
+    case "discount_rate":
+      return "110px";
+    default:
+      return "130px";
+  }
+};
+
+export const getLineItemColumns = (columnConfig = null, items = []) => {
+  let baseCols = [];
+  if (columnConfig && columnConfig.length > 0) {
+    baseCols = columnConfig.filter(f => !f.hidden).map(f => ({
+      key: f.key,
+      label: f.label,
+      isBase: true,
+      type: ["Number", "Currency", "Percentage"].includes(f.type) ? "number" : "text"
+    }));
+  } else {
+    baseCols = [
+      { key: "description", label: "Description", isBase: true },
+      { key: "description_of_goods", label: "Description of Goods", isBase: true },
+      { key: "hsn_code", label: "HSN Code", isBase: true },
+      { key: "quantity", label: "Quantity", isBase: true, type: "number" },
+      { key: "unit", label: "Unit", isBase: true },
+      { key: "unit_price", label: "Unit Price", isBase: true, type: "number" },
+      { key: "discount_amount", label: "Discount", isBase: true },
+      { key: "taxable_amount", label: "Taxable Amt", isBase: true, type: "number" },
+      { key: "tax_rate", label: "Tax Rate (%)", isBase: true },
+      { key: "tax_amount", label: "Tax Amt", isBase: true, type: "number" },
+      { key: "total_amount", label: "Total Amt", isBase: true, type: "number" },
+    ];
+  }
+
+  // Dynamic heuristic: Check if items contains extra columns with actual content
+  const allKeys = new Set();
+  (items || []).forEach(item => {
+    if (item && typeof item === "object") {
+      Object.keys(item).forEach(k => {
+        if (item[k] !== undefined && item[k] !== null && String(item[k]).trim() !== "") {
+          allKeys.add(k);
+        }
+      });
+    }
+  });
+
+  const ignoredKeys = ["id", "line_number", "_id", "confidence", "bbox", "is_valid", "suggested"];
+
+  // Automatically register all extra dynamic columns extracted by AI model
+  allKeys.forEach(key => {
+    if (!baseCols.some(c => c.key === key) && !ignoredKeys.includes(key)) {
+      const sampleVal = items.find(it => it && it[key] !== undefined)?.[key];
+      const isNum = typeof sampleVal === "number" || (!isNaN(parseFloat(sampleVal)) && /^-?\d+(\.\d+)?$/.test(String(sampleVal).trim()));
+      baseCols.push({
+        key: key,
+        label: formatDynamicKey(key),
+        isBase: false,
+        type: isNum ? "number" : "text"
+      });
+    }
+  });
+
+  return baseCols;
 };
 
 const getFieldConfidence = (sectionId, fieldKey, value) => {
@@ -27,39 +129,6 @@ const getConfidenceColor = (score) => {
   return "#ef4444"; // red
 };
 
-const getColMinWidth = (key) => {
-  switch (key) {
-    case "description":
-    case "description_of_goods":
-      return "320px";
-    case "total_amount":
-    case "taxable_amount":
-      return "150px";
-    case "tax_amount":
-    case "cgst_amount":
-    case "sgst_amount":
-    case "igst_amount":
-    case "discount_amount":
-      return "140px";
-    case "quantity":
-      return "130px";
-    case "unit_price":
-      return "140px";
-    case "hsn_code":
-      return "150px";
-    case "unit":
-      return "120px";
-    case "tax_rate":
-    case "cgst_rate":
-    case "sgst_rate":
-    case "igst_rate":
-    case "discount_rate":
-      return "130px";
-    default:
-      return "140px";
-  }
-};
-
 const snapToGSTTaxRate = (rawRate) => {
   if (rawRate <= 0) return "0%";
   const STANDARD_SLABS = [0, 0.1, 0.25, 1.5, 3, 5, 12, 18, 28];
@@ -71,7 +140,18 @@ const snapToGSTTaxRate = (rawRate) => {
   return `${parseFloat(rawRate.toFixed(2))}%`;
 };
 
-function LineItemsTable({ items = [], originalItems = [], onChange, columnConfig = null }) {
+function LineItemsTable({
+  items = [],
+  originalItems = [],
+  onChange,
+  columnConfig = null,
+  activeStep = 1,
+  onActiveStepChange,
+  verifiedFields = {},
+  onMarkFieldVerified,
+  sequentialFields = [],
+  onSave,
+}) {
   const [initialItems, setInitialItems] = useState([]);
 
   useEffect(() => {
@@ -82,59 +162,21 @@ function LineItemsTable({ items = [], originalItems = [], onChange, columnConfig
     }
   }, [originalItems]);
 
-  const [columns, setColumns] = useState(() => {
-    let baseCols = [];
-    if (columnConfig && columnConfig.length > 0) {
-      baseCols = columnConfig.filter(f => !f.hidden).map(f => ({
-        key: f.key,
-        label: f.label,
-        isBase: true,
-        type: ["Number", "Currency", "Percentage"].includes(f.type) ? "number" : "text"
-      }));
-    } else {
-      baseCols = [
-        { key: "description", label: "Description", isBase: true },
-        { key: "description_of_goods", label: "Description of Goods", isBase: true },
-        { key: "hsn_code", label: "HSN Code", isBase: true },
-        { key: "quantity", label: "Quantity", isBase: true, type: "number" },
-        { key: "unit", label: "Unit", isBase: true },
-        { key: "unit_price", label: "Unit Price", isBase: true, type: "number" },
-        { key: "discount_amount", label: "Discount", isBase: true },
-        { key: "taxable_amount", label: "Taxable Amt", isBase: true, type: "number" },
-        { key: "tax_rate", label: "Tax Rate (%)", isBase: true },
-        { key: "tax_amount", label: "Tax Amt", isBase: true, type: "number" },
-        { key: "total_amount", label: "Total Amt", isBase: true, type: "number" },
-      ];
-    }
+  const [columns, setColumns] = useState(() => getLineItemColumns(columnConfig, items));
 
-    // Dynamic heuristic: Check if items contains extra columns (>11) with actual content
-    const allKeys = new Set();
-    items.forEach(item => {
-      if (item && typeof item === "object") {
-        Object.keys(item).forEach(k => {
-          if (item[k] !== undefined && item[k] !== null && String(item[k]).trim() !== "") {
-            allKeys.add(k);
-          }
-        });
-      }
+  useEffect(() => {
+    setColumns((prevCols) => {
+      const computed = getLineItemColumns(columnConfig, items);
+      // Keep any dynamically added custom columns that the user added
+      const customAdded = prevCols.filter(c => c.key && c.key.startsWith("custom_"));
+      customAdded.forEach(c => {
+        if (!computed.some(existing => existing.key === c.key)) {
+          computed.push(c);
+        }
+      });
+      return computed;
     });
-
-    // Automatically register all extra dynamic columns (>11) extracted by AI model
-    allKeys.forEach(key => {
-      if (!baseCols.some(c => c.key === key) && !["id", "line_number", "_id"].includes(key)) {
-        const sampleVal = items.find(it => it && it[key] !== undefined)?.[key];
-        const isNum = typeof sampleVal === "number" || (!isNaN(parseFloat(sampleVal)) && /^-?\d+(\.\d+)?$/.test(String(sampleVal).trim()));
-        baseCols.push({
-          key: key,
-          label: formatDynamicKey(key),
-          isBase: false,
-          type: isNum ? "number" : "text"
-        });
-      }
-    });
-
-    return baseCols;
-  });
+  }, [columnConfig, items]);
 
   const [showAddColumnForm, setShowAddColumnForm] = useState(false);
 
@@ -476,16 +518,46 @@ function LineItemsTable({ items = [], originalItems = [], onChange, columnConfig
                     const sug = getCellSuggestion(item, col.key);
                     const showFix = !isModifiedFromModel && sug !== null && sug !== 0 && Math.abs((parseFloat(item[col.key]) || 0) - sug) > 0.05;
 
+                    // Locate sequential box info for this specific cell
+                    const seqItem = sequentialFields?.find(
+                      (s) => (s.sectionId === "item_details" || s.sectionId === "items") && s.rowIndex === idx && s.fieldKey === col.key
+                    );
+                    const boxNumber = seqItem ? seqItem.boxNumber : null;
+                    const isActiveStep = boxNumber !== null && boxNumber === activeStep;
+                    const isFieldVerified = Boolean(
+                      verifiedFields?.[`item_details[${idx}].${col.key}`] ||
+                      verifiedFields?.[`items[${idx}].${col.key}`] ||
+                      verifiedFields?.[`item_details.${col.key}`]
+                    );
+
                     return (
                       <td
                         key={col.key}
-                        className={(col.key === "description" || col.key === "description_of_goods") ? "col-desc" : ""}
-                        style={{ minWidth: getColMinWidth(col.key) }}
+                        data-row-index={idx}
+                        data-col-key={col.key}
+                        className={`line-item-td ${(col.key === "description" || col.key === "description_of_goods") ? "col-desc" : ""} ${isActiveStep ? "active-td" : ""}`}
+                        style={{
+                          minWidth: getColMinWidth(col.key),
+                          backgroundColor: isActiveStep ? "rgba(59, 130, 246, 0.08)" : isFieldVerified ? "rgba(16, 185, 129, 0.04)" : "transparent",
+                          transition: "background-color 0.2s ease"
+                        }}
                       >
-                        <div style={{ display: "flex", alignItems: "center", gap: "6px", width: "100%" }}>
+                        <div
+                          className="line-item-cell-wrapper"
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "4px",
+                            width: "100%",
+                            position: "relative",
+                            padding: "1px 0",
+                            boxSizing: "border-box"
+                          }}
+                        >
                           <input
                             type={isNumeric ? "number" : "text"}
                             className="table-input"
+                            title={String(item[col.key] ?? "")}
                             value={(() => {
                               const rawVal = item[col.key];
                               if (rawVal === undefined || rawVal === null) return "";
@@ -497,12 +569,36 @@ function LineItemsTable({ items = [], originalItems = [], onChange, columnConfig
                               return cleaned === "" ? "" : cleaned;
                             })()}
                             onChange={(e) => handleItemChange(idx, col.key, e.target.value)}
+                            onFocus={() => {
+                              if (boxNumber && onActiveStepChange && activeStep !== boxNumber) {
+                                onActiveStepChange(boxNumber);
+                              }
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                if (onMarkFieldVerified) {
+                                  onMarkFieldVerified("item_details", col.key, idx);
+                                }
+                                if (boxNumber && boxNumber < (sequentialFields?.length || 0)) {
+                                  if (onActiveStepChange) onActiveStepChange(boxNumber + 1);
+                                } else if (boxNumber && boxNumber === (sequentialFields?.length || 0)) {
+                                  if (onSave) onSave();
+                                }
+                              }
+                            }}
                             style={{ 
                               flex: 1,
                               minWidth: 0,
+                              width: "100%",
                               textAlign: isNumeric ? "right" : "left", 
                               fontWeight: col.key === "total_amount" ? "600" : "normal",
-                              paddingRight: "8px"
+                              fontSize: "12px",
+                              padding: "4px 8px",
+                              height: "28px",
+                              borderRadius: "4px",
+                              border: isActiveStep ? "2px solid #3b82f6" : "1px solid #cbd5e1",
+                              boxSizing: "border-box"
                             }}
                           />
                           <span 
@@ -515,7 +611,7 @@ function LineItemsTable({ items = [], originalItems = [], onChange, columnConfig
                             }
                             style={{ 
                               flexShrink: 0,
-                              fontSize: "10px", 
+                              fontSize: "9px", 
                               fontWeight: "700",
                               color: isModifiedFromModel ? "#7c3aed" : getConfidenceColor(score),
                               cursor: "default",
@@ -523,14 +619,15 @@ function LineItemsTable({ items = [], originalItems = [], onChange, columnConfig
                                 ? "#f5f3ff" 
                                 : showFix 
                                   ? "#f5f3ff" 
-                                  : `${getConfidenceColor(score)}10`,
-                              padding: "2px 5px",
-                              borderRadius: "4px",
+                                  : `${getConfidenceColor(score)}15`,
+                              padding: "1px 4px",
+                              borderRadius: "3px",
                               border: isModifiedFromModel 
                                 ? "1px solid #c4b5fd" 
                                 : showFix 
                                   ? "1px solid #7c3aed" 
                                   : "none",
+                              marginLeft: "2px"
                             }}
                           >
                             {isModifiedFromModel ? "Edited" : showFix ? `Fix` : `${score}%`}

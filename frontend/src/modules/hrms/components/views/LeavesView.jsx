@@ -1,9 +1,10 @@
 import LoadingSpinner from '../LoadingSpinner';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { api } from '../../services/api';
 import { formatDate } from '../../utils/helpers';
+import LeaveAdjustmentModal from './LeaveAdjustmentModal';
 
-export default function LeavesView({ employees = [] }) {
+export default function LeavesView({ employees = [], activeEmployees, onOpenBalances }) {
     const adminUser = (() => {
         try {
             return JSON.parse(localStorage.getItem('adminUser'));
@@ -13,8 +14,9 @@ export default function LeavesView({ employees = [] }) {
     })();
     const isTrackingManager = ['TRACKING_MANAGER', 'FIELD_INVOICE_MANAGER'].includes(String(adminUser?.role || 'ADMIN').toUpperCase());
 
-    const [leaves, setLeaves] = useState([]);
-    const [loading, setLoading] = useState(true);
+    const cachedLeaves = api.getCached('/leaves');
+    const [leaves, setLeaves] = useState(() => Array.isArray(cachedLeaves) ? cachedLeaves : []);
+    const [loading, setLoading] = useState(() => !cachedLeaves || cachedLeaves.length === 0);
     const [error, setError] = useState(false);
     
     // Search & Filter States
@@ -22,110 +24,148 @@ export default function LeavesView({ employees = [] }) {
     const [searchQuery, setSearchQuery] = useState('');
     const [fromDate, setFromDate] = useState('');
     const [toDate, setToDate] = useState('');
+    const [showAdjustModal, setShowAdjustModal] = useState(false);
 
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 15;
 
-    // Helper to resolve up-to-date employee ID (empCode) and Employee Name
-    const getEmployeeDisplayInfo = (leave) => {
+    // Fast O(1) Employee Lookup Map
+    const empMap = useMemo(() => {
+        const map = new Map();
+        (employees || []).forEach(e => {
+            if (e.id) map.set(String(e.id).toLowerCase(), e);
+            if (e.empCode) map.set(String(e.empCode).toLowerCase(), e);
+            if (e.name) map.set(String(e.name).toLowerCase(), e);
+        });
+        return map;
+    }, [employees]);
+
+    // O(1) Helper to resolve up-to-date employee ID (empCode) and Employee Name
+    const getEmployeeDisplayInfo = useCallback((leave) => {
         if (!leave) return { empCode: '-', empName: 'Unknown' };
-        const emp = (employees || []).find(e => 
-            (e.id && String(e.id).toLowerCase() === String(leave.userId || '').toLowerCase()) ||
-            (e.empCode && String(e.empCode).toLowerCase() === String(leave.userId || '').toLowerCase()) ||
-            (e.empCode && String(e.empCode).toLowerCase() === String(leave.empCode || '').toLowerCase()) ||
-            (e.name && String(e.name).toLowerCase() === String(leave.userName || '').toLowerCase())
-        );
+        const uId = String(leave.userId || '').toLowerCase();
+        const uName = String(leave.userName || '').toLowerCase();
+        const eCode = String(leave.empCode || '').toLowerCase();
+        const emp = empMap.get(uId) || empMap.get(eCode) || empMap.get(uName);
         const empCode = emp?.empCode || leave.empCode || leave.userId || '-';
         const empName = emp?.name || leave.userName || 'Unknown';
         return { empCode, empName };
-    };
+    }, [empMap]);
 
-    const fetchLeaves = async () => {
-        setLoading(true);
+    const fetchLeaves = useCallback(async (signal = null) => {
         try {
-            const data = await api.getLeaves();
-            setLeaves(Array.isArray(data) ? data : []);
+            const data = await api.getLeaves(null, signal ? { signal } : {});
+            if (Array.isArray(data)) {
+                setLeaves(data);
+                setError(false);
+            }
         } catch (err) {
-            console.error('Failed to load leaves:', err);
-            setError(true);
+            if (err.name !== 'AbortError') {
+                console.error('Failed to load leaves:', err);
+                if (!leaves.length) setError(true);
+            }
         } finally {
-            setTimeout(() => setLoading(false), 300);
+            setLoading(false);
         }
-    };
+    }, [leaves.length]);
 
     useEffect(() => {
-        fetchLeaves();
-    }, []);
+        const controller = new AbortController();
+        fetchLeaves(controller.signal);
+        return () => controller.abort();
+    }, [fetchLeaves]);
 
     // Reset pagination when filter or search changes
     useEffect(() => {
         setCurrentPage(1);
     }, [filter, searchQuery, fromDate, toDate]);
 
+    // Helper to get current acting admin name
+    const getCurrentAdminName = () => {
+        try {
+            const raw = localStorage.getItem('adminUser');
+            if (raw) {
+                const admin = JSON.parse(raw);
+                if (admin.name && admin.name.trim()) return admin.name.trim();
+                if (admin.empCode && admin.empCode.trim()) return admin.empCode.trim();
+                if (admin.email && admin.email.trim()) return admin.email.split('@')[0];
+            }
+            const username = localStorage.getItem('username');
+            if (username && username.trim()) return username.trim();
+        } catch (e) {}
+        return 'Admin';
+    };
+
+    // 0ms Optimistic status change with automatic background sync
     const handleUpdateStatus = async (id, status) => {
         if (!confirm(`Are you sure you want to ${status} this leave request?`)) return;
+        const currentAdmin = getCurrentAdminName();
+        setLeaves(prev => prev.map(l => l.id === id ? { ...l, status, actionBy: currentAdmin } : l));
         try {
-            await api.updateLeaveStatus(id, status);
-            fetchLeaves();
+            await api.updateLeaveStatus(id, status, currentAdmin);
+            window.dispatchEvent(new CustomEvent('hrms-badge-sync'));
         } catch (err) {
             alert('Failed to update leave status: ' + (err.response?.data?.error || err.message));
+            fetchLeaves();
         }
     };
 
-    // Filter leaves
-    let filteredLeaves = leaves.filter(leave => {
-        const s = String(leave.status || '').toLowerCase().trim();
-        if (filter === 'pending') return s === 'pending';
-        if (filter === 'approved') return s === 'approved';
-        if (filter === 'rejected') return s === 'rejected';
-        return true;
-    });
+    // Memoized filtered leaves to prevent main thread stutters
+    const filteredLeaves = useMemo(() => {
+        let list = leaves;
+        if (filter !== 'all') {
+            list = list.filter(leave => String(leave.status || '').toLowerCase().trim() === filter);
+        }
 
-    // Apply Date Range Filter if set (comparing against leave.startDate or leave.appliedAt)
-    if (fromDate) {
-        const from = new Date(fromDate);
-        from.setHours(0, 0, 0, 0);
-        filteredLeaves = filteredLeaves.filter(leave => {
-            if (!leave.startDate) return false;
-            const leaveDate = new Date(leave.startDate);
-            if (isNaN(leaveDate.getTime()) && !isNaN(Number(leave.startDate))) {
-                return new Date(Number(leave.startDate)) >= from;
-            }
-            return leaveDate >= from;
-        });
-    }
-    if (toDate) {
-        const to = new Date(toDate);
-        to.setHours(23, 59, 59, 999);
-        filteredLeaves = filteredLeaves.filter(leave => {
-            if (!leave.startDate) return false;
-            const leaveDate = new Date(leave.startDate);
-            if (isNaN(leaveDate.getTime()) && !isNaN(Number(leave.startDate))) {
-                return new Date(Number(leave.startDate)) <= to;
-            }
-            return leaveDate <= to;
-        });
-    }
+        if (fromDate) {
+            const from = new Date(fromDate);
+            from.setHours(0, 0, 0, 0);
+            list = list.filter(leave => {
+                if (!leave.startDate) return false;
+                const leaveDate = new Date(leave.startDate);
+                if (isNaN(leaveDate.getTime()) && !isNaN(Number(leave.startDate))) {
+                    return new Date(Number(leave.startDate)) >= from;
+                }
+                return leaveDate >= from;
+            });
+        }
 
-    // Apply Search Query (by Employee Name, Employee ID, or Reason)
-    if (searchQuery.trim() !== '') {
-        const query = searchQuery.toLowerCase();
-        filteredLeaves = filteredLeaves.filter(leave => {
-            const { empCode, empName } = getEmployeeDisplayInfo(leave);
-            const nameMatch = empName && empName.toLowerCase().includes(query);
-            const codeMatch = empCode && empCode.toLowerCase().includes(query);
-            const reasonMatch = leave.reason && leave.reason.toLowerCase().includes(query);
-            return nameMatch || codeMatch || reasonMatch;
-        });
-    }
+        if (toDate) {
+            const to = new Date(toDate);
+            to.setHours(23, 59, 59, 999);
+            list = list.filter(leave => {
+                if (!leave.startDate) return false;
+                const leaveDate = new Date(leave.startDate);
+                if (isNaN(leaveDate.getTime()) && !isNaN(Number(leave.startDate))) {
+                    return new Date(Number(leave.startDate)) <= to;
+                }
+                return leaveDate <= to;
+            });
+        }
+
+        if (searchQuery.trim() !== '') {
+            const query = searchQuery.toLowerCase();
+            list = list.filter(leave => {
+                const { empCode, empName } = getEmployeeDisplayInfo(leave);
+                const nameMatch = empName && empName.toLowerCase().includes(query);
+                const codeMatch = empCode && empCode.toLowerCase().includes(query);
+                const reasonMatch = leave.reason && leave.reason.toLowerCase().includes(query);
+                return nameMatch || codeMatch || reasonMatch;
+            });
+        }
+
+        return list;
+    }, [leaves, filter, fromDate, toDate, searchQuery, getEmployeeDisplayInfo]);
 
     // Paginated leaves
     const totalItems = filteredLeaves.length;
-    const totalPages = Math.ceil(totalItems / itemsPerPage);
+    const totalPages = Math.max(1, Math.ceil(totalItems / itemsPerPage));
     const startIndex = (currentPage - 1) * itemsPerPage;
     const endIndex = Math.min(startIndex + itemsPerPage, totalItems);
-    const paginatedLeaves = filteredLeaves.slice(startIndex, endIndex);
+    const paginatedLeaves = useMemo(() => {
+        return filteredLeaves.slice(startIndex, endIndex);
+    }, [filteredLeaves, startIndex, endIndex]);
 
     return (
         <div id="leaves-view" className="view active" style={{ height: '100%', minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: '16px', overflow: 'hidden' }}>
@@ -184,6 +224,51 @@ export default function LeavesView({ employees = [] }) {
                     >
                         Rejected
                     </button>
+                    {onOpenBalances && (
+                        <button
+                            className="btn"
+                            onClick={onOpenBalances}
+                            style={{
+                                height: '38px',
+                                padding: '0 16px',
+                                borderRadius: '6px',
+                                fontSize: '0.875rem',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px',
+                                background: 'var(--input-bg, #f3f4f6)',
+                                color: 'var(--text-primary, #374151)',
+                                border: '1px solid var(--border-glass, #d1d5db)'
+                            }}
+                        >
+                            <i className="fa-solid fa-scale-balanced"></i>
+                            <span>Leave Balances</span>
+                        </button>
+                    )}
+                    {!isTrackingManager && (
+                        <button
+                            className="btn btn-primary"
+                            onClick={() => setShowAdjustModal(true)}
+                            style={{
+                                height: '38px',
+                                padding: '0 16px',
+                                borderRadius: '6px',
+                                fontSize: '0.875rem',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px',
+                                background: 'linear-gradient(135deg, #4f46e5 0%, #4338ca 100%)',
+                                color: '#ffffff',
+                                border: 'none',
+                                cursor: 'pointer',
+                                fontWeight: 600,
+                                boxShadow: '0 2px 4px rgba(79, 70, 229, 0.25)'
+                            }}
+                        >
+                            <i className="fa-solid fa-plus-circle"></i>
+                            <span>Add Opening Balance</span>
+                        </button>
+                    )}
                 </div>
 
                 <div style={{ display: 'flex', gap: '15px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
@@ -272,9 +357,9 @@ export default function LeavesView({ employees = [] }) {
                         </tr>
                     </thead>
                     <tbody>
-                        {loading ? (
+                        {loading && paginatedLeaves.length === 0 ? (
                             <tr><td colSpan="6" style={{ padding: "40px 0" }}><LoadingSpinner message="Fetching Leave Requests..." minHeight="220px" /></td></tr>
-                        ) : error ? (
+                        ) : error && paginatedLeaves.length === 0 ? (
                             <tr><td colSpan="6" className="error-text" style={{ textAlign: 'center', padding: '30px' }}>Failed to load leaves</td></tr>
                         ) : paginatedLeaves.length === 0 ? (
                             <tr><td colSpan="6" style={{ textAlign: 'center', padding: '30px' }}>No leave requests found.</td></tr>
@@ -290,7 +375,16 @@ export default function LeavesView({ employees = [] }) {
                                         </td>
                                         <td>{formatDate(leave.startDate)} - {formatDate(leave.endDate)}</td>
                                         <td>{leave.reason}</td>
-                                        <td><span className={`badge-status badge-${String(leave.status || '').toLowerCase()}`}>{String(leave.status || '').toUpperCase()}</span></td>
+                                        <td>
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'flex-start' }}>
+                                                <span className={`badge-status badge-${String(leave.status || '').toLowerCase()}`}>{String(leave.status || '').toUpperCase()}</span>
+                                                {leave.actionBy && String(leave.status || '').toLowerCase() !== 'pending' && (
+                                                    <span style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600 }}>
+                                                        by <strong style={{ color: '#4f46e5' }}>{leave.actionBy}</strong>
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </td>
                                         <td>
                                             {String(leave.status || '').toLowerCase() === 'pending' && !isTrackingManager ? (
                                                 <div style={{ display: 'flex', gap: '8px' }}>
@@ -360,6 +454,18 @@ export default function LeavesView({ employees = [] }) {
                     </div>
                 )}
             </div>
+
+            {/* Leave Balance Adjustment Modal - Conditionally Mounted */}
+            {showAdjustModal && (
+                <LeaveAdjustmentModal
+                    isOpen={showAdjustModal}
+                    onClose={() => setShowAdjustModal(false)}
+                    employees={activeEmployees || employees}
+                    onSuccess={() => {
+                        fetchLeaves();
+                    }}
+                />
+            )}
         </div>
     );
 }

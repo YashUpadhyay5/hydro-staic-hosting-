@@ -21,7 +21,7 @@ export default function Login() {
         try {
             const loginUrl = (import.meta.env && import.meta.env.VITE_API_URL)
                 ? `${import.meta.env.VITE_API_URL.replace(/\/$/, '')}/auth/login`
-                : `http://${window.location.hostname}:8000/api/v1/auth/login`;
+                : `/api/v1/auth/login`;
 
             const response = await axios.post(loginUrl, {
                 email,

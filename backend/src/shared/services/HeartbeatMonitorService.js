@@ -3,6 +3,7 @@ const Attendance = require('../models/Attendance');
 const Employee = require('../models/Employee');
 const AuditLog = require('../models/AuditLog');
 const Rule = require('../models/Rule');
+const Setting = require('../models/Setting');
 const axios = require('axios');
 const admin = require('../../config/firebase');
 const { getCachedEmployees } = require('../../core/utils/employeeCache');
@@ -11,8 +12,20 @@ let cachedConfig = null;
 let lastConfigTime = 0;
 
 class HeartbeatMonitorService {
+    static _io = null;
+
+    static setIO(io) {
+        this._io = io;
+    }
     
-    // Fetch configuration from Rule table with fallbacks (cached for 60s)
+    // Invalidate cached configuration when updated from admin dashboard
+    static invalidateConfigCache() {
+        cachedConfig = null;
+        lastConfigTime = 0;
+        console.log('[HeartbeatService] Configuration cache invalidated.');
+    }
+
+    // Fetch configuration dynamically from dashboard Setting & Rule tables (cached for 60s)
     static async getConfig() {
         const now = Date.now();
         if (cachedConfig && (now - lastConfigTime < 60000)) {
@@ -20,49 +33,60 @@ class HeartbeatMonitorService {
         }
 
         try {
+            // Read active location_update_interval configured by admin on dashboard
+            let locationIntervalSeconds = 30;
+            try {
+                const setting = await Setting.findOne({ where: { id: 1 }, raw: true });
+                if (setting && setting.location_update_interval) {
+                    const raw = String(setting.location_update_interval).trim();
+                    const match = raw.match(/\d+/);
+                    if (match) {
+                        const parsed = parseInt(match[0], 10);
+                        if (!isNaN(parsed) && parsed > 0) {
+                            locationIntervalSeconds = parsed;
+                        }
+                    }
+                }
+            } catch (setErr) {
+                console.warn('[HeartbeatService] Warning reading Setting model:', setErr.message);
+            }
+
             const rules = await Rule.findAll({
                 where: {
                     key: {
                         [Op.in]: [
-                            'heartbeatInterval',
-                            'missedHeartbeatThreshold',
-                            'notificationDelay',
-                            'retryDelay',
                             'maximumNotifications',
                             'enableAdminAlert'
                         ]
                     }
                 }
-            });
+            }).catch(() => []);
 
             const config = {
-                heartbeatInterval: 30, // seconds
-                missedHeartbeatThreshold: 3,
-                notificationDelay: 90, // seconds
-                retryDelay: 120, // seconds
+                heartbeatInterval: locationIntervalSeconds, // Synced dynamically to dashboard location update interval
+                missedHeartbeatThreshold: 2, // Exactly 2 intervals trigger interruption alert
+                notificationDelay: locationIntervalSeconds * 2, // 2 intervals (e.g. 60s for 30s interval, 1800s for 15m)
+                retryDelay: Math.max(locationIntervalSeconds, 60), // Throttled retry cadence
                 maximumNotifications: 3,
                 enableAdminAlert: true
             };
 
             rules.forEach(rule => {
-                if (rule.key === 'heartbeatInterval') config.heartbeatInterval = parseInt(rule.value, 10);
-                if (rule.key === 'missedHeartbeatThreshold') config.missedHeartbeatThreshold = parseInt(rule.value, 10);
-                if (rule.key === 'notificationDelay') config.notificationDelay = parseInt(rule.value, 10);
-                if (rule.key === 'retryDelay') config.retryDelay = parseInt(rule.value, 10);
                 if (rule.key === 'maximumNotifications') config.maximumNotifications = parseInt(rule.value, 10);
                 if (rule.key === 'enableAdminAlert') config.enableAdminAlert = rule.value === 'true';
             });
 
             cachedConfig = config;
             lastConfigTime = now;
+            console.log(`[HeartbeatService] Loaded tracking config: Interval = ${config.heartbeatInterval}s, Alert Threshold = ${config.missedHeartbeatThreshold * config.heartbeatInterval}s (2 intervals)`);
             return config;
         } catch (err) {
             console.error('[HeartbeatService] Error reading config rules:', err.message);
             return {
                 heartbeatInterval: 30,
-                missedHeartbeatThreshold: 3,
-                notificationDelay: 90,
-                retryDelay: 120,
+                missedHeartbeatThreshold: 2,
+                notificationDelay: 60,
+                retryDelay: 60,
                 maximumNotifications: 3,
                 enableAdminAlert: true
             };
@@ -73,11 +97,37 @@ class HeartbeatMonitorService {
     static async registerHeartbeat(userId, telemetry = {}) {
         const now = Date.now();
         try {
-            // Find active attendance session (checkOut is null)
+            // Resolve employee aliases to match active session across id, empCode, and name
+            let candidateIds = [userId];
+            try {
+                const { empAliasesMap } = await getCachedEmployees();
+                const clean = String(userId || '').trim().toLowerCase();
+                const aliases = empAliasesMap ? empAliasesMap.get(clean) : null;
+                if (aliases && Array.isArray(aliases) && aliases.length > 0) {
+                    candidateIds = Array.from(new Set([userId, ...aliases].filter(Boolean)));
+                }
+            } catch (e) {}
+
+            // Find active attendance session (checkOut is null or empty)
             const session = await Attendance.findOne({
                 where: {
-                    userId,
-                    checkOut: null
+                    [Op.and]: [
+                        {
+                            [Op.or]: [
+                                { userId: { [Op.in]: candidateIds } },
+                                { userName: { [Op.in]: candidateIds } }
+                            ]
+                        },
+                        {
+                            [Op.or]: [
+                                { checkOut: null },
+                                { checkOut: '' },
+                                { checkOut: 'null' },
+                                { checkOut: 'undefined' },
+                                { checkOut: '-' }
+                            ]
+                        }
+                    ]
                 },
                 order: [['createdAt', 'DESC']]
             });
@@ -88,56 +138,68 @@ class HeartbeatMonitorService {
             }
 
             const oldStatus = session.trackingStatus;
-            const wasInterrupted = oldStatus === 'INTERRUPTED';
+            const wasInterrupted = oldStatus === 'INTERRUPTED' || oldStatus === 'MISSING' || oldStatus === 'WARNING';
 
             // Telemetry update mapping
             session.lastHeartbeat = now;
-            session.heartbeatCount += 1;
+            session.heartbeatCount = (session.heartbeatCount || 0) + 1;
             session.missedHeartbeatCount = 0;
             
             // Device specifications
             if (telemetry.manufacturer) session.deviceManufacturer = telemetry.manufacturer;
             if (telemetry.model) session.deviceModel = telemetry.model;
             if (telemetry.androidVersion) session.androidVersion = telemetry.androidVersion;
-            if (telemetry.batteryLevel !== undefined) session.batteryLevel = parseFloat(telemetry.batteryLevel);
+            if (telemetry.batteryLevel !== undefined && telemetry.batteryLevel !== null) session.batteryLevel = parseFloat(telemetry.batteryLevel);
             if (telemetry.networkType) session.networkType = telemetry.networkType;
-            if (telemetry.gpsEnabled !== undefined) session.gpsEnabled = telemetry.gpsEnabled;
-            if (telemetry.trackingReliabilityScore !== undefined) session.trackingReliabilityScore = parseFloat(telemetry.trackingReliabilityScore);
+            if (telemetry.gpsEnabled !== undefined && telemetry.gpsEnabled !== null) session.gpsEnabled = telemetry.gpsEnabled;
+            if (telemetry.trackingReliabilityScore !== undefined && telemetry.trackingReliabilityScore !== null) session.trackingReliabilityScore = parseFloat(telemetry.trackingReliabilityScore);
 
             if (wasInterrupted) {
                 session.trackingStatus = 'RECOVERED';
                 session.recoveryTime = now;
+                session.notificationCount = 0; // reset notification escalation count upon recovery
                 
-                const interruptedMs = now - (session.lastNotificationTime || session.lastHeartbeat || session.createdAt.getTime());
-                session.trackingInterruptedDuration += Math.floor(interruptedMs / 1000);
+                const interruptedMs = now - (session.lastNotificationTime || session.lastHeartbeat || (session.createdAt ? session.createdAt.getTime() : now));
+                session.trackingInterruptedDuration = (session.trackingInterruptedDuration || 0) + Math.max(0, Math.floor(interruptedMs / 1000));
                 
                 await session.save();
 
                 // Audit recovery event
                 await AuditLog.create({
-                    employeeId: userId,
+                    employeeId: session.userId || userId,
                     attendanceSessionId: session.id,
                     event: 'TRACKING_RECOVERED',
                     details: {
-                        durationSecs: Math.floor(interruptedMs / 1000),
+                        durationSecs: Math.max(0, Math.floor(interruptedMs / 1000)),
                         telemetry
                     },
                     timestamp: now
-                });
+                }).catch(() => {});
 
-                console.log(`[HeartbeatService] Session recovered for user ${userId}. Interrupted duration: ${Math.floor(interruptedMs / 1000)}s`);
+                console.log(`[HeartbeatService] Session recovered for user ${session.userId} (${session.userName || userId}). Interrupted duration: ${Math.max(0, Math.floor(interruptedMs / 1000))}s`);
+
+                if (HeartbeatMonitorService._io) {
+                    try {
+                        HeartbeatMonitorService._io.emit('ATTENDANCE_UPDATE', {
+                            date: session.date,
+                            action: 'RECOVERED',
+                            userId: session.userId,
+                            sessionId: session.id
+                        });
+                    } catch (sockErr) {}
+                }
             } else {
                 session.trackingStatus = 'ACTIVE';
                 await session.save();
 
                 // Audit log heartbeat received
                 await AuditLog.create({
-                    employeeId: userId,
+                    employeeId: session.userId || userId,
                     attendanceSessionId: session.id,
                     event: 'HEARTBEAT_RECEIVED',
                     details: { telemetry },
                     timestamp: now
-                });
+                }).catch(() => {});
             }
 
             return session;
@@ -166,7 +228,13 @@ class HeartbeatMonitorService {
             // Find all active attendance sessions strictly for today
             const activeSessions = await Attendance.findAll({
                 where: {
-                    checkOut: null,
+                    [Op.or]: [
+                        { checkOut: null },
+                        { checkOut: '' },
+                        { checkOut: 'null' },
+                        { checkOut: 'undefined' },
+                        { checkOut: '-' }
+                    ],
                     date: today
                 }
             });
@@ -175,46 +243,51 @@ class HeartbeatMonitorService {
                 // Calculate elapsed time since last heartbeat or clock-in
                 const referenceTime = session.lastHeartbeat ? parseInt(session.lastHeartbeat, 10) : session.createdAt.getTime();
                 const secondsElapsed = Math.floor((now - referenceTime) / 1000);
+                const intervalSec = config.heartbeatInterval || 30;
+                const missedIntervals = Math.floor(secondsElapsed / intervalSec);
 
-                // Check if heartbeat interval exceeded
-                if (secondsElapsed >= config.heartbeatInterval) {
-                    session.missedHeartbeatCount = (session.missedHeartbeatCount || 0) + 1;
-                    
-                    const oldStatus = session.trackingStatus;
-                    let newStatus = oldStatus;
+                session.missedHeartbeatCount = missedIntervals;
+                const oldStatus = session.trackingStatus;
+                let newStatus = oldStatus;
 
-                    if (session.missedHeartbeatCount === 1) {
-                        newStatus = 'MISSING';
-                    } else if (session.missedHeartbeatCount === 2) {
-                        newStatus = 'WARNING';
-                    } else if (session.missedHeartbeatCount >= config.missedHeartbeatThreshold) {
-                        newStatus = 'INTERRUPTED';
+                // Dynamic 2-interval threshold logic:
+                // < 1 interval missed: healthy (ACTIVE / RECOVERED)
+                // 1 interval missed: WARNING (grace period; no push notification)
+                // >= 2 intervals missed: INTERRUPTED (dispatches recovery push notification)
+                if (missedIntervals >= config.missedHeartbeatThreshold) {
+                    newStatus = 'INTERRUPTED';
+                } else if (missedIntervals === 1) {
+                    newStatus = 'WARNING';
+                } else if (missedIntervals === 0) {
+                    if (oldStatus === 'WARNING' || oldStatus === 'MISSING') {
+                        newStatus = 'ACTIVE';
                     }
+                }
 
-                    if (newStatus !== oldStatus) {
-                        session.trackingStatus = newStatus;
-                        await session.save();
+                if (newStatus !== oldStatus) {
+                    session.trackingStatus = newStatus;
+                    await session.save();
 
-                        // Log state transition
-                        await AuditLog.create({
-                            employeeId: session.userId,
-                            attendanceSessionId: session.id,
-                            event: `HEARTBEAT_STATE_${newStatus}`,
-                            details: {
-                                previousState: oldStatus,
-                                secondsElapsed,
-                                missedCount: session.missedHeartbeatCount
-                            },
-                            timestamp: now
-                        }).catch(() => {});
+                    // Log state transition
+                    await AuditLog.create({
+                        employeeId: session.userId,
+                        attendanceSessionId: session.id,
+                        event: `HEARTBEAT_STATE_${newStatus}`,
+                        details: {
+                            previousState: oldStatus,
+                            secondsElapsed,
+                            missedIntervals,
+                            intervalSec
+                        },
+                        timestamp: now
+                    }).catch(() => {});
 
-                        console.log(`[HeartbeatService] User ${session.userId} transitioned: ${oldStatus} -> ${newStatus}`);
-                    }
+                    console.log(`[HeartbeatService] User ${session.userId} transitioned: ${oldStatus} -> ${newStatus} (${secondsElapsed}s elapsed, ${missedIntervals} intervals missed, interval: ${intervalSec}s)`);
+                }
 
-                    // Trigger Recovery FCM Escalation if Interrupted
-                    if (newStatus === 'INTERRUPTED') {
-                        await this.escalateInterruption(session, config, now);
-                    }
+                // Trigger Recovery FCM Escalation if Interrupted (>= 2 intervals missed)
+                if (newStatus === 'INTERRUPTED') {
+                    await this.escalateInterruption(session, config, now);
                 }
             }
         } catch (err) {
@@ -265,15 +338,28 @@ class HeartbeatMonitorService {
                 return;
             }
 
+            const referenceTime = session.lastHeartbeat ? parseInt(session.lastHeartbeat, 10) : session.createdAt.getTime();
+            const secondsElapsed = Math.floor((now - referenceTime) / 1000);
+            const formatElapsed = (secs) => {
+                if (secs >= 120) {
+                    const mins = Math.floor(secs / 60);
+                    return `${mins} minutes`;
+                }
+                return `${secs} seconds`;
+            };
+            const elapsedText = formatElapsed(secondsElapsed);
+
             const attempt = session.notificationCount + 1;
             const title = 'HRMS Attendance Alert';
-            const body = `We haven't received your location for the last ${attempt * config.heartbeatInterval} seconds. Please open HRMS.`;
+            const body = `We haven't received your location update for the last ${elapsedText}. Please open HRMS to keep your session active.`;
             const payload = {
-                attendanceSessionId: session.id,
-                employeeId: session.userId,
+                attendanceSessionId: String(session.id),
+                employeeId: String(session.userId),
                 trackingStatus: 'INTERRUPTED',
                 notificationType: 'tracking_interrupted',
-                deepLink: 'mobileapp://attendance'
+                deepLink: 'mobileapp://attendance',
+                elapsedSeconds: String(secondsElapsed),
+                attempt: String(attempt)
             };
 
             const success = await this.sendPush(employee.fcmToken, title, body, payload);
@@ -293,7 +379,7 @@ class HeartbeatMonitorService {
                     },
                     timestamp: now
                 });
-                console.log(`[HeartbeatService] Recovery notification (attempt ${attempt}) sent to user: ${session.userId}`);
+                console.log(`[HeartbeatService] Recovery notification (attempt ${attempt}) sent to user: ${session.userId} (${elapsedText} elapsed)`);
             }
         } catch (err) {
             console.error(`[HeartbeatService] Notification escalation trigger failed for session ${session.id}:`, err.message);
@@ -334,6 +420,11 @@ class HeartbeatMonitorService {
       console.error('[Direct FCM Push Error] Failed to send message:', err.message);
       return false;
     }
+  }
+
+  // Backwards compatibility alias for CronScheduler / external callers
+  static async sendPushNotification(token, title, body, payload = {}) {
+    return this.sendPush(token, title, body, payload);
   }
 
     // Phase 15: Analytics reports

@@ -66,6 +66,16 @@ class PayrollQueue {
   getJobStatus(jobId) {
     return this.activeJobs.get(jobId) || { status: 'NOT_FOUND' };
   }
+
+  /**
+   * True while a job for this run is still executing in this server process
+   */
+  isRunActive(payrollRunId) {
+    for (const job of this.activeJobs.values()) {
+      if (job.payrollRunId === payrollRunId && job.status === 'PROCESSING') return true;
+    }
+    return false;
+  }
 }
 
 module.exports = new PayrollQueue();

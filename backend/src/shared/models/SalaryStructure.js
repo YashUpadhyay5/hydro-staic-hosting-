@@ -40,11 +40,21 @@ const SalaryStructure = sequelize.define('SalaryStructure', {
   status: {
     type: DataTypes.STRING,
     defaultValue: 'ACTIVE', // 'ACTIVE' or 'INACTIVE'
+  },
+  revisionReason: {
+    type: DataTypes.STRING,
+    field: 'revision_reason',
+    allowNull: true,
+    defaultValue: 'Salary Revision',
   }
 }, {
   tableName: 'salary_structures',
   timestamps: true,
-  underscored: true
+  underscored: true,
+  indexes: [
+    { fields: ['employee_id', 'status'] },
+    { fields: ['employee_id'] }
+  ]
 });
 
 module.exports = SalaryStructure;

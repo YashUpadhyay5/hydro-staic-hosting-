@@ -66,7 +66,11 @@ const PayrollRun = sequelize.define('PayrollRun', {
 }, {
   tableName: 'payroll_runs',
   timestamps: true,
-  underscored: true
+  underscored: true,
+  indexes: [
+    { fields: ['status'] },
+    { fields: ['month'] }
+  ]
 });
 
 module.exports = PayrollRun;

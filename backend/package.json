@@ -5,7 +5,13 @@
   "main": "server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "nodemon src/server.js"
+    "cluster": "pm2 start ecosystem.config.js",
+    "cluster:reload": "pm2 reload hydro-express-backend",
+    "cluster:scale": "pm2 scale hydro-express-backend",
+    "cluster:stop": "pm2 stop hydro-express-backend",
+    "cluster:status": "pm2 list",
+    "dev": "nodemon src/server.js",
+    "test": "node --test \"test/**/*.test.js\""
   },
   "dependencies": {
     "apicache": "^1.6.3",
@@ -23,6 +29,7 @@
     "multer": "^1.4.5-lts.2",
     "multer-storage-cloudinary": "^4.0.0",
     "node-cron": "^3.0.3",
+    "pdfkit": "^0.20.2",
     "pg": "^8.22.0",
     "pg-hstore": "^2.3.4",
     "sequelize": "^6.37.8",

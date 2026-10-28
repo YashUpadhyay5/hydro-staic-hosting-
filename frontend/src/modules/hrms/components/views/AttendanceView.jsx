@@ -1,10 +1,7 @@
 import LoadingSpinner from '../LoadingSpinner';
 import React, { useEffect, useState, useRef } from 'react';
-import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
-import * as XLSX from 'xlsx';
 import { api } from '../../services/api';
-import { formatDate } from '../../utils/helpers';
+import { formatDate, isActiveEmployee, formatTo12HourTime, isEmpActiveForPeriod, isEmpActiveOnDate } from '../../utils/helpers';
 
 const getDaysInMonth = (year, month) => {
     return new Date(year, month + 1, 0).getDate();
@@ -67,6 +64,195 @@ const isToday = (dateStr) => {
         return d.toDateString() === new Date().toDateString();
     }
     return false;
+};
+
+const MultiSelectEmployeeDropdown = ({ employees = [], selectedIds = [], onChange, getEmpId }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const [search, setSearch] = useState('');
+    const dropdownRef = useRef(null);
+
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+                setIsOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    const filtered = employees.filter(emp => {
+        if (!search.trim()) return true;
+        const q = search.toLowerCase().trim();
+        const code = String(emp.empCode || emp.emp_code || '').toLowerCase();
+        const name = String(emp.name || '').toLowerCase();
+        return code.includes(q) || name.includes(q);
+    });
+
+    const isAllSelected = selectedIds.length === 0 || selectedIds.length === employees.length;
+
+    const toggleSelectAll = () => {
+        onChange([]);
+    };
+
+    const toggleEmp = (emp) => {
+        const strId = String(emp.id);
+        let next;
+        if (selectedIds.length === 0) {
+            next = employees.filter(e => String(e.id) !== strId).map(e => String(e.id));
+        } else if (selectedIds.includes(strId)) {
+            next = selectedIds.filter(id => id !== strId);
+        } else {
+            next = [...selectedIds, strId];
+            if (next.length === employees.length) {
+                next = [];
+            }
+        }
+        onChange(next);
+    };
+
+    const getDisplayText = () => {
+        if (selectedIds.length === 0 || selectedIds.length === employees.length) {
+            return `All Employees (${employees.length})`;
+        }
+        if (selectedIds.length === 1) {
+            const found = employees.find(e => String(e.id) === selectedIds[0] || String(e.empCode) === selectedIds[0]);
+            return found ? found.name : '1 Employee Selected';
+        }
+        return `${selectedIds.length} Employees Selected`;
+    };
+
+    return (
+        <div ref={dropdownRef} style={{ position: 'relative', display: 'inline-block' }}>
+            <button
+                type="button"
+                onClick={() => setIsOpen(!isOpen)}
+                style={{
+                    padding: '6px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid #d1d5db',
+                    backgroundColor: 'white',
+                    color: '#1f2937',
+                    fontSize: '0.85rem',
+                    outline: 'none',
+                    height: '36px',
+                    cursor: 'pointer',
+                    minWidth: '180px',
+                    maxWidth: '240px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justify: 'space-between',
+                    gap: '8px',
+                    textAlign: 'left'
+                }}
+            >
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 500 }}>
+                    {getDisplayText()}
+                </span>
+                <i className={`fa-solid fa-chevron-${isOpen ? 'up' : 'down'}`} style={{ fontSize: '0.75rem', color: '#6b7280' }}></i>
+            </button>
+
+            {isOpen && (
+                <div style={{
+                    position: 'absolute',
+                    top: '100%',
+                    left: 0,
+                    marginTop: '4px',
+                    width: '280px',
+                    maxHeight: '320px',
+                    backgroundColor: 'white',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+                    zIndex: 1000,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    overflow: 'hidden'
+                }}>
+                    <div style={{ padding: '8px', borderBottom: '1px solid #f3f4f6' }}>
+                        <input
+                            type="text"
+                            placeholder="Search employee..."
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                            style={{
+                                width: '100%',
+                                padding: '6px 10px',
+                                borderRadius: '4px',
+                                border: '1px solid #d1d5db',
+                                fontSize: '0.8rem',
+                                outline: 'none',
+                                boxSizing: 'border-box'
+                            }}
+                        />
+                    </div>
+                    
+                    <div style={{ padding: '6px 12px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#f9fafb' }}>
+                        <label style={{ fontSize: '0.8rem', fontWeight: 600, color: '#374151', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', userSelect: 'none' }}>
+                            <input
+                                type="checkbox"
+                                checked={isAllSelected}
+                                onChange={toggleSelectAll}
+                                style={{ accentColor: '#ef4444', cursor: 'pointer' }}
+                            />
+                            Select All
+                        </label>
+                        {selectedIds.length > 0 && selectedIds.length < employees.length && (
+                            <button
+                                type="button"
+                                onClick={() => onChange([])}
+                                style={{ border: 'none', background: 'none', color: '#ef4444', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer' }}
+                            >
+                                Clear ({selectedIds.length})
+                            </button>
+                        )}
+                    </div>
+
+                    <div style={{ overflowY: 'auto', flex: 1, padding: '4px 0' }}>
+                        {filtered.length === 0 ? (
+                            <div style={{ padding: '12px', textAlign: 'center', fontSize: '0.8rem', color: '#9ca3af' }}>
+                                No employees found
+                            </div>
+                        ) : (
+                            filtered.map((emp, idx) => {
+                                const empIdStr = String(emp.id);
+                                const isChecked = selectedIds.length === 0 || selectedIds.includes(empIdStr);
+                                return (
+                                    <label
+                                        key={emp.id}
+                                        style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '10px',
+                                            padding: '6px 12px',
+                                            fontSize: '0.8rem',
+                                            cursor: 'pointer',
+                                            color: '#1f2937',
+                                            transition: 'background 0.15s',
+                                            userSelect: 'none'
+                                        }}
+                                        onMouseEnter={(e) => e.currentTarget.style.background = '#f3f4f6'}
+                                        onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            checked={isChecked}
+                                            onChange={() => toggleEmp(emp)}
+                                            style={{ accentColor: '#ef4444', cursor: 'pointer' }}
+                                        />
+                                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                            <span style={{ fontWeight: 500 }}>{emp.name}</span>
+                                            <span style={{ fontSize: '0.7rem', color: '#6b7280' }}>{emp.empCode || (getEmpId ? getEmpId(emp, idx) : '')}</span>
+                                        </div>
+                                    </label>
+                                );
+                            })
+                        )}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
 };
 
 const groupAttendanceRecords = (records, footprintsList = [], employeesList = []) => {
@@ -238,16 +424,44 @@ const groupAttendanceRecords = (records, footprintsList = [], employeesList = []
             // Sort punches chronologically by checkIn timestamp
             item.punches.sort((a, b) => (parseToTimestamp(a.checkIn) || 0) - (parseToTimestamp(b.checkIn) || 0));
 
-            // 1. Deduplicate rapid double-tap punches (checkIn within 15 seconds of each other)
+            // 1. Filter out redundant AUTO_RECOVERY_PUNCH ghost sessions if a legitimate MANUAL punch exists
+            const hasManualPunch = item.punches.some(p => p.checkInMethod === 'MANUAL_APP' || p.checkInMethod === 'MANUAL_WEB');
+            let candidatePunches = item.punches;
+            if (hasManualPunch) {
+                candidatePunches = candidatePunches.filter(p => {
+                    if (p.checkInMethod === 'AUTO_RECOVERY_PUNCH') {
+                        const autoInTs = parseToTimestamp(p.checkIn);
+                        const autoOutTs = parseToTimestamp(p.checkOut);
+                        const overlapsWithManual = item.punches.some(m => {
+                            if (m.checkInMethod !== 'MANUAL_APP' && m.checkInMethod !== 'MANUAL_WEB') return false;
+                            const manInTs = parseToTimestamp(m.checkIn);
+                            const manOutTs = parseToTimestamp(m.checkOut);
+                            if (!manInTs) return false;
+                            if (autoInTs && Math.abs(autoInTs - manInTs) <= 1800000) return true;
+                            if (autoOutTs && manOutTs && Math.abs(autoOutTs - manOutTs) <= 1800000) return true;
+                            return false;
+                        });
+                        return !overlapsWithManual;
+                    }
+                    return true;
+                });
+            }
+
+            // 2. Deduplicate rapid double-tap or overlapping punches
             const cleanPunches = [];
-            item.punches.forEach(p => {
+            candidatePunches.forEach(p => {
                 const pTs = parseToTimestamp(p.checkIn);
                 const prevP = cleanPunches[cleanPunches.length - 1];
                 const prevTs = prevP ? parseToTimestamp(prevP.checkIn) : null;
+                const prevOutTs = prevP ? parseToTimestamp(prevP.checkOut) : null;
 
-                if (pTs && prevTs && Math.abs(pTs - prevTs) <= 15000) {
-                    if (p.checkOut && !prevP.checkOut) {
-                        prevP.checkOut = p.checkOut;
+                if (pTs && prevTs && (Math.abs(pTs - prevTs) <= 900000 || (prevOutTs && pTs < prevOutTs))) {
+                    if (p.checkOut) {
+                        const pOutTs = parseToTimestamp(p.checkOut);
+                        if (!prevOutTs || (pOutTs && pOutTs > prevOutTs)) {
+                            prevP.checkOut = p.checkOut;
+                            prevP.clockOutMethod = p.clockOutMethod || prevP.clockOutMethod;
+                        }
                     }
                 } else {
                     cleanPunches.push(p);
@@ -262,6 +476,28 @@ const groupAttendanceRecords = (records, footprintsList = [], employeesList = []
                     p.checkOut = null;
                 }
             });
+
+            // Dynamic Shift Bridging & Closing Punch Consolidation:
+            // When an employee has an earlier unclosed punch (or inverted check-out invalidated above)
+            // followed by a trailing clock-out punch or short punch (<= 15 minutes) at the end of the shift:
+            if (cleanPunches.length > 1) {
+                const firstPunch = cleanPunches[0];
+                const lastPunch = cleanPunches[cleanPunches.length - 1];
+                const lastInTs = parseToTimestamp(lastPunch.checkIn);
+                const lastOutTs = parseToTimestamp(lastPunch.checkOut);
+                const lastDurationMs = (lastInTs && lastOutTs && lastOutTs >= lastInTs) ? (lastOutTs - lastInTs) : 0;
+
+                // If first punch has no checkout, and last punch has a checkout:
+                if (!firstPunch.checkOut && lastPunch.checkOut) {
+                    firstPunch.checkOut = lastPunch.checkOut;
+                    firstPunch.clockOutMethod = lastPunch.clockOutMethod || 'MANUAL_APP';
+                    if (lastPunch.checkOutAddress) firstPunch.checkOutAddress = lastPunch.checkOutAddress;
+                    // If the last punch was a short punch (<= 15 minutes), consolidate it away to avoid split card
+                    if (lastDurationMs <= 900000) {
+                        cleanPunches.splice(cleanPunches.length - 1, 1);
+                    }
+                }
+            }
 
             // 2. Cap at maximum 3 punches per company daily limit rule
             if (cleanPunches.length > 3) {
@@ -303,10 +539,18 @@ const groupAttendanceRecords = (records, footprintsList = [], employeesList = []
             }
 
             const isTodayRecord = isTodayStr(item.date);
+            const isFutureRecord = (() => {
+                const cleanDate = normalizeToIsoDate(item.date);
+                const todayIst = getAuthoritativeISTDate();
+                return Boolean(cleanDate && todayIst && cleanDate > todayIst);
+            })();
             const lastPunch = item.punches[item.punches.length - 1];
             
             if (isTodayRecord && lastPunch && !cleanCheckOutVal(lastPunch.checkOut)) {
                 item.checkOut = null;
+            } else if (isFutureRecord) {
+                // Future-dated record: preserve true punch checkout without synthesizing synthetic shift end
+                item.checkOut = lastPunch ? cleanCheckOutVal(lastPunch.checkOut) : null;
             } else if (!isTodayRecord && !item.checkOut) {
                 // Past date record with no valid checkOut logged:
                 const enrichedOutPunch = cleanPunches.find(p => p.clockOutMethod === 'AUTO_SHIFT_END' || p.clockOutMethod === 'AUTO_STALE_CLEANUP');
@@ -342,6 +586,15 @@ const groupAttendanceRecords = (records, footprintsList = [], employeesList = []
                     }
                 }
             }
+
+            // Synchronize the last punch's checkOut with item.checkOut if unclosed
+            if (item.checkOut && cleanPunches.length > 0) {
+                const lastP = cleanPunches[cleanPunches.length - 1];
+                if (!lastP.checkOut) {
+                    lastP.checkOut = item.checkOut;
+                    lastP.clockOutMethod = item.clockOutMethod || lastP.clockOutMethod;
+                }
+            }
         }
     });
 
@@ -371,17 +624,118 @@ const exportToCSV = (filename, headers, rows) => {
     document.body.removeChild(link);
 };
 
-export default function AttendanceView({ employees = [], onSelectEmployee }) {
-    const [attendance, setAttendance] = useState([]);
-    const [leaves, setLeaves] = useState([]);
-    const [footprints, setFootprints] = useState([]);
-    const [loading, setLoading] = useState(true);
+export default function AttendanceView({ employees = [], activeEmployees, onSelectEmployee }) {
+    const currentStaff = activeEmployees || employees.filter(isActiveEmployee);
+    const cachedAttendance = api.getCached('/attendance?limit=10000');
+    const [attendance, setAttendance] = useState(() => Array.isArray(cachedAttendance) ? cachedAttendance : (cachedAttendance?.data || []));
+    const [leaves, setLeaves] = useState(() => api.getCached('/leaves') || []);
+    const [footprints, setFootprints] = useState(() => api.getCached('/footprints') || []);
+    const [loading, setLoading] = useState(() => !cachedAttendance);
     const [error, setError] = useState(false);
     const [latestFootprints, setLatestFootprints] = useState({});
     const [todayDistances, setTodayDistances] = useState({});
     const [todayGpsOffDurations, setTodayGpsOffDurations] = useState({});
     const [latestAllFootprints, setLatestAllFootprints] = useState([]);
     const [selectedPunchHistory, setSelectedPunchHistory] = useState(null);
+    const [holidayCalendars, setHolidayCalendars] = useState(() => {
+        try {
+            const saved = localStorage.getItem('hrms_location_holiday_calendars');
+            if (saved) {
+                const parsed = JSON.parse(saved);
+                if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+            }
+        } catch {}
+        return [];
+    });
+
+    const getHolidayForEmp = (targetDateStr, emp) => {
+        if (!targetDateStr) return null;
+        let cals = holidayCalendars || [];
+        if (!cals.length) {
+            try {
+                const saved = localStorage.getItem('hrms_location_holiday_calendars');
+                if (saved) {
+                    const parsed = JSON.parse(saved);
+                    if (Array.isArray(parsed) && parsed.length > 0) cals = parsed;
+                }
+            } catch {}
+        }
+        if (!cals.length) return null;
+
+        const empLoc = String(emp?.location || '').trim().toLowerCase();
+        const empHolDet = String(emp?.holidayDetails || '').trim().toLowerCase();
+        let matchedCals = cals.filter(c => {
+            const cName = String(c.name || '').trim().toLowerCase();
+            const cLoc = String(c.location || '').trim().toLowerCase();
+            return (empHolDet && (cName === empHolDet || cName.includes(empHolDet) || cLoc === empHolDet)) ||
+                   (empLoc && (cLoc === empLoc || cName.includes(empLoc) || empLoc.includes(cLoc)));
+        });
+        if (!matchedCals.length) {
+            matchedCals = cals.filter(c => c.isDefault);
+        }
+        if (!matchedCals.length) {
+            return null;
+        }
+
+        for (const cal of matchedCals) {
+            let list = cal.holidays;
+            if (typeof list === 'string') {
+                try { list = JSON.parse(list); } catch { list = []; }
+            }
+            if (Array.isArray(list)) {
+                for (const h of list) {
+                    if (h && h.date) {
+                        const hDate = String(h.date).trim().slice(0, 10);
+                        if (hDate === targetDateStr) {
+                            return {
+                                name: String(h.title || h.name || 'Holiday').trim(),
+                                type: h.type || 'Holiday',
+                                date: hDate
+                            };
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    };
+
+    const getHolidayForDate = (targetDateStr) => {
+        if (!targetDateStr) return null;
+        let cals = holidayCalendars || [];
+        if (!cals.length) {
+            try {
+                const saved = localStorage.getItem('hrms_location_holiday_calendars');
+                if (saved) {
+                    const parsed = JSON.parse(saved);
+                    if (Array.isArray(parsed) && parsed.length > 0) cals = parsed;
+                }
+            } catch {}
+        }
+        for (const cal of cals) {
+            let list = cal.holidays;
+            if (typeof list === 'string') {
+                try { list = JSON.parse(list); } catch { list = []; }
+            }
+            if (Array.isArray(list)) {
+                for (const h of list) {
+                    if (h && h.date) {
+                        const hDate = String(h.date).trim().slice(0, 10);
+                        if (hDate === targetDateStr) {
+                            return {
+                                name: String(h.title || h.name || 'Holiday').trim(),
+                                type: h.type || 'Holiday',
+                                date: hDate
+                            };
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    };
+
+    const isHolidayForEmp = (targetDateStr, emp) => Boolean(getHolidayForEmp(targetDateStr, emp));
 
     const logsTopScrollRef = useRef(null);
     const logsTableRef = useRef(null);
@@ -872,42 +1226,42 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
         if (m === 'MANUAL_APP') {
             return (
                 <span style={{ fontSize: '0.68rem', color: '#059669', background: '#d1fae5', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '3px' }} title="Clocked by employee on Mobile App">
-                    📱 App
+                    ðŸ“± App
                 </span>
             );
         }
         if (m === 'MANUAL_WEB') {
             return (
                 <span style={{ fontSize: '0.68rem', color: '#2563eb', background: '#dbeafe', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '3px' }} title="Clocked via Web Portal">
-                    💻 Web
+                    ðŸ’» Web
                 </span>
             );
         }
         if (m === 'AUTO_SHIFT_END') {
             return (
                 <span style={{ fontSize: '0.68rem', color: '#d97706', background: '#fef3c7', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '3px' }} title="Automatically clocked out at shift end">
-                    🤖 Auto (Shift)
+                    ðŸ¤– Auto (Shift)
                 </span>
             );
         }
         if (m === 'AUTO_STALE_CLEANUP') {
             return (
                 <span style={{ fontSize: '0.68rem', color: '#b45309', background: '#ffedd5', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '3px' }} title="Auto-closed by system fallback cleanup">
-                    ⚠️ Auto-Closed
+                    âš ï¸ Auto-Closed
                 </span>
             );
         }
         if (m === 'AUTO_LOCATION_ANCHOR') {
             return (
                 <span style={{ fontSize: '0.68rem', color: '#7c3aed', background: '#ede9fe', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '3px' }} title="Auto-closed at last known GPS location">
-                    📍 Auto (GPS)
+                    ðŸ“ Auto (GPS)
                 </span>
             );
         }
         if (m === 'AUTO_RECOVERY_PUNCH') {
             return (
                 <span style={{ fontSize: '0.68rem', color: '#0284c7', background: '#e0f2fe', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '3px' }} title="Auto-recovered from live device telemetry">
-                    🔄 Auto-Recovered
+                    ðŸ”„ Auto-Recovered
                 </span>
             );
         }
@@ -919,6 +1273,7 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
     const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'not-clocked-in', 'clocked-out', 'active-today'
     const [fromDate, setFromDate] = useState('');
     const [toDate, setToDate] = useState('');
+    const [selectedRecordEmpIds, setSelectedRecordEmpIds] = useState([]); // [] means all employees, or array of selected employee IDs/codes
     
     // Dropdown & Report States
     const [showReportDropdown, setShowReportDropdown] = useState(false);
@@ -935,41 +1290,100 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 15;
 
+    // Robust Multi-Key & ISO Date-Aware Employee Record Matching Engine
+    const isRecordForEmpAndDate = (r, emp, targetDateStr) => {
+        if (!r || !emp || !targetDateStr) return false;
+        const rDateClean = normalizeToIsoDate(r.date || r.createdAt);
+        if (rDateClean !== targetDateStr) return false;
+
+        const rUid = String(r.userId || '').trim().toLowerCase();
+        const rUName = String(r.userName || '').trim().toLowerCase();
+        const rUCode = String(r.empCode || r.employeeId || '').trim().toLowerCase();
+
+        const empId = String(emp.id || '').trim().toLowerCase();
+        const empCode = String(emp.empCode || emp.emp_code || getEmpId(emp)).trim().toLowerCase();
+        const empName = String(emp.name || '').trim().toLowerCase();
+
+        const idMatches = (rUid && (rUid === empId || rUid === empCode || rUid === empName)) ||
+                          (rUCode && (rUCode === empCode || rUCode === empId)) ||
+                          (rUName && (rUName === empName || rUName === empId || rUName === empCode));
+
+        const objMatches = r.employee && (
+            String(r.employee.id || '').trim().toLowerCase() === empId ||
+            String(r.employee.empCode || r.employee.emp_code || '').trim().toLowerCase() === empCode ||
+            String(r.employee.name || '').trim().toLowerCase() === empName
+        );
+
+        return idMatches || objMatches;
+    };
+
     useEffect(() => {
+        const abortController = new AbortController();
+        let isMounted = true;
+
         const fetchData = async () => {
             try {
-                // Phase 1: Fetch initial logs first & unblock UI immediately (<100ms)
-                const attendanceRes = await api.getAttendance({ chunked: 'true', page: 1, limit: 20 });
-                const attendanceData = Array.isArray(attendanceRes) ? attendanceRes : (attendanceRes.data || []);
-                setAttendance(attendanceData);
-                setTimeout(() => setLoading(false), 300);
+                // Targeted date/month query to fetch current period instead of unbounded 10,000 records
+                const now = new Date();
+                const curMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+                let attendanceQuery = {};
 
-                // Phase 2: Fetch full attendance logs for complete reports, footprints & leaves in background
+                if (fromDate) {
+                    attendanceQuery.date = fromDate;
+                } else if (reportPeriod === 'last-month') {
+                    const lm = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                    attendanceQuery.month = `${lm.getFullYear()}-${String(lm.getMonth() + 1).padStart(2, '0')}`;
+                } else if (reportPeriod === 'custom' && customMonth) {
+                    attendanceQuery.month = customMonth;
+                } else {
+                    // Default to current active month (40KB vs 900KB unbounded payload)
+                    attendanceQuery.month = curMonthStr;
+                }
+
+                const fullAttendanceRes = await api.getAttendance(attendanceQuery, { signal: abortController.signal });
+                if (!isMounted) return;
+                const fullData = Array.isArray(fullAttendanceRes) ? fullAttendanceRes : (fullAttendanceRes?.data || []);
+                setAttendance(fullData);
+                setLoading(false);
+
+                // Fetch footprints & leaves in background with request cancellation
                 const targetDateQuery = fromDate || new Date().toISOString().split('T')[0];
                 Promise.all([
-                    api.getAttendance({ limit: 10000 }).catch(err => { console.warn('Full attendance fetch warning:', err); return null; }),
-                    api.getLatestAllFootprints().catch(err => { console.warn('Footprints fetch warning:', err); return []; }),
-                    api.getFootprints ? api.getFootprints(null, targetDateQuery).catch(err => { console.warn('Footprints history fetch warning:', err); return []; }) : Promise.resolve([]),
-                    api.getLeaves ? api.getLeaves().catch(err => { console.warn('Leaves fetch warning:', err); return []; }) : Promise.resolve([])
-                ]).then(([fullAttendanceRes, latestAllData, footprintsData, leavesData]) => {
-                    if (fullAttendanceRes) {
-                        const fullData = Array.isArray(fullAttendanceRes) ? fullAttendanceRes : (fullAttendanceRes.data || []);
-                        if (fullData.length > 0) {
-                            setAttendance(fullData);
-                        }
-                    }
+                    api.getLatestAllFootprints({ signal: abortController.signal }).catch(() => []),
+                    api.getFootprints ? api.getFootprints(null, targetDateQuery, { signal: abortController.signal }).catch(() => []) : Promise.resolve([]),
+                    api.getLeaves ? api.getLeaves(null, { signal: abortController.signal }).catch(() => []) : Promise.resolve([])
+                ]).then(([latestAllData, footprintsData, leavesData]) => {
+                    if (!isMounted) return;
                     if (latestAllData) setLatestAllFootprints(latestAllData);
                     if (footprintsData && Array.isArray(footprintsData)) setFootprints(footprintsData);
                     if (leavesData) setLeaves(leavesData);
                 });
+                fetch('/api/v1/holidays/calendars')
+                    .then(res => res.ok ? res.json() : [])
+                    .then(calsData => {
+                        if (!isMounted) return;
+                        if (Array.isArray(calsData) && calsData.length > 0) {
+                            setHolidayCalendars(calsData);
+                            try { localStorage.setItem('hrms_location_holiday_calendars', JSON.stringify(calsData)); } catch {}
+                        }
+                    })
+                    .catch(() => {});
             } catch (err) {
+                if (err?.name === 'AbortError') return;
                 console.error(err);
-                setError(true);
-                setLoading(false);
+                if (isMounted) {
+                    setError(true);
+                    setLoading(false);
+                }
             }
         };
         fetchData();
-    }, [fromDate]);
+
+        return () => {
+            isMounted = false;
+            abortController.abort();
+        };
+    }, [fromDate, reportPeriod, customMonth, activeSubView]);
 
     useEffect(() => {
         if (!employees.length) return;
@@ -1014,104 +1428,7 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
         setLatestFootprints(latest);
     }, [employees, attendance, latestAllFootprints]);
 
-    // Dedicated Audited Route Replay Multi-Date Travel Distance & GPS Off Duration Fetcher Engine
-    useEffect(() => {
-        if (!employees || employees.length === 0) return;
-        const todayStr = new Date().toISOString().split('T')[0];
-        const defaultDate = fromDate || todayStr;
-        const pairsToFetch = new Map(); // pairKey -> { targetId, dateStr, emp }
-
-        // 1. Gather all unique (targetId, dateStr) pairs from attendance records
-        if (attendance && attendance.length > 0) {
-            attendance.forEach(rec => {
-                const recDate = normalizeDateStr(rec.date || rec.createdAt);
-                if (!recDate) return;
-                const rawUser = rec.userId || rec.userName || rec.empCode;
-                if (!rawUser) return;
-
-                const uLower = String(rawUser).trim().toLowerCase();
-                const matchedEmp = employees.find(e => 
-                    (e.id && String(e.id).trim().toLowerCase() === uLower) ||
-                    (e.empCode && String(e.empCode).trim().toLowerCase() === uLower) ||
-                    (e.emp_code && String(e.emp_code).trim().toLowerCase() === uLower) ||
-                    (e.name && String(e.name).trim().toLowerCase() === uLower)
-                );
-
-                const targetId = matchedEmp ? (matchedEmp.id || matchedEmp.empCode || rawUser) : rawUser;
-                const pairKey = `${String(targetId).trim().toLowerCase()}_${recDate}`;
-                if (!pairsToFetch.has(pairKey)) {
-                    pairsToFetch.set(pairKey, { targetId, dateStr: recDate, emp: matchedEmp });
-                }
-            });
-        }
-
-        // 2. Add default date for all employees
-        employees.forEach(emp => {
-            const targetId = emp.employeeId || emp.userId || emp.id;
-            if (!targetId) return;
-            const pairKey = `${String(targetId).trim().toLowerCase()}_${defaultDate}`;
-            if (!pairsToFetch.has(pairKey)) {
-                pairsToFetch.set(pairKey, { targetId, dateStr: defaultDate, emp });
-            }
-        });
-
-        // 3. Query Route Replay for each unique (targetId, dateStr)
-        pairsToFetch.forEach(({ targetId, dateStr, emp }) => {
-            api.getRouteReplay(targetId, dateStr, 'osrm').then(res => {
-                if (res) {
-                    const dateAliases = getAllDateAliases(dateStr);
-                    const allAliasKeys = [
-                        emp?.id,
-                        emp?.empCode,
-                        emp?.emp_code,
-                        emp?.name,
-                        targetId,
-                        String(targetId).trim().toLowerCase()
-                    ].filter(Boolean);
-
-                    const isCurrentDate = isToday(dateStr);
-
-                    if (res.roadDistance !== undefined) {
-                        const distStr = Number(res.roadDistance).toFixed(2);
-                        const distUpdates = {};
-                        allAliasKeys.forEach(k => {
-                            const kStr = String(k).trim();
-                            const kLower = kStr.toLowerCase();
-                            dateAliases.forEach(dAlias => {
-                                distUpdates[`${kStr}_${dAlias}`] = distStr;
-                                distUpdates[`${kLower}_${dAlias}`] = distStr;
-                            });
-                            if (isCurrentDate) {
-                                distUpdates[kStr] = distStr;
-                                distUpdates[kLower] = distStr;
-                            }
-                        });
-                        setTodayDistances(prev => ({ ...prev, ...distUpdates }));
-                    }
-
-                    if (res.gpsOffDurationLabel !== undefined && res.gpsOffDurationLabel !== null) {
-                        const offLabel = res.gpsOffDurationLabel || '0m';
-                        const offUpdates = {};
-                        allAliasKeys.forEach(k => {
-                            const kStr = String(k).trim();
-                            const kLower = kStr.toLowerCase();
-                            dateAliases.forEach(dAlias => {
-                                offUpdates[`${kStr}_${dAlias}`] = offLabel;
-                                offUpdates[`${kLower}_${dAlias}`] = offLabel;
-                            });
-                            if (isCurrentDate) {
-                                offUpdates[kStr] = offLabel;
-                                offUpdates[kLower] = offLabel;
-                            }
-                        });
-                        setTodayGpsOffDurations(prev => ({ ...prev, ...offUpdates }));
-                    }
-                }
-            }).catch(err => {
-                console.warn(`[RouteReplay Fetch Warning] Could not fetch distance/gps off for ${targetId} on ${dateStr}:`, err);
-            });
-        });
-    }, [employees, attendance, fromDate]);
+    // Note: Route replay travel distances are fetched on-demand for the active paginated view below to prevent network flooding
 
     // Case-Insensitive & Multi-Key Date-Aware Distance Resolver
     const getAuditedDistanceForRecord = (record, emp) => {
@@ -1280,28 +1597,7 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
             return baseDate;
         };
 
-        // If record has multiple punches, sum working time across completed punch sessions
-        if (punches && punches.length > 1) {
-            let totalMs = 0;
-            punches.forEach(p => {
-                if (p.checkIn && p.checkOut) {
-                    const start = parseDateTime(date, p.checkIn);
-                    const end = parseDateTime(date, p.checkOut);
-                    if (start && end && end > start) {
-                        totalMs += (end - start);
-                    }
-                }
-            });
-            if (totalMs > 0) {
-                const diffHrs = Math.floor(totalMs / 3600000);
-                const diffMins = Math.floor((totalMs % 3600000) / 60000);
-                const diffSecs = Math.floor((totalMs % 60000) / 1000);
-                if (diffHrs > 0) return `${diffHrs}h ${diffMins}m ${diffSecs}s`;
-                if (diffMins > 0) return `${diffMins}m ${diffSecs}s`;
-                return `${diffSecs}s`;
-            }
-        }
-
+        // Production Rule: Total working hours are strictly calculated from First Clock-In to Last Clock-Out of the day
         if (!checkIn || !checkOut) return '-';
 
         const start = parseDateTime(date, checkIn);
@@ -1310,7 +1606,7 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
         if (!start || !end) return '-';
         
         const diffMs = end - start;
-        if (diffMs < 0) return '-';
+        if (diffMs <= 0) return '0s';
         
         const diffHrs = Math.floor(diffMs / 3600000);
         const diffMins = Math.floor((diffMs % 3600000) / 60000);
@@ -1346,8 +1642,9 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                 if (r.employee?.name) activeOrLoggedTodayKeys.add(String(r.employee.name).trim().toLowerCase());
             });
         
-        const absentEmployees = (employees || []).filter(emp => {
+        const absentEmployees = (currentStaff || []).filter(emp => {
             if (!emp) return false;
+            if (!isEmpActiveOnDate(emp, new Date())) return false;
             const eid = emp.id ? String(emp.id).trim().toLowerCase() : '';
             const ecode = emp.empCode ? String(emp.empCode).trim().toLowerCase() : (emp.emp_code ? String(emp.emp_code).trim().toLowerCase() : '');
             const ename = emp.name ? String(emp.name).trim().toLowerCase() : '';
@@ -1468,7 +1765,157 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
     const endIndex = Math.min(startIndex + itemsPerPage, totalItems);
     const paginatedData = filteredData.slice(startIndex, endIndex);
 
+    // High-Performance On-Demand Route Replay Fetcher (Scoped strictly to visible page rows, batched state update)
+    useEffect(() => {
+        if (!paginatedData || paginatedData.length === 0 || !employees || !employees.length) return;
+        const abortController = new AbortController();
+        let isMounted = true;
+
+        const pairsToFetch = new Map();
+        paginatedData.forEach(rec => {
+            const recDate = normalizeDateStr(rec.date || rec.createdAt);
+            if (!recDate) return;
+            const rawUser = rec.userId || rec.userName || rec.empCode;
+            if (!rawUser) return;
+
+            const uLower = String(rawUser).trim().toLowerCase();
+            const matchedEmp = employees.find(e => 
+                (e.id && String(e.id).trim().toLowerCase() === uLower) ||
+                (e.empCode && String(e.empCode).trim().toLowerCase() === uLower) ||
+                (e.emp_code && String(e.emp_code).trim().toLowerCase() === uLower) ||
+                (e.name && String(e.name).trim().toLowerCase() === uLower)
+            );
+
+            const targetId = matchedEmp ? (matchedEmp.id || matchedEmp.empCode || rawUser) : rawUser;
+            const pairKey = `${String(targetId).trim().toLowerCase()}_${recDate}`;
+            if (!pairsToFetch.has(pairKey)) {
+                pairsToFetch.set(pairKey, { targetId, dateStr: recDate, emp: matchedEmp });
+            }
+        });
+
+        if (pairsToFetch.size === 0) return;
+
+        const fetchPromises = Array.from(pairsToFetch.values()).map(async ({ targetId, dateStr, emp }) => {
+            try {
+                const res = await api.getRouteReplay(targetId, dateStr, 'osrm', { signal: abortController.signal });
+                if (!res) return null;
+                return { targetId, dateStr, emp, res };
+            } catch (err) {
+                return null;
+            }
+        });
+
+        Promise.all(fetchPromises).then(results => {
+            if (!isMounted) return;
+            const distUpdates = {};
+            const offUpdates = {};
+
+            results.forEach(item => {
+                if (!item) return;
+                const { targetId, dateStr, emp, res } = item;
+                const dateAliases = getAllDateAliases(dateStr);
+                const allAliasKeys = [
+                    emp?.id,
+                    emp?.empCode,
+                    emp?.emp_code,
+                    emp?.name,
+                    targetId,
+                    String(targetId).trim().toLowerCase()
+                ].filter(Boolean);
+
+                const isCurrentDate = isToday(dateStr);
+
+                if (res.roadDistance !== undefined) {
+                    const distStr = Number(res.roadDistance).toFixed(2);
+                    allAliasKeys.forEach(k => {
+                        const kStr = String(k).trim();
+                        const kLower = kStr.toLowerCase();
+                        dateAliases.forEach(dAlias => {
+                            distUpdates[`${kStr}_${dAlias}`] = distStr;
+                            distUpdates[`${kLower}_${dAlias}`] = distStr;
+                        });
+                        if (isCurrentDate) {
+                            distUpdates[kStr] = distStr;
+                            distUpdates[kLower] = distStr;
+                        }
+                    });
+                }
+
+                if (res.gpsOffDurationLabel !== undefined && res.gpsOffDurationLabel !== null) {
+                    const offLabel = res.gpsOffDurationLabel || '0m';
+                    allAliasKeys.forEach(k => {
+                        const kStr = String(k).trim();
+                        const kLower = kStr.toLowerCase();
+                        dateAliases.forEach(dAlias => {
+                            offUpdates[`${kStr}_${dAlias}`] = offLabel;
+                            offUpdates[`${kLower}_${dAlias}`] = offLabel;
+                        });
+                        if (isCurrentDate) {
+                            offUpdates[kStr] = offLabel;
+                            offUpdates[kLower] = offLabel;
+                        }
+                    });
+                }
+            });
+
+            if (Object.keys(distUpdates).length > 0) {
+                setTodayDistances(prev => ({ ...prev, ...distUpdates }));
+            }
+            if (Object.keys(offUpdates).length > 0) {
+                setTodayGpsOffDurations(prev => ({ ...prev, ...offUpdates }));
+            }
+        });
+
+        return () => {
+            isMounted = false;
+            abortController.abort();
+        };
+    }, [currentPage, filteredData.length, employees]);
+
+
     const getReportDates = () => {
+        // 1. If fromDate and toDate range is active
+        if (fromDate && toDate) {
+            const start = new Date(fromDate);
+            start.setHours(0, 0, 0, 0);
+            const end = new Date(toDate);
+            end.setHours(0, 0, 0, 0);
+
+            if (!isNaN(start.getTime()) && !isNaN(end.getTime()) && start <= end) {
+                const dateItems = [];
+                const cur = new Date(start);
+                const isSameMonth = start.getFullYear() === end.getFullYear() && start.getMonth() === end.getMonth();
+                while (cur <= end) {
+                    const y = cur.getFullYear();
+                    const m = cur.getMonth();
+                    const d = cur.getDate();
+                    const dStr = cur.toISOString().split('T')[0];
+                    dateItems.push({
+                        day: d,
+                        month: m,
+                        year: y,
+                        dateStr: dStr,
+                        label: isSameMonth ? `${d}` : `${d}/${m + 1}`
+                    });
+                    cur.setDate(cur.getDate() + 1);
+                }
+                const startDate = new Date(start);
+                const endDate = new Date(end);
+                endDate.setHours(23, 59, 59, 999);
+                return {
+                    year: start.getFullYear(),
+                    month: start.getMonth(),
+                    days: dateItems.map(item => item.day),
+                    dateItems,
+                    isCustomRange: true,
+                    rangeText: `${fromDate} to ${toDate}`,
+                    startDate,
+                    endDate
+                };
+            }
+        }
+
+        // 2. Standard month-based report period
         const today = new Date();
         let year = today.getFullYear();
         let month = today.getMonth(); // 0-indexed
@@ -1487,21 +1934,67 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
         }
 
         const daysCount = getDaysInMonth(year, month);
-        const days = Array.from({ length: daysCount }, (_, i) => i + 1);
-        return { year, month, days };
+        const dateItems = Array.from({ length: daysCount }, (_, i) => {
+            const day = i + 1;
+            const dStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            return {
+                day,
+                month,
+                year,
+                dateStr: dStr,
+                label: `${day}`
+            };
+        });
+
+        const startDate = new Date(year, month, 1, 0, 0, 0, 0);
+        const endDate = new Date(year, month, daysCount, 23, 59, 59, 999);
+
+        return {
+            year,
+            month,
+            days: dateItems.map(item => item.day),
+            dateItems,
+            isCustomRange: false,
+            startDate,
+            endDate
+        };
     };
 
     if (activeSubView === 'attendance-summary') {
-        const { year, month, days } = getReportDates();
+        const { year, month, days, startDate, endDate } = getReportDates();
         const monthName = new Date(year, month).toLocaleString('default', { month: 'long' });
         
-        const summaryRows = employees.map((emp, idx) => {
+        const activeEmployeesForPeriod = employees.filter(emp => isEmpActiveForPeriod(emp, startDate, endDate));
+
+        const filteredSummaryEmployees = activeEmployeesForPeriod.filter((emp, idx) => {
+            if (selectedRecordEmpIds && selectedRecordEmpIds.length > 0) {
+                const empIdStr = String(emp.id).toLowerCase();
+                const empCodeStr = String(emp.empCode || emp.emp_code || getEmpId(emp, idx)).toLowerCase();
+                const matches = selectedRecordEmpIds.some(id => {
+                    const s = String(id).toLowerCase();
+                    return s === empIdStr || s === empCodeStr;
+                });
+                if (!matches) return false;
+            }
+            if (searchQuery && searchQuery.trim() !== '') {
+                const q = searchQuery.toLowerCase().trim();
+                const nameMatch = emp.name && String(emp.name).toLowerCase().includes(q);
+                const codeMatch = (emp.empCode || emp.emp_code || emp.id) && String(emp.empCode || emp.emp_code || emp.id).toLowerCase().includes(q);
+                const deptMatch = emp.department && String(emp.department).toLowerCase().includes(q);
+                if (!nameMatch && !codeMatch && !deptMatch) return false;
+            }
+            return true;
+        });
+
+        const summaryRows = filteredSummaryEmployees.map((emp, idx) => {
             const empId = getEmpId(emp, idx);
             const dept = emp.department || 'Company';
             
             const today = new Date();
             let targetEndDay = days.length;
-            if (year === today.getFullYear() && month === today.getMonth()) {
+            if (year > today.getFullYear() || (year === today.getFullYear() && month > today.getMonth())) {
+                targetEndDay = 0;
+            } else if (year === today.getFullYear() && month === today.getMonth()) {
                 targetEndDay = today.getDate();
             }
 
@@ -1521,22 +2014,18 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
             const standardCheckInHour = 9; 
             const standardCheckOutHour = 18; 
             const requiredNetWorkMs = 9 * 60 * 60 * 1000; // 9.0 Hours daily shift
+            const empWeeklyOffs = String(emp.weeklyOffs || 'Sunday').toLowerCase();
             
             days.forEach(day => {
-                if (day <= targetEndDay) {
+                if (day <= targetEndDay && isEmpActiveOnDate(emp, new Date(year, month, day))) {
                     const targetDate = new Date(year, month, day);
                     targetDate.setHours(0, 0, 0, 0);
 
-                    // 1. Check for actual attendance punches
-                    const record = attendance.find(r => {
-                        if (r.userName && r.userName.toLowerCase() === emp.name.toLowerCase()) {
-                            const rDate = new Date(r.date);
-                            if (!isNaN(rDate.getTime())) {
-                                return rDate.getFullYear() === year && rDate.getMonth() === month && rDate.getDate() === day;
-                            }
-                        }
-                        return false;
-                    });
+                    const targetDateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                    const dayName = targetDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+                    const isWeeklyOff = empWeeklyOffs.includes(dayName);
+                    const isHoliday = isHolidayForEmp(targetDateStr, emp);
+                    const record = groupedAttendance.find(r => isRecordForEmpAndDate(r, emp, targetDateStr));
                     
                     if (record && record.checkIn && record.checkOut) {
                         actualWorkingDays += 1;
@@ -1608,7 +2097,7 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                                 }
                             }
                         }
-                    } else {
+                    } else if (!isWeeklyOff && !isHoliday) {
                         // 2. Check for approved leave on this day
                         const onApprovedLeave = leaves.some(l => {
                             const lStatus = l.status ? String(l.status).toLowerCase() : 'approved';
@@ -1635,21 +2124,21 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                 }
             });
             
-            // Calculate employee-specific standard working days (excluding Weekly Offs) up to today
+            // Calculate employee-specific standard working days (excluding Weekly Offs AND Holidays) up to today
             let empStandardDays = 0;
-            const empWeeklyOffs = String(emp.weeklyOffs || 'Sunday').toLowerCase();
             days.forEach(day => {
-                if (day <= targetEndDay) {
+                if (day <= targetEndDay && isEmpActiveOnDate(emp, new Date(year, month, day))) {
                     const date = new Date(year, month, day);
                     const dayName = date.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+                    const targetDateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                     const isWeeklyOff = empWeeklyOffs.includes(dayName);
-                    if (!isWeeklyOff) {
+                    const isHoliday = isHolidayForEmp(targetDateStr, emp);
+                    if (!isWeeklyOff && !isHoliday) {
                         empStandardDays++;
                     }
                 }
             });
-
-            const standardDays = empStandardDays > 0 ? empStandardDays : 1;
+            const standardDays = empStandardDays;
             const standardHoursVal = standardDays * 9; // 9.0 Hours daily standard shift
             const standardHours = `${standardHoursVal}:00`;
             const actualDays = actualWorkingDays;
@@ -1744,6 +2233,16 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'wrap' }}>
+                        {/* Selected Employee Filter */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#4b5563', whiteSpace: 'nowrap' }}>Employee:</label>
+                            <MultiSelectEmployeeDropdown
+                                employees={activeEmployeesForPeriod}
+                                selectedIds={selectedRecordEmpIds}
+                                onChange={setSelectedRecordEmpIds}
+                                getEmpId={getEmpId}
+                            />
+                        </div>
                         <div style={{ display: 'inline-flex', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '2px', background: 'white' }}>
                             <button
                                 className="btn"
@@ -1945,60 +2444,55 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
     }
 
     if (activeSubView === 'attendance-record') {
-        const { year, month, days } = getReportDates();
+        const { year, month, days, dateItems, isCustomRange, rangeText, startDate, endDate } = getReportDates();
         const monthName = new Date(year, month).toLocaleString('default', { month: 'long' });
         
-        // Generate rows for each employee
-        const reportRows = employees.map((emp, idx) => {
+        const activeEmployeesForPeriod = employees.filter(emp => isEmpActiveForPeriod(emp, startDate, endDate));
+
+        // Filter employees by selected employee dropdown and search query
+        const filteredReportEmployees = activeEmployeesForPeriod.filter((emp, idx) => {
+            if (selectedRecordEmpIds && selectedRecordEmpIds.length > 0) {
+                const empIdStr = String(emp.id).toLowerCase();
+                const empCodeStr = String(emp.empCode || emp.emp_code || getEmpId(emp, idx)).toLowerCase();
+                const matches = selectedRecordEmpIds.some(id => {
+                    const s = String(id).toLowerCase();
+                    return s === empIdStr || s === empCodeStr;
+                });
+                if (!matches) return false;
+            }
+            if (searchQuery && searchQuery.trim() !== '') {
+                const q = searchQuery.toLowerCase().trim();
+                const nameMatch = emp.name && String(emp.name).toLowerCase().includes(q);
+                const codeMatch = (emp.empCode || emp.emp_code || emp.id) && String(emp.empCode || emp.emp_code || emp.id).toLowerCase().includes(q);
+                const deptMatch = emp.department && String(emp.department).toLowerCase().includes(q);
+                if (!nameMatch && !codeMatch && !deptMatch) return false;
+            }
+            return true;
+        });
+
+        // Generate rows for each filtered employee
+        const reportRows = filteredReportEmployees.map((emp, idx) => {
             const empId = getEmpId(emp, idx);
             const dept = emp.department || 'Company';
             
-            // Map day number -> check-in and check-out times
+            // Map dateStr -> check-in and check-out times
             const dayRecords = {};
-            days.forEach(day => {
-                const targetDate = new Date(year, month, day);
+            dateItems.forEach(item => {
+                const targetDate = new Date(item.year, item.month, item.day);
                 targetDate.setHours(0, 0, 0, 0);
+                const isActiveOnThisDay = isEmpActiveOnDate(emp, targetDate);
 
-                const record = attendance.find(r => {
-                    const empNameMatch = r.userName && String(r.userName).trim().toLowerCase() === String(emp.name).trim().toLowerCase();
-                    const empIdMatch = r.userId && (
-                        String(r.userId).trim().toLowerCase() === String(emp.id).trim().toLowerCase() || 
-                        String(r.userId).trim().toLowerCase() === String(emp.empCode || '').trim().toLowerCase()
-                    );
-                    if (empNameMatch || empIdMatch) {
-                        const rDate = new Date(r.date);
-                        if (!isNaN(rDate.getTime())) {
-                            return rDate.getFullYear() === year && rDate.getMonth() === month && rDate.getDate() === day;
-                        }
-                    }
-                    return false;
-                });
+                const record = groupedAttendance.find(r => isRecordForEmpAndDate(r, emp, item.dateStr));
                 
-                const formatTime = (timeStr) => {
-                    if (!timeStr) return '';
-                    let d = new Date(timeStr);
-                    if (isNaN(d.getTime()) && !isNaN(Number(timeStr))) {
-                        d = new Date(Number(timeStr));
-                    }
-                    if (!isNaN(d.getTime()) && d.getFullYear() > 2000) {
-                        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
-                    }
-                    const timeRegex = /(\d+):(\d+):?(\d+)?\s*(AM|PM)?/i;
-                    const match = String(timeStr).match(timeRegex);
-                    if (match) {
-                        let hours = parseInt(match[1], 10);
-                        const minutes = match[2];
-                        const ampm = match[4] ? ` ${match[4].toUpperCase()}` : '';
-                        return `${String(hours).padStart(2, '0')}:${minutes}${ampm}`;
-                    }
-                    return String(timeStr);
-                };
+                const formatTime = (timeStr) => formatTo12HourTime(timeStr);
 
                 if (record && (record.checkIn || record.checkOut)) {
-                    dayRecords[day] = {
+                    dayRecords[item.dateStr] = {
                         in: formatTime(record.checkIn),
                         out: formatTime(record.checkOut)
                     };
+                } else if (!isActiveOnThisDay) {
+                    dayRecords[item.dateStr] = { in: '-', out: '-' };
                 } else {
                     // Check for approved leaves on this day
                     const onLeave = leaves.some(l => {
@@ -2027,9 +2521,9 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                     });
 
                     if (onLeave) {
-                        dayRecords[day] = { in: 'Leave', out: 'Approved' };
+                        dayRecords[item.dateStr] = { in: 'Leave', out: 'Approved' };
                     } else {
-                        dayRecords[day] = { in: '', out: '' };
+                        dayRecords[item.dateStr] = { in: '', out: '' };
                     }
                 }
             });
@@ -2038,26 +2532,548 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                 empId,
                 name: emp.name,
                 dept,
+                rawEmp: emp,
                 dayRecords
             };
         });
 
-        const handleExportRecordExcel = () => {
-            const headers = ['Employee ID', 'Name', 'Department'];
-            days.forEach(day => {
-                headers.push(`${day} In`, `${day} Out`);
-            });
+        const handleExportRecordExcel = async () => {
+            try {
+                const { default: ExcelJS } = await import('exceljs');
+                const wb = new ExcelJS.Workbook();
+                wb.creator = 'Hydro HRMS';
+                wb.created = new Date();
 
-            const rows = reportRows.map(row => {
-                const rowData = [row.empId, row.name, row.dept];
-                days.forEach(day => {
-                    const rec = row.dayRecords[day] || { in: '', out: '' };
-                    rowData.push(rec.in || '', rec.out || '');
+                const thinBorder = {
+                    top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+                    left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+                    bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+                    right: { style: 'thin', color: { argb: 'FFCBD5E1' } }
+                };
+
+                const headerBorder = {
+                    top: { style: 'medium', color: { argb: 'FF0F172A' } },
+                    left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+                    bottom: { style: 'medium', color: { argb: 'FF0F172A' } },
+                    right: { style: 'thin', color: { argb: 'FFCBD5E1' } }
+                };
+
+                const sundayLetters = ['S', 'U', 'N', 'D', 'A', 'Y'];
+                const totalRows = reportRows.length;
+
+                // ========================================================
+                // SHEET 1: ATTENDANCE RECORD (IN - OUT TIMES)
+                // ========================================================
+                const ws1 = wb.addWorksheet('Attendance Record', {
+                    views: [{ state: 'frozen', xSplit: 3, ySplit: 4 }]
                 });
-                return rowData;
-            });
 
-            exportToCSV(`Attendance_Record_${monthName}_${year}.csv`, headers, rows);
+                const totalCols1 = 3 + dateItems.length;
+
+                // 1. Top Title Banner
+                ws1.mergeCells(1, 1, 1, totalCols1);
+                const titleCell1 = ws1.getCell(1, 1);
+                titleCell1.value = 'ATTENDANCE RECORD (CLOCK IN / OUT)';
+                titleCell1.font = { name: 'Calibri', size: 15, bold: true, color: { argb: 'FFFFFFFF' } };
+                titleCell1.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F172A' } };
+                titleCell1.alignment = { vertical: 'middle', horizontal: 'center' };
+                ws1.getRow(1).height = 32;
+
+                // 2. Month & Report Info Banner
+                ws1.mergeCells(2, 1, 2, totalCols1);
+                const subCell1 = ws1.getCell(2, 1);
+                subCell1.value = `Month / Period: ${isCustomRange ? rangeText : `${monthName} ${year}`}    |    Total Employees: ${reportRows.length}    |    Generated: ${new Date().toLocaleDateString('en-GB')}`;
+                subCell1.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: 'FF334155' } };
+                subCell1.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+                subCell1.alignment = { vertical: 'middle', horizontal: 'center' };
+                ws1.getRow(2).height = 22;
+
+                // 3. Legend Row
+                ws1.mergeCells(3, 1, 3, totalCols1);
+                const legCell1 = ws1.getCell(3, 1);
+                legCell1.value = 'Legend:  🟢 Top: Clock-In (12-hr)    🔴 Bottom: Clock-Out (12-hr)    📅 Sunday: Weekly Off';
+                legCell1.font = { name: 'Calibri', size: 9, italic: true, color: { argb: 'FF475569' } };
+                legCell1.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+                legCell1.alignment = { vertical: 'middle', horizontal: 'center' };
+                ws1.getRow(3).height = 18;
+
+                // 4. Table Header Row (Row 4) - Day Numbers (dd) Only
+                ws1.getRow(4).height = 26;
+                const headerCols1 = ['Emp ID', 'Name', 'Department', ...dateItems.map(d => String(d.day).padStart(2, '0'))];
+
+                headerCols1.forEach((colName, idx) => {
+                    const colNum = idx + 1;
+                    const cell = ws1.getCell(4, colNum);
+                    cell.value = colName;
+                    cell.alignment = { vertical: 'middle', horizontal: 'center' };
+                    cell.border = headerBorder;
+
+                    if (colNum <= 3) {
+                        cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+                        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+                    } else {
+                        const item = dateItems[colNum - 4];
+                        const isSunday = new Date(item.year, item.month, item.day).getDay() === 0;
+
+                        if (isSunday) {
+                            cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF991B1B' } };
+                            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
+                        } else {
+                            cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+                            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0284C7' } };
+                        }
+                    }
+                });
+
+                // Column Widths for Sheet 1
+                ws1.getColumn(1).width = 14;
+                ws1.getColumn(2).width = 22;
+                ws1.getColumn(3).width = 16;
+                for (let c = 4; c <= totalCols1; c++) {
+                    ws1.getColumn(c).width = 11;
+                }
+
+                const startRowIdx1 = 5;
+                const endRowIdx1 = startRowIdx1 + reportRows.length - 1;
+
+                // Employee Data Rows for Sheet 1
+                reportRows.forEach((row, rIdx) => {
+                    const rowNum = startRowIdx1 + rIdx;
+                    const wsRow = ws1.getRow(rowNum);
+                    wsRow.height = 30;
+
+                    const idCell = wsRow.getCell(1);
+                    idCell.value = row.empId;
+                    idCell.font = { name: 'Calibri', size: 9.5, bold: true, color: { argb: 'FF334155' } };
+                    idCell.alignment = { vertical: 'middle', horizontal: 'center' };
+                    idCell.border = thinBorder;
+
+                    const nameCell = wsRow.getCell(2);
+                    nameCell.value = row.name;
+                    nameCell.font = { name: 'Calibri', size: 9.5, bold: true, color: { argb: 'FF0F172A' } };
+                    nameCell.alignment = { vertical: 'middle', horizontal: 'left' };
+                    nameCell.border = thinBorder;
+
+                    const deptCell = wsRow.getCell(3);
+                    deptCell.value = row.dept;
+                    deptCell.font = { name: 'Calibri', size: 9, color: { argb: 'FF475569' } };
+                    deptCell.alignment = { vertical: 'middle', horizontal: 'left' };
+                    deptCell.border = thinBorder;
+
+                    dateItems.forEach((item, dIdx) => {
+                        const colNum = 4 + dIdx;
+                        const cell = wsRow.getCell(colNum);
+                        cell.border = thinBorder;
+
+                        const targetDate = new Date(item.year, item.month, item.day);
+                        targetDate.setHours(0, 0, 0, 0);
+
+                        const empObj = row.rawEmp || row;
+                        const empWeeklyOffs = String(empObj.weeklyOffs || 'Sunday').toLowerCase();
+                        const dayName = targetDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+                        const isSunday = targetDate.getDay() === 0 || empWeeklyOffs.includes(dayName);
+                        const holidayObj = getHolidayForEmp(item.dateStr, empObj);
+                        const isHoliday = Boolean(holidayObj);
+
+                        const rec = row.dayRecords[item.dateStr] || { in: '', out: '' };
+                        const inVal = rec.in ? String(rec.in).trim() : '';
+                        const outVal = rec.out ? String(rec.out).trim() : '';
+                        const hasPunch = Boolean((inVal && inVal !== '-' && inVal !== 'Leave') || (outVal && outVal !== '-' && outVal !== 'Approved'));
+
+                        if (isSunday && hasPunch) {
+                            cell.value = {
+                                richText: [
+                                    { text: 'WOS\n', font: { name: 'Calibri', size: 9, bold: true, color: { argb: 'FF92400E' } } },
+                                    { text: (inVal || '--') + ' - ' + (outVal || '--'), font: { name: 'Calibri', size: 7.5, bold: true, color: { argb: 'FFB45309' } } }
+                                ]
+                            };
+                            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } };
+                            cell.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
+                        } else if (isSunday && !hasPunch) {
+                            cell.value = 'Sunday';
+                            cell.font = { name: 'Calibri', size: 9, bold: true, color: { argb: 'FF991B1B' } };
+                            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
+                            cell.alignment = { vertical: 'middle', horizontal: 'center' };
+                        } else if (isHoliday && hasPunch) {
+                            cell.value = {
+                                richText: [
+                                    { text: 'WOH\n', font: { name: 'Calibri', size: 9, bold: true, color: { argb: 'FF6B21A8' } } },
+                                    { text: (inVal || '--') + ' - ' + (outVal || '--'), font: { name: 'Calibri', size: 7.5, bold: true, color: { argb: 'FF7C3AED' } } }
+                                ]
+                            };
+                            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEDE9FE' } };
+                            cell.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
+                        } else if (isHoliday && !hasPunch) {
+                            cell.value = 'Holiday';
+                            cell.font = { name: 'Calibri', size: 9, bold: true, color: { argb: 'FF7E22CE' } };
+                            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3E8FF' } };
+                            cell.alignment = { vertical: 'middle', horizontal: 'center' };
+                        } else if (inVal === 'Leave' || outVal === 'Approved') {
+                            cell.value = 'Leave';
+                            cell.font = { name: 'Calibri', size: 9, bold: true, color: { argb: 'FF2563EB' } };
+                            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFF6FF' } };
+                            cell.alignment = { vertical: 'middle', horizontal: 'center' };
+                        } else if (inVal === '-' && outVal === '-') {
+                            cell.value = '-';
+                            cell.font = { name: 'Calibri', size: 9, color: { argb: 'FF94A3B8' } };
+                            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: rIdx % 2 === 0 ? 'FFFFFFFF' : 'FFF8FAFC' } };
+                            cell.alignment = { vertical: 'middle', horizontal: 'center' };
+                        } else if (inVal && outVal) {
+                            cell.value = {
+                                richText: [
+                                    { text: inVal + '\n', font: { name: 'Calibri', size: 8.5, bold: true, color: { argb: 'FF16A34A' } } },
+                                    { text: outVal, font: { name: 'Calibri', size: 8.5, bold: true, color: { argb: 'FFDC2626' } } }
+                                ]
+                            };
+                            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: rIdx % 2 === 0 ? 'FFFFFFFF' : 'FFF8FAFC' } };
+                            cell.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
+                        } else if (inVal) {
+                            cell.value = {
+                                richText: [
+                                    { text: inVal + '\n', font: { name: 'Calibri', size: 8.5, bold: true, color: { argb: 'FF16A34A' } } },
+                                    { text: '--:--', font: { name: 'Calibri', size: 8.5, color: { argb: 'FF94A3B8' } } }
+                                ]
+                            };
+                            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: rIdx % 2 === 0 ? 'FFFFFFFF' : 'FFF8FAFC' } };
+                            cell.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
+                        } else if (outVal) {
+                            cell.value = {
+                                richText: [
+                                    { text: '--:--\n', font: { name: 'Calibri', size: 8.5, color: { argb: 'FF94A3B8' } } },
+                                    { text: outVal, font: { name: 'Calibri', size: 8.5, bold: true, color: { argb: 'FFDC2626' } } }
+                                ]
+                            };
+                            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: rIdx % 2 === 0 ? 'FFFFFFFF' : 'FFF8FAFC' } };
+                            cell.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
+                        } else {
+                            cell.value = '-';
+                            cell.font = { name: 'Calibri', size: 9, color: { argb: 'FFCBD5E1' } };
+                            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: rIdx % 2 === 0 ? 'FFFFFFFF' : 'FFF8FAFC' } };
+                            cell.alignment = { vertical: 'middle', horizontal: 'center' };
+                        }
+                    });
+                });
+
+                // ========================================================
+                // SHEET 2: ATTENDANCE STATUS (PRESENT, ABSENT, LEAVES)
+                // ========================================================
+                const ws2 = wb.addWorksheet('Attendance Status', {
+                    views: [{ state: 'frozen', xSplit: 3, ySplit: 4 }]
+                });
+
+                const summaryHeaders = [
+                    'Present (P)',
+                    'Absent (A)',
+                    'WOS',
+                    'WOH',
+                    'EL',
+                    'Sun/Hol Consumed',
+                    'LOP',
+                    'Sunday (WO)',
+                    'Holiday (H)',
+                    'Total Payable Days'
+                ];
+
+                const totalCols2 = 3 + dateItems.length + summaryHeaders.length;
+
+                // 1. Top Title Banner
+                ws2.mergeCells(1, 1, 1, totalCols2);
+                const titleCell2 = ws2.getCell(1, 1);
+                titleCell2.value = 'ATTENDANCE STATUS (DATEWISE PRESENT, ABSENT & LEAVE BREAKDOWN)';
+                titleCell2.font = { name: 'Calibri', size: 15, bold: true, color: { argb: 'FFFFFFFF' } };
+                titleCell2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E1B4B' } };
+                titleCell2.alignment = { vertical: 'middle', horizontal: 'center' };
+                ws2.getRow(1).height = 32;
+
+                // 2. Month & Report Info Banner
+                ws2.mergeCells(2, 1, 2, totalCols2);
+                const subCell2 = ws2.getCell(2, 1);
+                subCell2.value = `Month / Period: ${isCustomRange ? rangeText : `${monthName} ${year}`}    |    Total Employees: ${reportRows.length}    |    Generated: ${new Date().toLocaleDateString('en-GB')}`;
+                subCell2.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: 'FF334155' } };
+                subCell2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+                subCell2.alignment = { vertical: 'middle', horizontal: 'center' };
+                ws2.getRow(2).height = 22;
+
+                // 3. Legend Row
+                ws2.mergeCells(3, 1, 3, totalCols2);
+                const legCell2 = ws2.getCell(3, 1);
+                legCell2.value = 'Status Codes:  🟢 Present  |  🔴 Absent  |  🔵 EL (Earned Leave)  |  🟠 Sunday/Holiday Consumed  |  🟣 LOP (Loss of Pay)  |  📅 Sunday (WO)  |  🌴 Holiday  |  ➖ Future Date / NA';
+                legCell2.font = { name: 'Calibri', size: 9, bold: true, color: { argb: 'FF334155' } };
+                legCell2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+                legCell2.alignment = { vertical: 'middle', horizontal: 'center' };
+                ws2.getRow(3).height = 18;
+
+                // 4. Table Header Row (Row 4)
+                ws2.getRow(4).height = 26;
+                const headerCols2 = [
+                    'Emp ID',
+                    'Name',
+                    'Department',
+                    ...dateItems.map(d => String(d.day).padStart(2, '0')),
+                    ...summaryHeaders
+                ];
+
+                headerCols2.forEach((colName, idx) => {
+                    const colNum = idx + 1;
+                    const cell = ws2.getCell(4, colNum);
+                    cell.value = colName;
+                    cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+                    cell.border = headerBorder;
+
+                    if (colNum <= 3) {
+                        cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+                        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+                    } else if (colNum <= 3 + dateItems.length) {
+                        const item = dateItems[colNum - 4];
+                        const isSunday = new Date(item.year, item.month, item.day).getDay() === 0;
+
+                        if (isSunday) {
+                            cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF991B1B' } };
+                            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
+                        } else {
+                            cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+                            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4338CA' } };
+                        }
+                    } else {
+                        cell.font = { name: 'Calibri', size: 9.5, bold: true, color: { argb: 'FFFFFFFF' } };
+                        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F766E' } };
+                    }
+                });
+
+                // Set Column Widths for Sheet 2
+                ws2.getColumn(1).width = 14;
+                ws2.getColumn(2).width = 22;
+                ws2.getColumn(3).width = 16;
+                for (let c = 4; c <= 3 + dateItems.length; c++) ws2.getColumn(c).width = 13;
+                for (let c = 4 + dateItems.length; c <= totalCols2; c++) ws2.getColumn(c).width = 14;
+
+                const startRowIdx2 = 5;
+                const endRowIdx2 = startRowIdx2 + reportRows.length - 1;
+
+                // 5. Employee Data Rows for Sheet 2
+                reportRows.forEach((row, rIdx) => {
+                    const rowNum = startRowIdx2 + rIdx;
+                    const wsRow = ws2.getRow(rowNum);
+                    wsRow.height = 28;
+
+                    const emp = row.emp || filteredReportEmployees[rIdx] || {};
+
+                    const idCell = wsRow.getCell(1);
+                    idCell.value = row.empId;
+                    idCell.font = { name: 'Calibri', size: 9.5, bold: true, color: { argb: 'FF334155' } };
+                    idCell.alignment = { vertical: 'middle', horizontal: 'center' };
+                    idCell.border = thinBorder;
+
+                    const nameCell = wsRow.getCell(2);
+                    nameCell.value = row.name;
+                    nameCell.font = { name: 'Calibri', size: 9.5, bold: true, color: { argb: 'FF0F172A' } };
+                    nameCell.alignment = { vertical: 'middle', horizontal: 'left' };
+                    nameCell.border = thinBorder;
+
+                    const deptCell = wsRow.getCell(3);
+                    deptCell.value = row.dept;
+                    deptCell.font = { name: 'Calibri', size: 9, color: { argb: 'FF475569' } };
+                    deptCell.alignment = { vertical: 'middle', horizontal: 'left' };
+                    deptCell.border = thinBorder;
+
+                    let presentCount = 0;
+                    let absentCount = 0;
+                    let wosCount = 0;
+                    let wohCount = 0;
+                    let elCount = 0;
+                    let sunHolCount = 0;
+                    let lopCount = 0;
+                    let sundayCount = 0;
+                    let holidayCount = 0;
+
+                    const empLeaves = (leaves || []).filter(l => {
+                        const lStatus = l.status ? String(l.status).toLowerCase() : 'approved';
+                        if (lStatus !== 'approved') return false;
+                        const empNameMatch = (l.userName && String(l.userName).trim().toLowerCase() === String(emp.name).trim().toLowerCase()) ||
+                                             (l.employeeName && String(l.employeeName).trim().toLowerCase() === String(emp.name).trim().toLowerCase());
+                        const empIdMatch = l.userId && String(l.userId).trim().toLowerCase() === String(emp.id).trim().toLowerCase();
+                        return empNameMatch || empIdMatch;
+                    });
+
+                    dateItems.forEach((item, dIdx) => {
+                        const colNum = 4 + dIdx;
+                        const cell = wsRow.getCell(colNum);
+                        cell.border = thinBorder;
+
+                        const targetDate = new Date(item.year, item.month, item.day);
+                        targetDate.setHours(0, 0, 0, 0);
+
+                        const today = new Date();
+                        today.setHours(0, 0, 0, 0);
+                        const isFutureDate = targetDate.getTime() > today.getTime();
+
+                        const empObj = row.rawEmp || emp;
+                        const empWeeklyOffs = String(empObj.weeklyOffs || 'Sunday').toLowerCase();
+                        const dayName = targetDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+                        const isSunday = targetDate.getDay() === 0 || empWeeklyOffs.includes(dayName);
+                        const holidayObj = getHolidayForEmp(item.dateStr, empObj);
+                        const isHoliday = Boolean(holidayObj);
+                        const isActiveOnDate = isEmpActiveOnDate(empObj, targetDate);
+
+                        const record = groupedAttendance.find(r => isRecordForEmpAndDate(r, empObj, item.dateStr));
+                        const hasPunch = record && (record.checkIn || record.checkOut);
+
+                        let status = '-';
+                        let fontColor = 'FF94A3B8';
+                        let fillColor = 'FFFFFFFF';
+
+                        const matchedLeave = empLeaves.find(l => {
+                            if (l.date) {
+                                const lDate = new Date(l.date); lDate.setHours(0, 0, 0, 0);
+                                if (lDate.getTime() === targetDate.getTime()) return true;
+                            }
+                            if (l.startDate && l.endDate) {
+                                const start = new Date(l.startDate); start.setHours(0, 0, 0, 0);
+                                const end = new Date(l.endDate); end.setHours(23, 59, 59, 999);
+                                return targetDate >= start && targetDate <= end;
+                            }
+                            return false;
+                        });
+
+                        if (!isActiveOnDate) {
+                            status = '-';
+                            fontColor = 'FF94A3B8';
+                            fillColor = 'FFF8FAFC';
+                        } else if (isSunday) {
+                            if (hasPunch) {
+                                status = 'WOS';
+                                fontColor = 'FF92400E';
+                                fillColor = 'FFFEF3C7';
+                                wosCount++;
+                            } else {
+                                status = 'Sunday';
+                                fontColor = 'FF991B1B';
+                                fillColor = 'FFFEE2E2';
+                                sundayCount++;
+                            }
+                        } else if (isHoliday) {
+                            if (hasPunch) {
+                                status = 'WOH';
+                                fontColor = 'FF6B21A8';
+                                fillColor = 'FFEDE9FE';
+                                wohCount++;
+                            } else {
+                                status = 'Holiday';
+                                fontColor = 'FF7E22CE';
+                                fillColor = 'FFF3E8FF';
+                                holidayCount++;
+                            }
+                        } else if (hasPunch) {
+                            status = 'Present';
+                            fontColor = 'FF15803D';
+                            fillColor = 'FFDCFCE7';
+                            presentCount++;
+                        } else if (matchedLeave) {
+                            const lType = String(matchedLeave.type || '').toLowerCase();
+                            const lReason = String(matchedLeave.reason || '').toLowerCase();
+
+                            let isLopDay = lType.includes('lop') || lType.includes('loss of pay');
+                            if (!isLopDay && matchedLeave.startDate && matchedLeave.elDays !== undefined && matchedLeave.lopDays !== undefined) {
+                                const lStart = new Date(matchedLeave.startDate);
+                                lStart.setHours(0, 0, 0, 0);
+                                const diffDays = Math.round((targetDate - lStart) / (1000 * 3600 * 24));
+                                if (diffDays >= Number(matchedLeave.elDays || 0) && diffDays < (Number(matchedLeave.elDays || 0) + Number(matchedLeave.lopDays || 0))) {
+                                    isLopDay = true;
+                                }
+                            }
+
+                            if (isLopDay) {
+                                status = 'LOP';
+                                fontColor = 'FF991B1B';
+                                fillColor = 'FFFEE2E2';
+                                lopCount++;
+                            } else {
+                                const isSpecial = lType.includes('special') || lType.includes('sunday') || lType.includes('holiday') ||
+                                                  lReason.includes('special') || lReason.includes('sunday') || lReason.includes('holiday') || lReason.includes('comp');
+                                if (isSpecial) {
+                                    status = 'Sunday/Holiday\r\nConsumed';
+                                    fontColor = 'FFB45309';
+                                    fillColor = 'FFFEF3C7';
+                                    sunHolCount++;
+                                } else {
+                                    status = 'EL';
+                                    fontColor = 'FF1D4ED8';
+                                    fillColor = 'FFDBEAFE';
+                                    elCount++;
+                                }
+                            }
+                        } else if (isFutureDate) {
+                            status = '-';
+                            fontColor = 'FF94A3B8';
+                            fillColor = 'FFF8FAFC';
+                        } else {
+                            status = 'Absent';
+                            fontColor = 'FFBE123C';
+                            fillColor = 'FFFFE4E6';
+                            absentCount++;
+                        }
+
+                        const fontSize = status.length > 12 ? 8 : 9;
+                        cell.value = status;
+                        cell.font = { name: 'Calibri', size: fontSize, bold: true, color: { argb: fontColor } };
+                        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillColor } };
+                        cell.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
+                    });
+
+                    // Summary Count Columns
+                    const payableDays = presentCount + wosCount + wohCount + elCount + sunHolCount + sundayCount + holidayCount;
+                    const counts = [
+                        presentCount,
+                        absentCount,
+                        wosCount,
+                        wohCount,
+                        elCount,
+                        sunHolCount,
+                        lopCount,
+                        sundayCount,
+                        holidayCount,
+                        payableDays
+                    ];
+
+                    counts.forEach((val, cIdx) => {
+                        const colNum = 4 + dateItems.length + cIdx;
+                        const cell = wsRow.getCell(colNum);
+                        cell.value = val;
+                        const isPayableCol = cIdx === counts.length - 1;
+                        cell.font = {
+                            name: 'Calibri',
+                            size: 10,
+                            bold: isPayableCol,
+                            color: { argb: isPayableCol ? 'FF0F766E' : 'FF334155' }
+                        };
+                        cell.fill = {
+                            type: 'pattern',
+                            pattern: 'solid',
+                            fgColor: { argb: isPayableCol ? 'FFCCFBF1' : (rIdx % 2 === 0 ? 'FFFFFFFF' : 'FFF8FAFC') }
+                        };
+                        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+                        cell.border = thinBorder;
+                    });
+                });
+
+                // 7. Write to buffer and trigger browser download
+                const buffer = await wb.xlsx.writeBuffer();
+                const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+                const downloadUrl = window.URL.createObjectURL(blob);
+                const fileName = isCustomRange 
+                    ? `Attendance_Record_${fromDate}_to_${toDate}.xlsx` 
+                    : `Attendance_Record_${monthName}_${year}.xlsx`;
+                const link = document.createElement('a');
+                link.href = downloadUrl;
+                link.download = fileName;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                window.URL.revokeObjectURL(downloadUrl);
+            } catch (err) {
+                console.error('Error generating Attendance Record Excel:', err);
+                alert('Failed to export Excel report. Please try again.');
+            }
         };
 
         return (
@@ -2076,21 +3092,77 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                         <div>
                             <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 700 }}>Attendance Record</h2>
                             <span style={{ fontSize: '0.85rem', color: '#6b7280' }}>
-                                Period: {monthName} {year}
+                                Period: {isCustomRange ? rangeText : `${monthName} ${year}`}
                             </span>
                         </div>
                     </div>
 
-                    {/* Filter Periods: Last Month, Current Month, Custom */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'wrap' }}>
+                    {/* Filter Controls: Employee Select, Date Range & Quick Periods */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                        {/* Selected Employee Filter */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#4b5563', whiteSpace: 'nowrap' }}>Employee:</label>
+                            <MultiSelectEmployeeDropdown
+                                employees={activeEmployeesForPeriod}
+                                selectedIds={selectedRecordEmpIds}
+                                onChange={setSelectedRecordEmpIds}
+                                getEmpId={getEmpId}
+                            />
+                        </div>
+
+                        {/* From Date & To Date Range Pickers */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#4b5563', whiteSpace: 'nowrap' }}>From:</label>
+                            <input
+                                type="date"
+                                value={fromDate}
+                                onChange={(e) => {
+                                    setFromDate(e.target.value);
+                                    if (e.target.value) setReportPeriod('custom-range');
+                                }}
+                                style={{
+                                    padding: '4px 8px',
+                                    borderRadius: '6px',
+                                    border: '1px solid #d1d5db',
+                                    fontSize: '0.85rem',
+                                    height: '36px',
+                                    backgroundColor: 'white',
+                                    outline: 'none'
+                                }}
+                            />
+                            <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#4b5563', whiteSpace: 'nowrap' }}>To:</label>
+                            <input
+                                type="date"
+                                value={toDate}
+                                onChange={(e) => {
+                                    setToDate(e.target.value);
+                                    if (e.target.value) setReportPeriod('custom-range');
+                                }}
+                                style={{
+                                    padding: '4px 8px',
+                                    borderRadius: '6px',
+                                    border: '1px solid #d1d5db',
+                                    fontSize: '0.85rem',
+                                    height: '36px',
+                                    backgroundColor: 'white',
+                                    outline: 'none'
+                                }}
+                            />
+                        </div>
+
+                        {/* Quick Period Buttons */}
                         <div style={{ display: 'inline-flex', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '2px', background: 'white' }}>
                             <button
                                 className="btn"
-                                onClick={() => setReportPeriod('last-month')}
+                                onClick={() => {
+                                    setFromDate('');
+                                    setToDate('');
+                                    setReportPeriod('last-month');
+                                }}
                                 style={{
                                     border: 'none',
                                     borderRadius: '6px',
-                                    padding: '8px 16px',
+                                    padding: '6px 12px',
                                     background: 'transparent',
                                     color: reportPeriod === 'last-month' ? '#991b1b' : '#4b5563',
                                     fontWeight: 600,
@@ -2104,11 +3176,15 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                             </button>
                             <button
                                 className="btn"
-                                onClick={() => setReportPeriod('current-month')}
+                                onClick={() => {
+                                    setFromDate('');
+                                    setToDate('');
+                                    setReportPeriod('current-month');
+                                }}
                                 style={{
                                     border: 'none',
                                     borderRadius: '6px',
-                                    padding: '8px 16px',
+                                    padding: '6px 12px',
                                     background: 'transparent',
                                     color: reportPeriod === 'current-month' ? '#991b1b' : '#4b5563',
                                     fontWeight: 600,
@@ -2122,11 +3198,15 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                             </button>
                             <button
                                 className="btn"
-                                onClick={() => setReportPeriod('custom')}
+                                onClick={() => {
+                                    setFromDate('');
+                                    setToDate('');
+                                    setReportPeriod('custom');
+                                }}
                                 style={{
                                     border: 'none',
                                     borderRadius: '6px',
-                                    padding: '8px 16px',
+                                    padding: '6px 12px',
                                     background: 'transparent',
                                     color: reportPeriod === 'custom' ? '#991b1b' : '#4b5563',
                                     fontWeight: 600,
@@ -2136,12 +3216,12 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                                     borderBottom: reportPeriod === 'custom' ? '2px solid #ef4444' : 'none'
                                 }}
                             >
-                                Custom
+                                Custom Month
                             </button>
                         </div>
 
-                        {reportPeriod === 'custom' && (
-                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        {reportPeriod === 'custom' && !fromDate && !toDate && (
+                            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                                 <select
                                     value={customMonth ? customMonth.split('-')[1] : String(new Date().getMonth() + 1).padStart(2, '0')}
                                     onChange={(e) => {
@@ -2149,14 +3229,14 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                                         setCustomMonth(`${currentYear}-${e.target.value}`);
                                     }}
                                     style={{
-                                        padding: '6px 12px',
+                                        padding: '6px 10px',
                                         borderRadius: '6px',
-                                        border: '1px solid var(--border-glass)',
-                                        backgroundColor: 'var(--input-bg)',
-                                        color: 'var(--text-primary)',
-                                        fontSize: '0.9rem',
+                                        border: '1px solid #d1d5db',
+                                        backgroundColor: 'white',
+                                        color: '#1f2937',
+                                        fontSize: '0.85rem',
                                         outline: 'none',
-                                        height: '34px',
+                                        height: '36px',
                                         cursor: 'pointer'
                                     }}
                                 >
@@ -2180,14 +3260,14 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                                         setCustomMonth(`${e.target.value}-${currentMonth}`);
                                     }}
                                     style={{
-                                        padding: '6px 12px',
+                                        padding: '6px 10px',
                                         borderRadius: '6px',
-                                        border: '1px solid var(--border-glass)',
-                                        backgroundColor: 'var(--input-bg)',
-                                        color: 'var(--text-primary)',
-                                        fontSize: '0.9rem',
+                                        border: '1px solid #d1d5db',
+                                        backgroundColor: 'white',
+                                        color: '#1f2937',
+                                        fontSize: '0.85rem',
                                         outline: 'none',
-                                        height: '34px',
+                                        height: '36px',
                                         cursor: 'pointer'
                                     }}
                                 >
@@ -2197,7 +3277,35 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                                 </select>
                             </div>
                         )}
+
+                        {(fromDate || toDate || selectedRecordEmpIds.length > 0) && (
+                            <button
+                                onClick={() => {
+                                    setFromDate('');
+                                    setToDate('');
+                                    setSelectedRecordEmpIds([]);
+                                    setSearchQuery('');
+                                    setReportPeriod('current-month');
+                                }}
+                                style={{
+                                    padding: '6px 10px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 600,
+                                    background: '#fee2e2',
+                                    color: '#991b1b',
+                                    border: '1px solid #fca5a5',
+                                    borderRadius: '6px',
+                                    cursor: 'pointer',
+                                    height: '36px',
+                                    whiteSpace: 'nowrap'
+                                }}
+                                title="Reset All Filters"
+                            >
+                                Clear Filters
+                            </button>
+                        )}
                     </div>
+
                     <button 
                         className="btn btn-primary" 
                         onClick={handleExportRecordExcel}
@@ -2228,13 +3336,39 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                                 <th rowSpan="2" style={{ padding: '12px 16px', textAlign: 'left', borderRight: '1px solid #e2e8f0', fontWeight: 600, color: '#334155', position: 'sticky', left: 0, top: 0, zIndex: 30, background: '#f8fafc' }}>Employee ID</th>
                                 <th rowSpan="2" style={{ padding: '12px 16px', textAlign: 'left', borderRight: '1px solid #e2e8f0', fontWeight: 600, color: '#334155', position: 'sticky', left: '100px', top: 0, zIndex: 30, background: '#f8fafc', minWidth: '120px' }}>Name</th>
                                 <th rowSpan="2" style={{ padding: '12px 16px', textAlign: 'left', borderRight: '2px solid #cbd5e1', fontWeight: 600, color: '#334155', position: 'sticky', top: 0, zIndex: 25, background: '#f8fafc', minWidth: '100px' }}>Department</th>
-                                {days.map(day => (
-                                    <th key={day} colSpan="2" style={{ padding: '8px', textAlign: 'center', borderRight: '1px solid #e2e8f0', fontWeight: 600, color: '#334155', position: 'sticky', top: 0, zIndex: 25, background: '#f8fafc', minWidth: '100px' }}>{day}</th>
-                                ))}
+                                {dateItems.map((item, idx) => {
+                                    const isSunday = new Date(item.year, item.month, item.day).getDay() === 0;
+                                    return (
+                                        <th 
+                                            key={`h-${item.dateStr}-${idx}`} 
+                                            colSpan="2" 
+                                            style={{ 
+                                                padding: '8px 4px', 
+                                                textAlign: 'center', 
+                                                borderRight: '1px solid #e2e8f0', 
+                                                fontWeight: 600, 
+                                                color: isSunday ? '#991b1b' : '#334155', 
+                                                position: 'sticky', 
+                                                top: 0, 
+                                                zIndex: 25, 
+                                                background: isSunday ? '#fee2e2' : '#f8fafc', 
+                                                minWidth: '100px' 
+                                            }}
+                                            title={isSunday ? 'Sunday' : `Date: ${item.dateStr}`}
+                                        >
+                                            <div>{item.label}</div>
+                                            {isSunday && (
+                                                <div style={{ fontSize: '0.68rem', fontWeight: 600, color: '#991b1b', marginTop: '2px' }}>
+                                                    Sunday
+                                                </div>
+                                            )}
+                                        </th>
+                                    );
+                                })}
                             </tr>
                             <tr style={{ background: '#f1f5f9', borderBottom: '2px solid #cbd5e1', position: 'sticky', top: '44px', zIndex: 20 }}>
-                                {days.map(day => (
-                                    <React.Fragment key={`io-${day}`}>
+                                {dateItems.map((item, idx) => (
+                                    <React.Fragment key={`io-${item.dateStr}-${idx}`}>
                                         <th style={{ padding: '6px 4px', textAlign: 'center', borderRight: '1px solid #e2e8f0', fontWeight: 600, color: '#475569', fontSize: '0.75rem', minWidth: '50px', background: '#f1f5f9' }}>In</th>
                                         <th style={{ padding: '6px 4px', textAlign: 'center', borderRight: '1px solid #cbd5e1', fontWeight: 600, color: '#475569', fontSize: '0.75rem', minWidth: '50px', background: '#f1f5f9' }}>Out</th>
                                     </React.Fragment>
@@ -2242,44 +3376,162 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                             </tr>
                         </thead>
                         <tbody>
-                            {reportRows.map((row, idx) => (
-                                <tr key={row.empId} style={{ borderBottom: '1px solid #e2e8f0', background: idx % 2 === 0 ? 'white' : '#f8fafc' }}>
-                                    <td style={{ padding: '10px 16px', borderRight: '1px solid #e2e8f0', color: '#475569', position: 'sticky', left: 0, zIndex: 5, background: idx % 2 === 0 ? 'white' : '#f8fafc' }}>{row.empId}</td>
-                                    <td style={{ padding: '10px 16px', borderRight: '1px solid #e2e8f0', fontWeight: 500, color: '#1e293b', position: 'sticky', left: '100px', zIndex: 5, background: idx % 2 === 0 ? 'white' : '#f8fafc' }}>{row.name}</td>
-                                    <td style={{ padding: '10px 16px', borderRight: '2px solid #cbd5e1', color: '#64748b' }}>{row.dept}</td>
-                                    {days.map(day => {
-                                        const record = row.dayRecords[day];
-                                        return (
-                                            <React.Fragment key={day}>
-                                                <td 
-                                                    style={{ 
-                                                        padding: '8px 4px', 
-                                                        textAlign: 'center', 
-                                                        borderRight: '1px solid #e2e8f0',
-                                                        color: record.in ? '#10b981' : '#cbd5e1',
-                                                        background: record.in ? 'rgba(16, 185, 129, 0.03)' : 'transparent',
-                                                        fontWeight: record.in ? 500 : 'normal'
-                                                    }}
-                                                >
-                                                    {record.in || '-'}
-                                                </td>
-                                                <td 
-                                                    style={{ 
-                                                        padding: '8px 4px', 
-                                                        textAlign: 'center', 
-                                                        borderRight: '1px solid #cbd5e1',
-                                                        color: record.out ? '#ef4444' : '#cbd5e1',
-                                                        background: record.out ? 'rgba(239, 68, 68, 0.03)' : 'transparent',
-                                                        fontWeight: record.out ? 500 : 'normal'
-                                                    }}
-                                                >
-                                                    {record.out || '-'}
-                                                </td>
-                                            </React.Fragment>
-                                        );
-                                    })}
+                            {reportRows.length === 0 ? (
+                                <tr>
+                                    <td colSpan={3 + (dateItems.length * 2)} style={{ padding: '32px', textAlign: 'center', color: '#6b7280', fontSize: '0.9rem' }}>
+                                        No attendance records found for the selected employee or date range.
+                                    </td>
                                 </tr>
-                            ))}
+                            ) : (
+                                reportRows.map((row, idx) => (
+                                    <tr key={row.empId} style={{ borderBottom: '1px solid #e2e8f0', background: idx % 2 === 0 ? 'white' : '#f8fafc' }}>
+                                        <td style={{ padding: '10px 16px', borderRight: '1px solid #e2e8f0', color: '#475569', position: 'sticky', left: 0, zIndex: 5, background: idx % 2 === 0 ? 'white' : '#f8fafc' }}>{row.empId}</td>
+                                        <td style={{ padding: '10px 16px', borderRight: '1px solid #e2e8f0', fontWeight: 500, color: '#1e293b', position: 'sticky', left: '100px', zIndex: 5, background: idx % 2 === 0 ? 'white' : '#f8fafc' }}>{row.name}</td>
+                                        <td style={{ padding: '10px 16px', borderRight: '2px solid #cbd5e1', color: '#64748b' }}>{row.dept}</td>
+                                        {dateItems.map((item, dIdx) => {
+                                            const targetDate = new Date(item.year, item.month, item.day);
+                                            targetDate.setHours(0, 0, 0, 0);
+
+                                            const empObj = row.rawEmp || row;
+                                            const empWeeklyOffs = String(empObj.weeklyOffs || 'Sunday').toLowerCase();
+                                            const dayName = targetDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+                                            const isSunday = targetDate.getDay() === 0 || empWeeklyOffs.includes(dayName);
+
+                                            const holidayObj = getHolidayForEmp(item.dateStr, empObj);
+                                            const isHoliday = Boolean(holidayObj);
+
+                                            const record = row.dayRecords[item.dateStr] || { in: '', out: '' };
+                                            const hasPunch = Boolean(
+                                                (record.in && record.in !== '-' && record.in !== 'Leave') || 
+                                                (record.out && record.out !== '-' && record.out !== 'Approved')
+                                            );
+
+                                            // 1. Worked on Sunday -> WOS
+                                            if (isSunday && hasPunch) {
+                                                return (
+                                                    <td 
+                                                        key={`c-${item.dateStr}-${dIdx}`}
+                                                        colSpan="2"
+                                                        style={{
+                                                            padding: '4px 6px',
+                                                            textAlign: 'center',
+                                                            borderRight: '1px solid #cbd5e1',
+                                                            background: '#fef3c7',
+                                                            color: '#92400e'
+                                                        }}
+                                                        title={`Worked on Sunday (WOS): In: ${record.in || '--'} | Out: ${record.out || '--'}`}
+                                                    >
+                                                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#f59e0b', color: 'white', padding: '1px 6px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 700 }}>
+                                                            WOS
+                                                        </div>
+                                                        <div style={{ fontSize: '0.68rem', color: '#b45309', fontWeight: 600, marginTop: '2px' }}>
+                                                            {record.in || '--'} - {record.out || '--'}
+                                                        </div>
+                                                    </td>
+                                                );
+                                            }
+
+                                            // 2. Off on Sunday -> Sunday
+                                            if (isSunday && !hasPunch) {
+                                                return (
+                                                    <td 
+                                                        key={`c-${item.dateStr}-${dIdx}`}
+                                                        colSpan="2"
+                                                        style={{
+                                                            padding: '8px 4px',
+                                                            textAlign: 'center',
+                                                            borderRight: '1px solid #cbd5e1',
+                                                            color: '#991b1b',
+                                                            background: '#fee2e2',
+                                                            fontWeight: 600,
+                                                            fontSize: '0.75rem'
+                                                        }}
+                                                    >
+                                                        Sunday
+                                                    </td>
+                                                );
+                                            }
+
+                                            // 3. Worked on Holiday -> WOH
+                                            if (isHoliday && hasPunch) {
+                                                return (
+                                                    <td 
+                                                        key={`c-${item.dateStr}-${dIdx}`}
+                                                        colSpan="2"
+                                                        style={{
+                                                            padding: '4px 6px',
+                                                            textAlign: 'center',
+                                                            borderRight: '1px solid #cbd5e1',
+                                                            background: '#ede9fe',
+                                                            color: '#6b21a8'
+                                                        }}
+                                                        title={`Worked on Holiday (${holidayObj.name}) (WOH): In: ${record.in || '--'} | Out: ${record.out || '--'}`}
+                                                    >
+                                                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#7c3aed', color: 'white', padding: '1px 6px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 700 }}>
+                                                            WOH
+                                                        </div>
+                                                        <div style={{ fontSize: '0.68rem', color: '#6b21a8', fontWeight: 600, marginTop: '2px' }}>
+                                                            {record.in || '--'} - {record.out || '--'}
+                                                        </div>
+                                                    </td>
+                                                );
+                                            }
+
+                                            // 4. Off on Holiday -> Holiday (no name needed)
+                                            if (isHoliday && !hasPunch) {
+                                                return (
+                                                    <td 
+                                                        key={`c-${item.dateStr}-${dIdx}`}
+                                                        colSpan="2"
+                                                        style={{
+                                                            padding: '8px 4px',
+                                                            textAlign: 'center',
+                                                            borderRight: '1px solid #cbd5e1',
+                                                            color: '#7e22ce',
+                                                            background: '#f3e8ff',
+                                                            fontWeight: 600,
+                                                            fontSize: '0.75rem'
+                                                        }}
+                                                        title={holidayObj.name}
+                                                    >
+                                                        Holiday
+                                                    </td>
+                                                );
+                                            }
+
+                                            // 5. Regular Working Day / Approved Leave / Absent
+                                            return (
+                                                <React.Fragment key={`c-${item.dateStr}-${dIdx}`}>
+                                                    <td 
+                                                        style={{ 
+                                                            padding: '8px 4px', 
+                                                            textAlign: 'center', 
+                                                            borderRight: '1px solid #e2e8f0',
+                                                            color: record.in === 'Leave' ? '#3b82f6' : (record.in ? '#10b981' : '#cbd5e1'),
+                                                            background: record.in === 'Leave' ? 'rgba(59, 130, 246, 0.05)' : (record.in ? 'rgba(16, 185, 129, 0.03)' : 'transparent'),
+                                                            fontWeight: record.in ? 500 : 'normal'
+                                                        }}
+                                                    >
+                                                        {record.in || '-'}
+                                                    </td>
+                                                    <td 
+                                                        style={{ 
+                                                            padding: '8px 4px', 
+                                                            textAlign: 'center', 
+                                                            borderRight: '1px solid #cbd5e1',
+                                                            color: record.out === 'Approved' ? '#3b82f6' : (record.out ? '#ef4444' : '#cbd5e1'),
+                                                            background: record.out === 'Approved' ? 'rgba(59, 130, 246, 0.05)' : (record.out ? 'rgba(239, 68, 68, 0.03)' : 'transparent'),
+                                                            fontWeight: record.out ? 500 : 'normal'
+                                                        }}
+                                                    >
+                                                        {record.out || '-'}
+                                                    </td>
+                                                </React.Fragment>
+                                            );
+                                        })}
+                                    </tr>
+                                ))
+                            )}
                         </tbody>
                     </table>
                 </div>
@@ -2288,7 +3540,7 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
     }
 
     if (activeSubView === 'abnormal-attendance') {
-        const { year, month, days } = getReportDates();
+        const { year, month, days, startDate, endDate } = getReportDates();
         const monthName = new Date(year, month).toLocaleString('default', { month: 'long' });
         
         // Helper to parse time HH:MM into minutes from midnight
@@ -2318,11 +3570,18 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
 
         // Generate day-by-day rows for the selected date range for all employees
         const reportRows = [];
-        employees.forEach((emp, empIdx) => {
+        const activeEmployeesForPeriod = employees.filter(emp => isEmpActiveForPeriod(emp, startDate, endDate));
+        activeEmployeesForPeriod.forEach((emp, empIdx) => {
             const empId = getEmpId(emp, empIdx);
             const dept = emp.department || 'Company';
 
             days.forEach(day => {
+                const targetDayDate = new Date(year, month, day);
+                targetDayDate.setHours(0, 0, 0, 0);
+                const todayMidnight = new Date();
+                todayMidnight.setHours(0, 0, 0, 0);
+                if (targetDayDate.getTime() > todayMidnight.getTime()) return;
+                if (!isEmpActiveOnDate(emp, targetDayDate)) return;
                 // Filter logs for this employee on this specific day
                 const dayLogs = attendance.filter(r => {
                     if (r.userName && r.userName.toLowerCase() === emp.name.toLowerCase()) {
@@ -2362,7 +3621,7 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                     desTime: onApprovedLeave ? 0 : totalShiftDuration,
                     totalTime: onApprovedLeave ? 0 : totalShiftDuration,
                     overtime: 0,
-                    remarks: onApprovedLeave ? 'On Leave' : 'Absent'
+                    remarks: onApprovedLeave ? 'On Leave' : (isHolidayForEmp(`${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`, emp) ? 'Holiday' : (String(emp.weeklyOffs || 'Sunday').toLowerCase().includes(new Date(year, month, day).toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase()) ? 'Weekly Off' : 'Absent'))
                 };
 
                 if (dayLogs.length > 0) {
@@ -2454,14 +3713,14 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                 row.name,
                 row.dept,
                 row.date,
-                row.firstOn || '',
-                row.firstOff || '',
-                row.secondOn || '',
-                row.secondOff || '',
-                row.thirdOn || '',
-                row.thirdOff || '',
-                row.overBegin || '',
-                row.overEnd || '',
+                formatTo12HourTime(row.firstOn),
+                formatTo12HourTime(row.firstOff),
+                formatTo12HourTime(row.secondOn),
+                formatTo12HourTime(row.secondOff),
+                formatTo12HourTime(row.thirdOn),
+                formatTo12HourTime(row.thirdOff),
+                formatTo12HourTime(row.overBegin),
+                formatTo12HourTime(row.overEnd),
                 row.lateTime,
                 row.leaveTime,
                 row.desTime,
@@ -2473,10 +3732,7 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
         };
 
         const formatTimeDisplay = (timeVal) => {
-            if (!timeVal) return '00:00';
-            const match = String(timeVal).match(/(\d+):(\d+)/);
-            if (!match) return timeVal;
-            return `${match[1].padStart(2, '0')}:${match[2].padStart(2, '0')}`;
+            return formatTo12HourTime(timeVal) || '-';
         };
 
         return (
@@ -2645,7 +3901,7 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
     }
 
     if (activeSubView === 'attendance-card') {
-        const { year, month, days } = getReportDates();
+        const { year, month, days, startDate, endDate } = getReportDates();
         const monthName = new Date(year, month).toLocaleString('default', { month: 'long' });
         const dateRangeStr = `${year}/${String(month + 1).padStart(2, '0')}/01-${year}/${String(month + 1).padStart(2, '0')}/${String(days.length).padStart(2, '0')}`;
 
@@ -2667,8 +3923,8 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
         const shiftStartMin = 9 * 60; // 09:00 -> 540 min
         const shiftEndMin = 18 * 60; // 18:00 -> 1080 min
 
-        // Filter employees based on search query (if any)
-        let displayEmployees = employees;
+        // Filter employees based on period activity and search query (if any)
+        let displayEmployees = employees.filter(emp => isEmpActiveForPeriod(emp, startDate, endDate));
         if (searchQuery.trim() !== '') {
             const query = searchQuery.toLowerCase();
             displayEmployees = displayEmployees.filter(emp => emp.name.toLowerCase().includes(query));
@@ -2747,15 +4003,14 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                     today.setHours(0,0,0,0);
                     if (date < today) {
                         const isWeeklyOff = String(emp.weeklyOffs || 'Sunday').toLowerCase().includes(date.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase());
-                        if (!isWeeklyOff) absentDays++;
+                        const targetDateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                        const isHoliday = isHolidayForEmp(targetDateStr, emp);
+                        if (!isWeeklyOff && !isHoliday && isEmpActiveOnDate(emp, date)) absentDays++;
                     }
                 }
 
                 const formatTimeDisplay = (timeVal) => {
-                    if (!timeVal) return '';
-                    const match = String(timeVal).match(/(\d+):(\d+)/);
-                    if (!match) return timeVal;
-                    return `${match[1].padStart(2, '0')}:${match[2].padStart(2, '0')}`;
+                    return formatTo12HourTime(timeVal);
                 };
 
                 return {
@@ -2785,6 +4040,12 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
             if (cards.length === 0) return;
             
             try {
+                // Dynamic imports â€” only download when user clicks PDF export
+                const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
+                    import('jspdf'),
+                    import('html2canvas')
+                ]);
+
                 const pdf = new jsPDF({
                     orientation: 'landscape',
                     unit: 'pt',
@@ -2819,7 +4080,9 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
             }
         };
 
-        const handleDownloadExcel = () => {
+        const handleDownloadExcel = async () => {
+            // Dynamic import â€” xlsx only downloads when user clicks Export Excel
+            const XLSX = await import('xlsx');
             const wb = XLSX.utils.book_new();
             reportCards.forEach(card => {
                 const wsData = [
@@ -2837,7 +4100,7 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                     wsData.push([r.day, r.dayName, r.firstOn, r.firstOff, r.secondOn, r.secondOff, r.thirdOn, r.thirdOff, r.overBegin, r.overEnd]);
                 });
                 const ws = XLSX.utils.aoa_to_sheet(wsData);
-                let sheetName = card.name.substring(0, 31).replace(/[\\/?*\[\]]/g, '');
+                let sheetName = card.name.substring(0, 31).replace(/[\\/?*[\]]/g, '');
                 XLSX.utils.book_append_sheet(wb, ws, sheetName);
             });
             XLSX.writeFile(wb, `Attendance_Card_${monthName}_${year}.xlsx`);
@@ -2883,7 +4146,7 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
 
                 <div id="attendance-cards-container" className="custom-scrollbar" style={{ padding: '15px', flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexWrap: 'wrap', gap: '20px', background: 'white', borderRadius: '16px', border: '1px solid #e2e8f0' }}>
                     {reportCards.map(card => (
-                        <div key={card.empId} style={{ minWidth: '450px', flex: '1 1 450px', border: '1px solid #000', backgroundColor: 'white', color: 'black', fontFamily: 'sans-serif', fontSize: '0.75rem' }}>
+                        <div key={card.empId} style={{ minWidth: '540px', flex: '1 1 540px', border: '1px solid #000', backgroundColor: 'white', color: 'black', fontFamily: 'sans-serif', fontSize: '0.75rem' }}>
                             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'center' }}>
                                 <tbody>
                                     <tr>
@@ -3228,23 +4491,51 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                                 const displayName = emp?.name || record.userName || emp?.employeeName || record.userId || 'Employee';
                                 const displayCode = emp?.empCode || emp?.emp_code || emp?.employeeId || record.empCode || (record.userId && !String(record.userId).startsWith('EMP0') ? record.userId : '');
                                 const displayDept = emp?.department || record.department || emp?.designation || record.jobTitle || '';
+                                const targetId = (emp && (emp.id || emp.empCode || emp._id || emp.employeeId)) || record.userId || record.empCode || record.id;
+                                const targetName = (emp && emp.name) || displayName;
                                 
                                 return (
                                     <tr 
                                         key={record.id || index}
-                                        onClick={() => onSelectEmployee && onSelectEmployee(emp?.id || record.userId, displayName)}
-                                        style={{ cursor: 'pointer' }}
-                                        title={`View ${displayName}'s Tracking Details`}
+                                        onClick={() => {
+                                            if (onSelectEmployee && targetId) {
+                                                const recDate = record.date ? record.date.split('T')[0] : '';
+                                                onSelectEmployee(targetId, targetName, recDate);
+                                            }
+                                        }}
+                                        style={{ cursor: targetId ? 'pointer' : 'default', transition: 'background-color 0.15s ease' }}
+                                        title={targetId ? `View ${targetName}'s Tracking Details` : ''}
                                     >
                                         {statusFilter !== 'not-clocked-in' && <td>{formatDate(record.date)}</td>}
                                         <td>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                            <div 
+                                                style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    if (onSelectEmployee && targetId) {
+                                                        const recDate = record.date ? record.date.split('T')[0] : '';
+                                                        onSelectEmployee(targetId, targetName, recDate);
+                                                    }
+                                                }}
+                                                title={`View ${targetName}'s Tracking Details`}
+                                            >
                                                 {record.type === 'absent' && (
                                                     <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ef4444', flexShrink: 0 }} title="Not Clocked-in"></span>
                                                 )}
                                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                                                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                                        <span style={{ fontWeight: 600 }}>{displayName}</span>
+                                                        <span 
+                                                            style={{ 
+                                                                fontWeight: 600, 
+                                                                color: '#2563eb', 
+                                                                cursor: 'pointer',
+                                                                transition: 'color 0.15s ease'
+                                                            }}
+                                                            onMouseEnter={(e) => e.currentTarget.style.textDecoration = 'underline'}
+                                                            onMouseLeave={(e) => e.currentTarget.style.textDecoration = 'none'}
+                                                        >
+                                                            {displayName}
+                                                        </span>
                                                         {displayCode && (
                                                             <span style={{ fontSize: '0.72rem', color: '#2563eb', fontWeight: 600, background: 'rgba(37, 99, 235, 0.08)', padding: '1px 5px', borderRadius: '4px', border: '1px solid rgba(37, 99, 235, 0.15)' }}>
                                                                 {displayCode}
@@ -3447,7 +4738,7 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                         color: '#4b5563'
                     }}>
                         <span>
-                            {startIndex + 1}–{endIndex} of {totalItems}
+                            {startIndex + 1}â€“{endIndex} of {totalItems}
                         </span>
                         <div style={{ display: 'flex', gap: '8px' }}>
                             <button 
@@ -3545,7 +4836,7 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                                         {selectedPunchHistory.userName}
                                     </h3>
                                     <p style={{ margin: '2px 0 0 0', fontSize: '0.85rem', color: '#64748b' }}>
-                                        Punch History • {formatDate(selectedPunchHistory.date)}
+                                        Punch History â€¢ {formatDate(selectedPunchHistory.date)}
                                     </p>
                                 </div>
                             </div>
@@ -3572,7 +4863,7 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                                         borderRadius: '6px'
                                     }}
                                 >
-                                    ✕
+                                    âœ•
                                 </button>
                             </div>
                         </div>
@@ -3623,7 +4914,7 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                                                 </div>
                                                 {p.address && (
                                                     <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '4px', wordBreak: 'break-word' }}>
-                                                        📍 {p.address}
+                                                        ðŸ“ {p.address}
                                                     </div>
                                                 )}
                                             </div>
@@ -3641,7 +4932,7 @@ export default function AttendanceView({ employees = [], onSelectEmployee }) {
                                                 </div>
                                                 {p.checkOutAddress && (
                                                     <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '4px', wordBreak: 'break-word' }}>
-                                                        📍 {p.checkOutAddress}
+                                                        ðŸ“ {p.checkOutAddress}
                                                     </div>
                                                 )}
                                             </div>

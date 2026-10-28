@@ -39,37 +39,40 @@ const ensureTimeFormat = (val, defaultVal = '08:30') => {
 };
 
 export default function SettingsView() {
-  const [loading, setLoading] = useState(true);
+  const cachedSettings = api.getCached('/settings');
+  const cachedAcks = api.getCached('/acknowledgments');
+
+  const [loading, setLoading] = useState(() => !cachedSettings);
   const [savingAttendance, setSavingAttendance] = useState(false);
   const [savingLocation, setSavingLocation] = useState(false);
   const [toast, setToast] = useState(null);
   const [isDirty, setIsDirty] = useState(false);
 
   // Form State
-  const [configVersion, setConfigVersion] = useState(1);
-  const [punchInStart, setPunchInStart] = useState('08:30');
-  const [punchInEnd, setPunchInEnd] = useState('10:00');
-  const [punchOutTime, setPunchOutTime] = useState('18:00');
+  const [configVersion, setConfigVersion] = useState(() => cachedSettings?.config_version || 1);
+  const [punchInStart, setPunchInStart] = useState(() => ensureTimeFormat(cachedSettings?.punch_in_start, '08:30'));
+  const [punchInEnd, setPunchInEnd] = useState(() => ensureTimeFormat(cachedSettings?.punch_in_end, '10:00'));
+  const [punchOutTime, setPunchOutTime] = useState(() => ensureTimeFormat(cachedSettings?.punch_out_time, '18:00'));
 
-  const [locationProvider, setLocationProvider] = useState('GPS Only');
-  const [gpsRatioCount, setGpsRatioCount] = useState(1);
-  const [cellularRatioCount, setCellularRatioCount] = useState(2);
-  const [locationUpdateInterval, setLocationUpdateInterval] = useState('30 Seconds');
+  const [locationProvider, setLocationProvider] = useState(() => cachedSettings?.location_provider || 'GPS Only');
+  const [gpsRatioCount, setGpsRatioCount] = useState(() => Number(cachedSettings?.gps_ratio_count || 1));
+  const [cellularRatioCount, setCellularRatioCount] = useState(() => Number(cachedSettings?.cellular_ratio_count || 2));
+  const [locationUpdateInterval, setLocationUpdateInterval] = useState(() => cachedSettings?.location_update_interval || '30 Seconds');
   const [customIntervalSeconds, setCustomIntervalSeconds] = useState(45);
   const [isCustomMode, setIsCustomMode] = useState(false);
 
   // Extended Shift Engine & Threshold State
-  const [graceMinutes, setGraceMinutes] = useState(15);
-  const [halfDayMinutes, setHalfDayMinutes] = useState(240);
-  const [fullDayMinutes, setFullDayMinutes] = useState(480);
-  const [minWorkingMinutes, setMinWorkingMinutes] = useState(240);
-  const [maxWorkingMinutes, setMaxWorkingMinutes] = useState(720);
-  const [overtimeThresholdMinutes, setOvertimeThresholdMinutes] = useState(480);
-  const [autoSyncIntervalSeconds, setAutoSyncIntervalSeconds] = useState(30);
-  const [allowCrossDay, setAllowCrossDay] = useState(true);
+  const [graceMinutes, setGraceMinutes] = useState(() => cachedSettings?.grace_minutes !== undefined ? Number(cachedSettings.grace_minutes) : 15);
+  const [halfDayMinutes, setHalfDayMinutes] = useState(() => cachedSettings?.half_day_minutes !== undefined ? Number(cachedSettings.half_day_minutes) : 240);
+  const [fullDayMinutes, setFullDayMinutes] = useState(() => cachedSettings?.full_day_minutes !== undefined ? Number(cachedSettings.full_day_minutes) : 480);
+  const [minWorkingMinutes, setMinWorkingMinutes] = useState(() => cachedSettings?.min_working_minutes !== undefined ? Number(cachedSettings.min_working_minutes) : 240);
+  const [maxWorkingMinutes, setMaxWorkingMinutes] = useState(() => cachedSettings?.max_working_minutes !== undefined ? Number(cachedSettings.max_working_minutes) : 720);
+  const [overtimeThresholdMinutes, setOvertimeThresholdMinutes] = useState(() => cachedSettings?.overtime_threshold_minutes !== undefined ? Number(cachedSettings.overtime_threshold_minutes) : 480);
+  const [autoSyncIntervalSeconds, setAutoSyncIntervalSeconds] = useState(() => cachedSettings?.auto_sync_interval_seconds !== undefined ? Number(cachedSettings.auto_sync_interval_seconds) : 30);
+  const [allowCrossDay, setAllowCrossDay] = useState(() => cachedSettings?.allow_cross_day !== undefined ? Boolean(cachedSettings.allow_cross_day) : true);
 
   // Audit Logs State
-  const [acknowledgments, setAcknowledgments] = useState([]);
+  const [acknowledgments, setAcknowledgments] = useState(() => Array.isArray(cachedAcks) ? cachedAcks : []);
   const [loadingAck, setLoadingAck] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('ALL');
@@ -85,7 +88,7 @@ export default function SettingsView() {
   };
 
   const fetchSettings = async () => {
-    setLoading(true);
+    if (!cachedSettings) setLoading(true);
     try {
       const data = await api.getSettings();
       if (data) {
@@ -127,7 +130,7 @@ export default function SettingsView() {
       console.error('Failed to load settings:', err);
       showToast('Failed to load system settings', 'error');
     } finally {
-      setTimeout(() => setLoading(false), 300);
+      setLoading(false);
     }
   };
 

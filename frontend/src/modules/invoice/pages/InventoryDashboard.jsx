@@ -199,7 +199,7 @@ function InventoryDashboard() {
     };
     const handleUnload = () => {
       if (selectedDocRef.current) {
-        const url = `http://${window.location.hostname}:8000/api/documents/${selectedDocRef.current.document_id}/time`;
+        const url = `/api/documents/${selectedDocRef.current.document_id}/time`;
         const headers = { type: 'application/json' };
         const blob = new Blob([JSON.stringify({ verification_time: verificationTimeRef.current })], headers);
         navigator.sendBeacon(url, blob);
@@ -251,10 +251,10 @@ function InventoryDashboard() {
     }
   };
 
-  // Poll documents every 5 seconds
+  // Poll documents every 60 seconds when idle
   useEffect(() => {
     loadDocuments();
-    const interval = setInterval(loadDocuments, 5000);
+    const interval = setInterval(loadDocuments, 60000);
     return () => clearInterval(interval);
   }, []);
 

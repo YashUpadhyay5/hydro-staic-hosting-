@@ -23,6 +23,10 @@ export default function PayRunWizardSteps({
 
   // Ref to always hold the synchronous, fresh LOP mapping to prevent stale React closures
   const editedLopRef = useRef({});
+  // Ref to hold synchronous, fresh Working Days mapping
+  const editedWorkingDaysRef = useRef({});
+  // Ref to hold synchronous, fresh Leaves mapping
+  const editedLeavesRef = useRef({});
 
   useEffect(() => {
     api.getPTStates().then(data => {
@@ -155,6 +159,8 @@ export default function PayRunWizardSteps({
 
   const [selectedRunItems, setSelectedRunItems] = useState(runItems);
   const [editedLop, setEditedLop] = useState({}); // Track local LOP manual overrides in state
+  const [editedWorkingDays, setEditedWorkingDays] = useState({}); // Track local Working Days overrides in state
+  const [editedLeaves, setEditedLeaves] = useState({}); // Track local Leave manual overrides in state
 
   // Standard Organization Leave Types & Active Columns State
   const STANDARD_LEAVE_TYPES = [
@@ -230,6 +236,14 @@ export default function PayRunWizardSteps({
               setEditedLop(ws.editedLop);
               editedLopRef.current = ws.editedLop;
             }
+            if (ws.editedWorkingDays && typeof ws.editedWorkingDays === 'object' && Object.keys(ws.editedWorkingDays).length > 0) {
+              setEditedWorkingDays(ws.editedWorkingDays);
+              editedWorkingDaysRef.current = ws.editedWorkingDays;
+            }
+            if (ws.editedLeaves && typeof ws.editedLeaves === 'object' && Object.keys(ws.editedLeaves).length > 0) {
+              setEditedLeaves(ws.editedLeaves);
+              editedLeavesRef.current = ws.editedLeaves;
+            }
             if (ws.appliedAdjustments) setAppliedAdjustments(ws.appliedAdjustments);
             if (ws.appliedAdhoc) setAppliedAdhoc(ws.appliedAdhoc);
             if (ws.heldEmployees) setHeldEmployees(ws.heldEmployees);
@@ -250,6 +264,14 @@ export default function PayRunWizardSteps({
                 setEditedLop(parsed.editedLop);
                 editedLopRef.current = parsed.editedLop;
               }
+              if (parsed.editedWorkingDays && typeof parsed.editedWorkingDays === 'object' && Object.keys(parsed.editedWorkingDays).length > 0) {
+                setEditedWorkingDays(parsed.editedWorkingDays);
+                editedWorkingDaysRef.current = parsed.editedWorkingDays;
+              }
+              if (parsed.editedLeaves && typeof parsed.editedLeaves === 'object' && Object.keys(parsed.editedLeaves).length > 0) {
+                setEditedLeaves(parsed.editedLeaves);
+                editedLeavesRef.current = parsed.editedLeaves;
+              }
               if (parsed.appliedAdjustments) setAppliedAdjustments(parsed.appliedAdjustments);
               if (parsed.appliedAdhoc) setAppliedAdhoc(parsed.appliedAdhoc);
               if (parsed.heldEmployees) setHeldEmployees(parsed.heldEmployees);
@@ -264,7 +286,25 @@ export default function PayRunWizardSteps({
     }
   }, [runItems, reimbursements, selectedRun]);
 
-  // Auto-save helper when stepping forward/backward or changing steps
+  const getFullDraftPayload = (overrides = {}) => {
+    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    return {
+      runId: selectedRun?.id,
+      completedStep: overrides.completedStep !== undefined ? overrides.completedStep : completedStep,
+      lastActiveStep: overrides.lastActiveStep !== undefined ? overrides.lastActiveStep : currentStep,
+      lastSavedAt: timeStr,
+      editedLop: overrides.editedLop || editedLopRef.current || editedLop,
+      editedWorkingDays: overrides.editedWorkingDays || editedWorkingDaysRef.current || editedWorkingDays,
+      editedLeaves: overrides.editedLeaves || editedLeavesRef.current || editedLeaves,
+      appliedAdjustments: overrides.appliedAdjustments || appliedAdjustments,
+      appliedAdhoc: overrides.appliedAdhoc || appliedAdhoc,
+      heldEmployees: overrides.heldEmployees || heldEmployees,
+      appliedOverrides: overrides.appliedOverrides || appliedOverrides,
+      checkedExited: overrides.checkedExited || checkedExited,
+      ...overrides
+    };
+  };
+
   const handleStepChange = (targetStep, customDraft = {}) => {
     const nextStep = Math.max(1, Math.min(totalSteps, targetStep));
     const newCompleted = Math.max(completedStep, currentStep - 1);
@@ -273,19 +313,12 @@ export default function PayRunWizardSteps({
     setLastSavedTime(timeStr);
 
     if (selectedRun && selectedRun.id) {
-      const currentLopState = customDraft.editedLop || editedLopRef.current || editedLop;
-      const draftPayload = {
-        runId: selectedRun.id,
+      const draftPayload = getFullDraftPayload({
         completedStep: newCompleted,
         lastActiveStep: nextStep,
         lastSavedAt: timeStr,
-        editedLop: currentLopState,
-        appliedAdjustments: customDraft.appliedAdjustments || appliedAdjustments,
-        appliedAdhoc: customDraft.appliedAdhoc || appliedAdhoc,
-        heldEmployees: customDraft.heldEmployees || heldEmployees,
-        appliedOverrides: customDraft.appliedOverrides || appliedOverrides,
-        checkedExited: customDraft.checkedExited || checkedExited
-      };
+        ...customDraft
+      });
 
       // 1. Save directly to Database for multi-system sync
       api.savePayRunState(selectedRun.id, draftPayload)
@@ -315,6 +348,9 @@ export default function PayRunWizardSteps({
         return;
       }
     }
+    if (currentStep === 7) {
+      triggerExcelDownload();
+    }
     handleStepChange(currentStep + 1);
   };
 
@@ -341,6 +377,21 @@ export default function PayRunWizardSteps({
       setLocalEmployees(employees);
     }
   }, [employees]);
+
+  useEffect(() => {
+    const handleEmpUpdated = () => {
+      api.getEmployees({ limit: 1000 }).then(data => {
+        const list = Array.isArray(data) ? data : (data?.data || []);
+        if (list && list.length > 0) setLocalEmployees(list);
+      }).catch(() => {});
+    };
+    window.addEventListener('employee-updated', handleEmpUpdated);
+    window.addEventListener('focus', handleEmpUpdated);
+    return () => {
+      window.removeEventListener('employee-updated', handleEmpUpdated);
+      window.removeEventListener('focus', handleEmpUpdated);
+    };
+  }, []);
 
   // Quick Fix Modal state for Bank Details & Compliance Issues
   const [fixModalEmp, setFixModalEmp] = useState(null);
@@ -413,16 +464,9 @@ export default function PayRunWizardSteps({
     setAppliedOverrides(updatedOverrides);
 
     if (selectedRun && selectedRun.id) {
-      api.savePayRunState(selectedRun.id, {
-        appliedOverrides: updatedOverrides,
-        editedLop,
-        completedStep,
-        lastActiveStep: currentStep,
-        appliedAdjustments,
-        appliedAdhoc,
-        heldEmployees,
-        checkedExited
-      }).catch(e => console.warn('Sync override error:', e));
+      api.savePayRunState(selectedRun.id, getFullDraftPayload({
+        appliedOverrides: updatedOverrides
+      })).catch(e => console.warn('Sync override error:', e));
     }
 
     logActivity(`Statutory deductions overridden for ${empName}: PF=₹${editDeds.epf}, VPF=₹${editDeds.vpf}, ESI=₹${editDeds.esi}, PT=₹${editDeds.pt}, LWF=₹${editDeds.lwf}, TDS=₹${editDeds.tds}, Other=₹${editDeds.other}`);
@@ -650,7 +694,8 @@ export default function PayRunWizardSteps({
 
 
   // Active Workforce: active employees + explicitly checked deactivated employees
-  const activeWorkforce = employees.filter(emp => {
+  const workforceSource = localEmployees && localEmployees.length > 0 ? localEmployees : employees;
+  const activeWorkforce = workforceSource.filter(emp => {
     if (emp.status === 'PAST') {
       return !!checkedExited[emp.id];
     }
@@ -658,7 +703,8 @@ export default function PayRunWizardSteps({
   });
 
   // 1. Leave & Payable Units calculations (Scans DB Leaves & computes allowed vs excess LOP & Date of Joining Proration)
-  const getPayableUnits = () => {
+  // Salary amounts are taken from the server preview (previewMap) whenever it is available.
+  const getPayableUnits = (previewMap = serverPreview) => {
     const [cycleYear, cycleMonth] = selectedRun.month.split('-').map(Number);
     const workingDays = getCalendarDaysInMonth(cycleYear, cycleMonth);
 
@@ -744,6 +790,40 @@ export default function PayRunWizardSteps({
         return t.includes('lop') || t.includes('unpaid') || t.includes('loss of pay');
       }).reduce((sum, l) => sum + getLeaveDuration(l), 0);
 
+      // Factor in local manual input edits for leaves
+      const leavesSource = Object.keys(editedLeavesRef.current || {}).length > 0 ? editedLeavesRef.current : editedLeaves;
+      const findLeavesVal = () => {
+        if (leavesSource[emp.id]) return leavesSource[emp.id];
+        if (emp.empCode && leavesSource[emp.empCode]) return leavesSource[emp.empCode];
+        if (emp.name && leavesSource[emp.name]) return leavesSource[emp.name];
+        const key = Object.keys(leavesSource).find(k => 
+          k.toLowerCase() === String(emp.id).toLowerCase() || 
+          (emp.empCode && k.toLowerCase() === String(emp.empCode).toLowerCase()) ||
+          (emp.name && k.toLowerCase() === String(emp.name).toLowerCase())
+        );
+        if (key !== undefined) return leavesSource[key];
+        return undefined;
+      };
+
+      const matchedLeaves = findLeavesVal() || {};
+      let finalCl = matchedLeaves.CL !== undefined ? matchedLeaves.CL : clUsed;
+      let finalSl = matchedLeaves.SL !== undefined ? matchedLeaves.SL : slUsed;
+      let finalEl = matchedLeaves.EL !== undefined ? matchedLeaves.EL : earnedLeaveUsed;
+      let finalCustomLeaves = {};
+      Object.keys(matchedLeaves).forEach(k => {
+        if (!['CL', 'SL', 'EL', 'approved'].includes(k) && matchedLeaves[k] !== undefined) {
+          finalCustomLeaves[k] = matchedLeaves[k];
+        }
+      });
+
+      let finalApprovedLeaves = approvedLeaveDays;
+      if (matchedLeaves.approved !== undefined) {
+        finalApprovedLeaves = matchedLeaves.approved;
+      } else if (matchedLeaves.CL !== undefined || matchedLeaves.SL !== undefined || matchedLeaves.EL !== undefined || Object.keys(finalCustomLeaves).length > 0) {
+        const customSum = Object.values(finalCustomLeaves).reduce((a, b) => a + Number(b || 0), 0);
+        finalApprovedLeaves = Number(finalCl || 0) + Number(finalSl || 0) + Number(finalEl || 0) + customSum;
+      }
+
       // Factor in local manual input edits or DB overrides (matching by id, empCode, or name)
       let lopDays = computedLopDays;
       const lopSource = Object.keys(editedLopRef.current || {}).length > 0 ? editedLopRef.current : editedLop;
@@ -767,35 +847,57 @@ export default function PayRunWizardSteps({
         lopDays = Number(runItem.lopDays);
       }
 
+      // Factor in edited working days if modified by user in wizard Step 1 or DB run item
+      const wdSource = Object.keys(editedWorkingDaysRef.current || {}).length > 0 ? editedWorkingDaysRef.current : editedWorkingDays;
+      const findWdVal = () => {
+        if (wdSource[emp.id] !== undefined) return Number(wdSource[emp.id]);
+        if (emp.empCode && wdSource[emp.empCode] !== undefined) return Number(wdSource[emp.empCode]);
+        if (emp.name && wdSource[emp.name] !== undefined) return Number(wdSource[emp.name]);
+        const key = Object.keys(wdSource).find(k => 
+          k.toLowerCase() === String(emp.id).toLowerCase() || 
+          (emp.empCode && k.toLowerCase() === String(emp.empCode).toLowerCase()) ||
+          (emp.name && k.toLowerCase() === String(emp.name).toLowerCase())
+        );
+        if (key !== undefined) return Number(wdSource[key]);
+        return undefined;
+      };
+
+      const matchedWd = findWdVal();
+
       // --- DATE OF JOINING & EXIT PRORATION ---
       const joinParts = parseDateMonthYear(emp.joiningDate);
       const exitParts = parseDateMonthYear(emp.exitDate);
 
-      let eligibleWorkingDays = workingDays;
+      let empBaseWorkingDays = matchedWd !== undefined ? matchedWd : (runItem && (runItem.workingDays != null || runItem.working_days != null) ? Number(runItem.workingDays || runItem.working_days) : workingDays);
+      let eligibleWorkingDays = empBaseWorkingDays;
       let isMidMonthJoin = false;
       let isMidMonthExit = false;
       let joinDay = null;
 
-      if (joinParts && !isNaN(joinParts.year) && !isNaN(joinParts.month)) {
-        if (joinParts.year === cycleYear && joinParts.month === cycleMonth) {
-          // Joined in this cycle month on day J
-          isMidMonthJoin = true;
-          joinDay = Math.min(Math.max(1, joinParts.day || 1), workingDays);
-          eligibleWorkingDays = workingDays - joinDay + 1;
-        } else if (joinParts.year > cycleYear || (joinParts.year === cycleYear && joinParts.month > cycleMonth)) {
-          // Joined in a future month after this cycle
-          eligibleWorkingDays = 0;
+      if (matchedWd !== undefined) {
+        eligibleWorkingDays = matchedWd;
+      } else {
+        if (joinParts && !isNaN(joinParts.year) && !isNaN(joinParts.month)) {
+          if (joinParts.year === cycleYear && joinParts.month === cycleMonth) {
+            // Joined in this cycle month on day J
+            isMidMonthJoin = true;
+            joinDay = Math.min(Math.max(1, joinParts.day || 1), empBaseWorkingDays);
+            eligibleWorkingDays = empBaseWorkingDays - joinDay + 1;
+          } else if (joinParts.year > cycleYear || (joinParts.year === cycleYear && joinParts.month > cycleMonth)) {
+            // Joined in a future month after this cycle
+            eligibleWorkingDays = 0;
+          }
         }
-      }
 
-      if (exitParts && !isNaN(exitParts.year) && !isNaN(exitParts.month) && emp.status === 'PAST') {
-        if (exitParts.year === cycleYear && exitParts.month === cycleMonth) {
-          isMidMonthExit = true;
-          const exitDay = Math.min(Math.max(1, exitParts.day || 1), workingDays);
-          if (isMidMonthJoin && joinDay) {
-            eligibleWorkingDays = Math.max(0, exitDay - joinDay + 1);
-          } else {
-            eligibleWorkingDays = Math.min(eligibleWorkingDays, exitDay);
+        if (exitParts && !isNaN(exitParts.year) && !isNaN(exitParts.month) && emp.status === 'PAST') {
+          if (exitParts.year === cycleYear && exitParts.month === cycleMonth) {
+            isMidMonthExit = true;
+            const exitDay = Math.min(Math.max(1, exitParts.day || 1), empBaseWorkingDays);
+            if (isMidMonthJoin && joinDay) {
+              eligibleWorkingDays = Math.max(0, exitDay - joinDay + 1);
+            } else {
+              eligibleWorkingDays = Math.min(eligibleWorkingDays, exitDay);
+            }
           }
         }
       }
@@ -808,8 +910,8 @@ export default function PayRunWizardSteps({
       );
       const adj = adjKey ? appliedAdjustments[adjKey] : null;
       const revisionGross = adj && Number(adj.ctc) > 0 ? Number(adj.ctc) : 0;
-      const dbGross = Number(emp.compensationGross || emp.salary || 0);
-      const monthlyDbGross = dbGross > 0 ? Math.round(dbGross / 12) : 50000;
+      const dbGross = Number(emp.compensationGross || emp.compensation_gross || emp.ctc || emp.salary || 0);
+      const monthlyDbGross = dbGross > 0 ? (dbGross > 100000 ? Math.round(dbGross / 12) : dbGross) : 25000;
       const monthlyRevision = revisionGross > 0 ? (revisionGross > 100000 ? Math.round(revisionGross / 12) : revisionGross) : 0;
       const baseSalary = monthlyRevision > 0 ? monthlyRevision : monthlyDbGross;
       const bonusVal = adj ? adj.bonus : 0;
@@ -837,33 +939,40 @@ export default function PayRunWizardSteps({
       const isOnHold = isEmpHeld();
 
       // Calculated Total Earned Gross Salary (PF wage base before Advance Salary / Ad-hoc deductions)
+      const baseDaysForRatio = eligibleWorkingDays > 0 ? eligibleWorkingDays : workingDays;
       const earnedGross = isOnHold
         ? 0
-        : Math.max(0, Math.round(baseSalary * (payableDays / workingDays)) + bonusVal + totalPayments + totalArrears);
+        : Math.max(0, Math.round(baseSalary * (payableDays / (baseDaysForRatio || 30))) + bonusVal + totalPayments + totalArrears);
 
       // Estimated net after post-gross deductions (Advance Salary recovery)
       const netAfterAdhoc = Math.max(0, earnedGross - totalDeductions);
 
+      // Server-calculated pay for this employee (identical to what Lock & Freeze stores)
+      const serverPay = previewMap ? previewMap[String(emp.id)] || null : null;
+
       return {
         ...emp,
+        serverPay,
         runItemId: runItem ? runItem.id : null,
-        workingDays,
+        workingDays: eligibleWorkingDays,
         eligibleWorkingDays,
+        monthCalendarDays: workingDays,
         isMidMonthJoin,
         isMidMonthExit,
         joinDay,
-        approvedLeaveDays,
-        earnedLeaveUsed,
-        clUsed,
-        slUsed,
+        approvedLeaveDays: finalApprovedLeaves,
+        earnedLeaveUsed: finalEl,
+        clUsed: finalCl,
+        slUsed: finalSl,
+        customLeaves: finalCustomLeaves,
         lopDays,
         payableDays,
-        earnedGross,
+        earnedGross: serverPay ? Number(serverPay.grossEarned) || 0 : earnedGross,
         totalPayments,
         totalArrears,
-        totalDeductions,
-        calculatedSalary: earnedGross,
-        netAfterAdhoc
+        totalDeductions: serverPay ? Number((serverPay.deductions || {}).ADHOC_DEDUCTION) || 0 : totalDeductions,
+        calculatedSalary: serverPay ? Number(serverPay.grossEarned) || 0 : earnedGross,
+        netAfterAdhoc: serverPay ? Number(serverPay.netSalary) || 0 : netAfterAdhoc
       };
     });
   };
@@ -883,26 +992,17 @@ export default function PayRunWizardSteps({
     try {
       if (selectedRun && selectedRun.id) {
         // Direct database save for LOP in SQLite
-        await api.savePayRunLop(selectedRun.id, empId, numericLop);
+        const res = await api.savePayRunLop(selectedRun.id, empId, numericLop);
+
+        if (res?.updatedItem) {
+          setSelectedRunItems(prev => prev.map(item => item.id === res.updatedItem.id ? res.updatedItem : item));
+          setLocalItems(prev => prev.map(item => item.id === res.updatedItem.id ? res.updatedItem : item));
+        }
 
         // Also persist full wizard state to database for cross-device sync
-        api.savePayRunState(selectedRun.id, {
-          editedLop: updatedLopMap,
-          completedStep,
-          lastActiveStep: currentStep,
-          appliedAdjustments,
-          appliedAdhoc,
-          heldEmployees,
-          appliedOverrides,
-          checkedExited
-        }).catch(() => {});
-      }
-
-      if (runItemId) {
-        try {
-          const updatedItem = await api.updatePayrollItem(runItemId, { lopDays: numericLop });
-          setSelectedRunItems(prev => prev.map(item => item.id === runItemId ? updatedItem : item));
-        } catch (e) {}
+        api.savePayRunState(selectedRun.id, getFullDraftPayload({
+          editedLop: updatedLopMap
+        })).catch(() => {});
       }
 
       logActivity(`Overrode LOP days to ${numericLop} for employee ID: ${empId}`);
@@ -910,6 +1010,100 @@ export default function PayRunWizardSteps({
     } catch (err) {
       console.error(err);
       alert(`✓ LOP of ${numericLop} days updated.`);
+    }
+  };
+
+  const handleWorkingDaysChange = (empId, val) => {
+    const updated = { ...editedWorkingDaysRef.current, [empId]: val };
+    editedWorkingDaysRef.current = updated;
+    setEditedWorkingDays(updated);
+  };
+
+  const handleSaveWorkingDays = async (empId, runItemId, wdVal) => {
+    const numericWd = Number(wdVal || 0);
+    const updatedWdMap = { ...editedWorkingDaysRef.current, [empId]: numericWd };
+    editedWorkingDaysRef.current = updatedWdMap;
+    setEditedWorkingDays(updatedWdMap);
+
+    try {
+      if (selectedRun && selectedRun.id) {
+        const res = await api.savePayRunWorkingDays(selectedRun.id, empId, numericWd);
+
+        if (res?.updatedItem) {
+          setSelectedRunItems(prev => prev.map(item => item.id === res.updatedItem.id ? res.updatedItem : item));
+          setLocalItems(prev => prev.map(item => item.id === res.updatedItem.id ? res.updatedItem : item));
+        }
+
+        api.savePayRunState(selectedRun.id, getFullDraftPayload({
+          editedWorkingDays: updatedWdMap
+        })).catch(() => {});
+      }
+
+      logActivity(`Overrode Working Days to ${numericWd} for employee ID: ${empId}`);
+      alert(`✓ Working Days of ${numericWd} days saved successfully in database.`);
+    } catch (err) {
+      console.error(err);
+      alert(`✓ Working Days of ${numericWd} days updated.`);
+    }
+  };
+
+  const handleLeaveChange = (empId, leaveKey, val, currentP) => {
+    const currentEmpLeaves = { ...(editedLeavesRef.current[empId] || {}) };
+    currentEmpLeaves[leaveKey] = val;
+
+    if (leaveKey !== 'approved') {
+      const cl = currentEmpLeaves.CL !== undefined && currentEmpLeaves.CL !== '' ? Number(currentEmpLeaves.CL) : Number(currentP?.clUsed || 0);
+      const sl = currentEmpLeaves.SL !== undefined && currentEmpLeaves.SL !== '' ? Number(currentEmpLeaves.SL) : Number(currentP?.slUsed || 0);
+      const el = currentEmpLeaves.EL !== undefined && currentEmpLeaves.EL !== '' ? Number(currentEmpLeaves.EL) : Number(currentP?.earnedLeaveUsed || 0);
+      
+      let customSum = 0;
+      activeLeaveColumns.forEach(c => {
+        if (!['CL', 'SL', 'EL'].includes(c)) {
+          const cVal = currentEmpLeaves[c] !== undefined && currentEmpLeaves[c] !== '' 
+            ? Number(currentEmpLeaves[c]) 
+            : Number(currentP?.customLeaves?.[c] || 0);
+          customSum += cVal;
+        }
+      });
+
+      currentEmpLeaves.approved = cl + sl + el + customSum;
+    }
+
+    const updated = { ...editedLeavesRef.current, [empId]: currentEmpLeaves };
+    editedLeavesRef.current = updated;
+    setEditedLeaves(updated);
+  };
+
+  const handleSaveLeaves = async (empId, runItemId) => {
+    const currentEmpLeaves = editedLeavesRef.current[empId] || {};
+    try {
+      if (selectedRun && selectedRun.id) {
+        if (api.savePayRunLeaves) {
+          api.savePayRunLeaves(selectedRun.id, empId, currentEmpLeaves).catch(() => {});
+        }
+        await api.savePayRunState(selectedRun.id, getFullDraftPayload({
+          editedLeaves: editedLeavesRef.current
+        }));
+      }
+
+      logActivity(`Saved leave adjustments for employee ID: ${empId}`);
+      alert(`✓ Leaves saved successfully in database.`);
+    } catch (err) {
+      console.error(err);
+      alert(`✓ Leaves updated.`);
+    }
+  };
+
+  const handleAutoSaveLeaves = async (empId) => {
+    if (selectedRun && selectedRun.id) {
+      try {
+        if (api.savePayRunLeaves && empId) {
+          api.savePayRunLeaves(selectedRun.id, empId, editedLeavesRef.current[empId] || {}).catch(() => {});
+        }
+        await api.savePayRunState(selectedRun.id, getFullDraftPayload({
+          editedLeaves: editedLeavesRef.current
+        }));
+      } catch (e) {}
     }
   };
 
@@ -940,8 +1134,34 @@ export default function PayRunWizardSteps({
   // Statutory Overrides Audit History State
   const [appliedOverrides, setAppliedOverrides] = useState([]);
 
+  // Salary figures come from the server (PayCalculator): the same calculation that Lock & Freeze stores
+  // and that Form W / payslips read back. Unsaved edits are previewed by sending the current wizard state.
+  const [serverPreview, setServerPreview] = useState({});
+  const previewSeqRef = useRef(0);
+
+  const refreshServerPreview = async () => {
+    if (!selectedRun || !selectedRun.id) return serverPreview;
+    const seq = ++previewSeqRef.current;
+    const res = await api.previewPayRun(selectedRun.id, getFullDraftPayload());
+    const map = {};
+    ((res && res.rows) || []).forEach(row => {
+      if (row && row.employeeId != null) map[String(row.employeeId)] = row;
+    });
+    if (seq === previewSeqRef.current) setServerPreview(map);
+    return map;
+  };
+
+  useEffect(() => {
+    if (!selectedRun || !selectedRun.id) return undefined;
+    const timer = setTimeout(() => {
+      refreshServerPreview().catch(err => console.warn('Payroll preview error:', err));
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [selectedRun?.id, selectedRun?.status, editedLop, editedWorkingDays, appliedAdjustments, appliedAdhoc, heldEmployees, appliedOverrides, checkedExited, localEmployees]);
+
   // Dynamic Statutory & Net Pay Calculation helper with Override synchronization based on Earned Gross
-  const getEmployeeStatutoryValues = (p) => {
+  // Uses the server-calculated pay (previewMap) when available; the local estimate only covers the first load.
+  const getEmployeeStatutoryValues = (p, previewMap = serverPreview) => {
     // Match employee record from local state or props
     const empList = localEmployees.length > 0 ? localEmployees : employees;
     const emp = empList.find(e => String(e.id) === String(p.id) || String(e.empCode) === String(p.id) || e.name === p.name) || p;
@@ -964,9 +1184,10 @@ export default function PayRunWizardSteps({
     const attendanceRatio = workingDays > 0 ? Math.max(0, Math.min(1, payableDays / workingDays)) : 1;
 
     // Determine exact Earned Gross Salary for this pay run cycle (Pre-deduction wage base)
-    const fullMonthlyGross = Number(emp.compensationGross || emp.salary || 0) > 0 
-      ? Math.round(Number(emp.compensationGross || emp.salary) / 12) 
-      : 50000;
+    const rawEmpGross = Number(emp.compensationGross || emp.compensation_gross || emp.ctc || emp.salary || 0);
+    const fullMonthlyGross = rawEmpGross > 0 
+      ? (rawEmpGross > 100000 ? Math.round(rawEmpGross / 12) : rawEmpGross) 
+      : 25000;
     
     const earnedGross = isOnHold 
       ? 0 
@@ -986,6 +1207,7 @@ export default function PayRunWizardSteps({
         gross: 0,
         basic: 0,
         hra: 0,
+        other: 0,
         epfEe: 0,
         vpfEe: 0,
         esicEe: 0,
@@ -1026,6 +1248,75 @@ export default function PayRunWizardSteps({
     const tdsOverride = findOverride('TDS');
     const otherOverride = findOverride('OTHER') || findOverride('LWP');
 
+    const hasOverrides = epfOverride !== null || vpfOverride !== null || esiOverride !== null || ptOverride !== null || lwfOverride !== null || tdsOverride !== null || otherOverride !== null;
+    const registered = {
+      pfEligible: emp.pfEligible !== false,
+      pfAmount: emp.pfAmount,
+      vpfEligible: !!emp.vpfEligible,
+      vpfAmount: emp.vpfAmount,
+      esiEligible: emp.esiEligible !== false,
+      ptEligible: emp.ptEligible !== false,
+      ptAmount: emp.ptAmount,
+      lwfEligible: emp.lwfEligible !== false,
+      lwfAmount: emp.lwfAmount,
+      taxRegime: emp.taxRegime || 'New Regime'
+    };
+
+    // Server-calculated pay: exactly what Lock & Freeze stores and what Form W / payslips show
+    const serverPay = p.serverPay || (previewMap ? previewMap[String(p.id)] : null);
+    if (serverPay) {
+      const e = serverPay.earnings || {};
+      const d = serverPay.deductions || {};
+      const pick = (obj, ...keys) => {
+        for (const k of keys) {
+          if (obj[k] != null) return Number(obj[k]) || 0;
+        }
+        return 0;
+      };
+      const srvEpf = pick(d, 'EPF_EE', 'PF_EE');
+      const srvVpf = pick(d, 'VPF_EE', 'VPF');
+      const srvEsi = pick(d, 'ESI_EE', 'ESI');
+      const srvPt = pick(d, 'PT');
+      const srvLwf = pick(d, 'LWF', 'LWF_EE');
+      const srvTds = pick(d, 'TDS');
+      const srvOther = pick(d, 'OTHER', 'LWP');
+      const loanEmi = pick(d, 'LOAN_EMI');
+      const srvNonTds = srvEpf + srvVpf + srvEsi + srvPt + srvLwf + srvOther + loanEmi;
+      const srvWorkingDays = Number(serverPay.workingDays) || 0;
+      const srvPayableDays = Number(serverPay.workedDays) || 0;
+      const srvBasic = pick(e, 'BASIC');
+      const srvHra = pick(e, 'HRA');
+      const srvOtherEarn = pick(e, 'SPECIAL_ALLOWANCE', 'OTHER_ALLOWANCE', 'OTHER', 'special', 'other')
+        || Math.max(0, (Number(serverPay.grossEarned) || 0) - srvBasic - srvHra - pick(e, 'ADHOC_PAYMENT') - pick(e, 'ARREARS'));
+      return {
+        gross: Number(serverPay.grossEarned) || 0,
+        basic: srvBasic,
+        hra: srvHra,
+        other: srvOtherEarn,
+        epfEe: srvEpf,
+        epfEr: srvEpf,
+        vpfEe: srvVpf,
+        esicEe: srvEsi,
+        lwfEe: srvLwf,
+        pt: srvPt,
+        tds: srvTds,
+        otherDed: srvOther,
+        loanEmi,
+        adhocDed: pick(d, 'ADHOC_DEDUCTION'),
+        adhocPay: pick(e, 'ADHOC_PAYMENT') + pick(e, 'ARREARS'),
+        nonTdsStatutory: srvNonTds,
+        totalStatutoryDed: srvNonTds + srvTds,
+        totalDeductions: Number(serverPay.totalDeductions) || 0,
+        net: Number(serverPay.netSalary) || 0,
+        isHeld: !!serverPay.isHeld,
+        hasOverrides,
+        attendanceRatio: srvWorkingDays > 0 ? Math.min(1, srvPayableDays / srvWorkingDays) : 0,
+        workingDays: srvWorkingDays,
+        payableDays: srvPayableDays,
+        registered
+      };
+    }
+
     // 1. EPF (Provident Fund calculated on earned PF wage)
     let epfEe = 0;
     if (epfOverride !== null) {
@@ -1035,8 +1326,9 @@ export default function PayRunWizardSteps({
     } else if (emp.pfAmount !== undefined && emp.pfAmount !== null && emp.pfAmount !== '' && !isNaN(Number(emp.pfAmount)) && Number(emp.pfAmount) > 0) {
       epfEe = Math.round(Number(emp.pfAmount) * attendanceRatio);
     } else {
-      epfEe = pfWage < 15000 ? Math.round(pfWage * 0.12) : 1800;
+      epfEe = pfWage < 15000 ? Math.round(pfWage * 0.12) : Math.round(1800 * attendanceRatio);
     }
+    const epfEr = emp.pfEligible === false ? 0 : epfEe;
 
     // 2. VPF (Voluntary Provident Fund - Fixed Monthly Registered Contribution)
     let vpfEe = 0;
@@ -1100,13 +1392,13 @@ export default function PayRunWizardSteps({
     const adhocDed = Number(p.totalDeductions) >= 0 ? Number(p.totalDeductions) : 0;
     const net = Math.max(0, earnedGross - totalStatutoryDed - adhocDed);
 
-    const hasOverrides = epfOverride !== null || vpfOverride !== null || esiOverride !== null || ptOverride !== null || lwfOverride !== null || tdsOverride !== null || otherOverride !== null;
-
     return {
       gross: earnedGross,
       basic,
       hra,
+      other: otherAllowance,
       epfEe,
+      epfEr,
       vpfEe,
       esicEe,
       lwfEe,
@@ -1120,56 +1412,68 @@ export default function PayRunWizardSteps({
       attendanceRatio,
       workingDays,
       payableDays,
-      registered: {
-        pfEligible: emp.pfEligible !== false,
-        pfAmount: emp.pfAmount,
-        vpfEligible: !!emp.vpfEligible,
-        vpfAmount: emp.vpfAmount,
-        esiEligible: emp.esiEligible !== false,
-        ptEligible: emp.ptEligible !== false,
-        ptAmount: emp.ptAmount,
-        lwfEligible: emp.lwfEligible !== false,
-        lwfAmount: emp.lwfAmount,
-        taxRegime: emp.taxRegime || 'New Regime'
-      }
+      registered
     };
   };
 
   // Automatic Excel / CSV Register Download Engine
-  const triggerExcelDownload = () => {
+  const triggerExcelDownload = async () => {
     try {
-      const units = getPayableUnits();
+      // Always export the latest server calculation (the figures Lock & Freeze will store)
+      let previewMap = serverPreview;
+      try {
+        previewMap = await refreshServerPreview();
+      } catch (previewErr) {
+        console.warn('Could not refresh payroll preview before export:', previewErr);
+      }
+      const units = getPayableUnits(previewMap);
       const headers = [
         "Employee Name", "Emp ID", "Designation", "Working Days", "Payable Days", "LOP Days", 
-        "Basic Salary (₹)", "HRA (₹)", "Gross Salary (₹)", "EPF EE (12%)", "ESIC EE (0.75%)", 
+        "Basic Salary (₹)", "HRA (₹)", "Other (₹)", "Gross Salary (₹)", "EPF EE (12%)", "Voluntary PF VPF (₹)", "ESIC EE (0.75%)", 
         "LWF EE (₹)", "Prof Tax PT (₹)", "TDS Tax (₹)", "Ad-hoc Payments (₹)", "Ad-hoc Deductions (₹)", 
-        "Net Payable (₹)", "Bank Account Number", "IFSC Code"
+        "Other Deductions (₹)", "Total Deductions (₹)", "Net Payable (₹)", "Bank Account Number", "IFSC Code"
       ];
       
       const rows = units.map(p => {
-        const empAdhocs = appliedAdhoc.filter(a => a.employeeId === p.id);
-        const adhocPay = empAdhocs.filter(a => a.type === 'PAYMENT' || a.type === 'ARREARS').reduce((s, a) => s + a.amount, 0);
-        const adhocDed = empAdhocs.filter(a => a.type === 'DEDUCTION').reduce((s, a) => s + a.amount, 0);
-        const stat = getEmployeeStatutoryValues(p);
+        const stat = getEmployeeStatutoryValues(p, previewMap);
+        let adhocPay, adhocDed, otherDed, totalDeductions, netPayable;
+        if (p.serverPay) {
+          adhocPay = stat.adhocPay;
+          adhocDed = stat.adhocDed;
+          otherDed = (stat.otherDed || 0) + (stat.loanEmi || 0);
+          totalDeductions = stat.totalDeductions;
+          netPayable = stat.net;
+        } else {
+          const empAdhocs = appliedAdhoc.filter(a => a.employeeId === p.id);
+          adhocPay = empAdhocs.filter(a => a.type === 'PAYMENT' || a.type === 'ARREARS').reduce((s, a) => s + a.amount, 0);
+          adhocDed = empAdhocs.filter(a => a.type === 'DEDUCTION').reduce((s, a) => s + a.amount, 0);
+          otherDed = stat.otherDed || 0;
+          totalDeductions = (stat.epfEe || 0) + (stat.vpfEe || 0) + (stat.esicEe || 0) + (stat.lwfEe || 0) + (stat.pt || 0) + (stat.tds || 0) + otherDed + adhocDed;
+          netPayable = stat.isHeld || (stat.net === 0 && stat.gross > 0) ? 0 : Math.max(0, stat.gross - totalDeductions);
+        }
 
         return [
           p.name,
-          p.id,
+          p.empCode || p.id,
           p.designation || 'Staff',
-          p.workingDays,
-          p.payableDays,
+          stat.workingDays,
+          stat.payableDays,
           p.lopDays,
           stat.basic,
           stat.hra,
+          stat.other || 0,
           stat.gross,
           stat.epfEe,
+          stat.vpfEe || 0,
           stat.esicEe,
           stat.lwfEe,
           stat.pt,
           stat.tds,
           adhocPay,
           adhocDed,
-          stat.net,
+          otherDed,
+          totalDeductions,
+          netPayable,
           p.bankAccountNo || p.accountNumber || 'N/A',
           p.bankIfscCode || p.ifscCode || p.ifsc || 'N/A'
         ];
@@ -1218,16 +1522,9 @@ export default function PayRunWizardSteps({
     setAppliedOverrides(updatedOverrides);
 
     if (selectedRun && selectedRun.id) {
-      api.savePayRunState(selectedRun.id, {
-        appliedOverrides: updatedOverrides,
-        editedLop,
-        completedStep,
-        lastActiveStep: currentStep,
-        appliedAdjustments,
-        appliedAdhoc,
-        heldEmployees,
-        checkedExited
-      }).catch(e => console.warn('Override sync error:', e));
+      api.savePayRunState(selectedRun.id, getFullDraftPayload({
+        appliedOverrides: updatedOverrides
+      })).catch(e => console.warn('Override sync error:', e));
     }
 
     logActivity(`Override: Configured custom ${overrideType} override of ₹${Number(overrideAmount).toLocaleString()} for ${isAll ? 'All Employees' : (emp ? emp.name : overrideEmp)}. Reason: ${overrideReason}`);
@@ -1241,16 +1538,9 @@ export default function PayRunWizardSteps({
     const updatedOverrides = appliedOverrides.filter(o => o.id !== id);
     setAppliedOverrides(updatedOverrides);
     if (selectedRun && selectedRun.id) {
-      api.savePayRunState(selectedRun.id, {
-        appliedOverrides: updatedOverrides,
-        editedLop,
-        completedStep,
-        lastActiveStep: currentStep,
-        appliedAdjustments,
-        appliedAdhoc,
-        heldEmployees,
-        checkedExited
-      }).catch(e => console.warn('Remove override sync error:', e));
+      api.savePayRunState(selectedRun.id, getFullDraftPayload({
+        appliedOverrides: updatedOverrides
+      })).catch(e => console.warn('Remove override sync error:', e));
     }
     logActivity(`Override Removed: Reverted statutory override entry.`);
   };
@@ -1271,16 +1561,9 @@ export default function PayRunWizardSteps({
     setAppliedAdjustments(updatedAdjustments);
 
     if (selectedRun && selectedRun.id) {
-      api.savePayRunState(selectedRun.id, {
-        appliedAdjustments: updatedAdjustments,
-        editedLop,
-        completedStep,
-        lastActiveStep: currentStep,
-        appliedAdhoc,
-        heldEmployees,
-        appliedOverrides,
-        checkedExited
-      }).catch(e => console.warn('Adjustments sync error:', e));
+      api.savePayRunState(selectedRun.id, getFullDraftPayload({
+        appliedAdjustments: updatedAdjustments
+      })).catch(e => console.warn('Adjustments sync error:', e));
     }
 
     logActivity(`Adjustment Applied: Revise CTC/Bonus for employee: ${revisionEmp}. Revision: ₹${revisionAmount || 0}, Bonus: ₹${bonusAmount || 0}`);
@@ -1311,16 +1594,9 @@ export default function PayRunWizardSteps({
     setAppliedAdhoc(updatedAdhoc);
 
     if (selectedRun && selectedRun.id) {
-      api.savePayRunState(selectedRun.id, {
-        appliedAdhoc: updatedAdhoc,
-        editedLop,
-        completedStep,
-        lastActiveStep: currentStep,
-        appliedAdjustments,
-        heldEmployees,
-        appliedOverrides,
-        checkedExited
-      }).catch(e => console.warn('Adhoc sync error:', e));
+      api.savePayRunState(selectedRun.id, getFullDraftPayload({
+        appliedAdhoc: updatedAdhoc
+      })).catch(e => console.warn('Adhoc sync error:', e));
     }
 
     logActivity(`Ad-hoc ${adhocType} of ₹${Number(adhocAmount).toLocaleString()} added for ${emp ? emp.name : adhocEmp}. Reason: ${finalReason}`);
@@ -1340,16 +1616,9 @@ export default function PayRunWizardSteps({
     setAppliedAdhoc(updatedAdhoc);
 
     if (selectedRun && selectedRun.id) {
-      api.savePayRunState(selectedRun.id, {
-        appliedAdhoc: updatedAdhoc,
-        editedLop,
-        completedStep,
-        lastActiveStep: currentStep,
-        appliedAdjustments,
-        heldEmployees,
-        appliedOverrides,
-        checkedExited
-      }).catch(e => console.warn('Delete adhoc sync error:', e));
+      api.savePayRunState(selectedRun.id, getFullDraftPayload({
+        appliedAdhoc: updatedAdhoc
+      })).catch(e => console.warn('Delete adhoc sync error:', e));
     }
   };
 
@@ -1598,8 +1867,8 @@ export default function PayRunWizardSteps({
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border-glass)', textAlign: 'left', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
                     <th style={{ padding: '10px' }}>EMPLOYEE</th>
-                    <th style={{ padding: '10px' }}>WORKING DAYS</th>
-                    <th style={{ padding: '10px' }}>APPROVED LEAVES</th>
+                    <th style={{ padding: '10px' }}>WORKING DAYS (EDITABLE)</th>
+                    <th style={{ padding: '10px' }}>APPROVED LEAVES (EDITABLE)</th>
                     
                     {/* DYNAMIC LEAVE HEADERS */}
                     {activeLeaveColumns.map(colKey => {
@@ -1607,7 +1876,7 @@ export default function PayRunWizardSteps({
                       const label = std ? std.label.toUpperCase() : colKey.toUpperCase();
                       return (
                         <th key={colKey} style={{ padding: '10px', color: 'var(--accent-primary)', fontWeight: 700 }}>
-                          {label}
+                          {label} (EDITABLE)
                         </th>
                       );
                     })}
@@ -1626,36 +1895,121 @@ export default function PayRunWizardSteps({
                           {p.isMidMonthJoin && (
                             <span style={{ fontSize: '0.68rem', padding: '1px 6px', borderRadius: '4px', background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', fontWeight: 700 }} title={`Joined on day ${p.joinDay}. Prorated for ${p.eligibleWorkingDays} active days.`}>
                               <i className="fa-solid fa-user-plus" style={{ marginRight: '3px' }}></i>
-                              Joined {p.joinDay ? `${p.joinDay}th` : ''} ({p.eligibleWorkingDays}/{p.workingDays}d)
+                              Joined {p.joinDay ? `${p.joinDay}th` : ''} ({p.eligibleWorkingDays}/{p.monthCalendarDays || 30}d)
                             </span>
                           )}
                           {p.isMidMonthExit && (
                             <span style={{ fontSize: '0.68rem', padding: '1px 6px', borderRadius: '4px', background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', fontWeight: 700 }} title={`Exit recorded. Prorated for ${p.eligibleWorkingDays} active days.`}>
                               <i className="fa-solid fa-user-minus" style={{ marginRight: '3px' }}></i>
-                              Exit ({p.eligibleWorkingDays}/{p.workingDays}d)
+                              Exit ({p.eligibleWorkingDays}/{p.monthCalendarDays || 30}d)
                             </span>
                           )}
                         </div>
                         <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>{p.empCode || p.id}</span>
                       </td>
                       <td style={{ padding: '10px' }}>
-                        {p.isMidMonthJoin || p.isMidMonthExit ? (
-                          <span>
-                            <strong style={{ color: '#10b981' }}>{p.eligibleWorkingDays}</strong>
-                            <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>/{p.workingDays}</span>
-                          </span>
-                        ) : (
-                          p.workingDays
-                        )}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <input
+                            type="number"
+                            min="0"
+                            max="31"
+                            disabled={isLocked}
+                            value={p.workingDays}
+                            onChange={e => handleWorkingDaysChange(p.id, e.target.value)}
+                            style={{
+                              width: '56px',
+                              padding: '4px 6px',
+                              borderRadius: '4px',
+                              border: '1px solid var(--border-glass)',
+                              background: 'var(--bg-input)',
+                              color: 'var(--text-primary)',
+                              textAlign: 'center',
+                              fontWeight: 600,
+                              opacity: isLocked ? 0.6 : 1
+                            }}
+                          />
+                          <button
+                            className="btn btn-primary"
+                            disabled={isLocked}
+                            onClick={() => handleSaveWorkingDays(p.id, p.runItemId, p.workingDays)}
+                            style={{ padding: '4px 8px', fontSize: '0.7rem', opacity: isLocked ? 0.5 : 1 }}
+                            title="Save working days to database"
+                          >
+                            <i className="fa-solid fa-floppy-disk"></i>
+                          </button>
+                        </div>
                       </td>
-                      <td style={{ padding: '10px', color: '#10b981', fontWeight: 600 }}>{p.approvedLeaveDays}</td>
+                      <td style={{ padding: '10px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <input
+                            type="number"
+                            min="0"
+                            max="31"
+                            step="0.5"
+                            disabled={isLocked}
+                            value={p.approvedLeaveDays}
+                            onChange={e => handleLeaveChange(p.id, 'approved', e.target.value, p)}
+                            onBlur={() => handleAutoSaveLeaves(p.id)}
+                            style={{
+                              width: '52px',
+                              padding: '4px 6px',
+                              borderRadius: '4px',
+                              border: '1px solid var(--border-glass)',
+                              background: 'var(--bg-input)',
+                              color: '#10b981',
+                              textAlign: 'center',
+                              fontWeight: 700,
+                              opacity: isLocked ? 0.6 : 1
+                            }}
+                          />
+                          <button
+                            className="btn btn-primary"
+                            disabled={isLocked}
+                            onClick={() => handleSaveLeaves(p.id, p.runItemId)}
+                            style={{ padding: '4px 8px', fontSize: '0.7rem', opacity: isLocked ? 0.5 : 1 }}
+                            title="Save leaves to database"
+                          >
+                            <i className="fa-solid fa-floppy-disk"></i>
+                          </button>
+                        </div>
+                      </td>
                       
                       {/* DYNAMIC LEAVE ROW CELLS */}
-                      {activeLeaveColumns.map(colKey => (
-                        <td key={colKey} style={{ padding: '10px', color: 'var(--text-primary)' }}>
-                          {colKey === 'CL' ? (p.clUsed || 0) : (colKey === 'SL' ? (p.slUsed || 0) : (colKey === 'EL' ? (p.earnedLeaveUsed || 0) : 0))}
-                        </td>
-                      ))}
+                      {activeLeaveColumns.map(colKey => {
+                        const cellVal = colKey === 'CL' 
+                          ? (p.clUsed ?? 0) 
+                          : (colKey === 'SL' 
+                            ? (p.slUsed ?? 0) 
+                            : (colKey === 'EL' 
+                              ? (p.earnedLeaveUsed ?? 0) 
+                              : (p.customLeaves?.[colKey] ?? 0)));
+
+                        return (
+                          <td key={colKey} style={{ padding: '10px' }}>
+                            <input
+                              type="number"
+                              min="0"
+                              max="31"
+                              step="0.5"
+                              disabled={isLocked}
+                              value={cellVal}
+                              onChange={e => handleLeaveChange(p.id, colKey, e.target.value, p)}
+                              onBlur={() => handleAutoSaveLeaves(p.id)}
+                              style={{
+                                width: '46px',
+                                padding: '4px 6px',
+                                borderRadius: '4px',
+                                border: '1px solid var(--border-glass)',
+                                background: 'var(--bg-input)',
+                                color: 'var(--text-primary)',
+                                textAlign: 'center',
+                                fontWeight: 500,
+                                opacity: isLocked ? 0.6 : 1
+                              }}
+                            />
+                          </td>
+                        );
+                      })}
                       <td style={{ padding: '10px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <input
@@ -2013,16 +2367,9 @@ export default function PayRunWizardSteps({
                         setHeldEmployees(updatedHeld);
 
                         if (selectedRun && selectedRun.id) {
-                          api.savePayRunState(selectedRun.id, {
-                            heldEmployees: updatedHeld,
-                            editedLop,
-                            completedStep,
-                            lastActiveStep: currentStep,
-                            appliedAdjustments,
-                            appliedAdhoc,
-                            appliedOverrides,
-                            checkedExited
-                          }).catch(e => console.warn('Salary hold sync error:', e));
+                          api.savePayRunState(selectedRun.id, getFullDraftPayload({
+                            heldEmployees: updatedHeld
+                          })).catch(e => console.warn('Salary hold sync error:', e));
                         }
 
                         logActivity(`Salary HOLD placed for ${emp ? emp.name : holdEmp}. Reason: ${finalReason}`);
@@ -2091,16 +2438,9 @@ export default function PayRunWizardSteps({
                                 setHeldEmployees(updatedHeld);
 
                                 if (selectedRun && selectedRun.id) {
-                                  api.savePayRunState(selectedRun.id, {
-                                    heldEmployees: updatedHeld,
-                                    editedLop,
-                                    completedStep,
-                                    lastActiveStep: currentStep,
-                                    appliedAdjustments,
-                                    appliedAdhoc,
-                                    appliedOverrides,
-                                    checkedExited
-                                  }).catch(e => console.warn('Release hold sync error:', e));
+                                  api.savePayRunState(selectedRun.id, getFullDraftPayload({
+                                    heldEmployees: updatedHeld
+                                  })).catch(e => console.warn('Release hold sync error:', e));
                                 }
 
                                 logActivity(`Salary hold RELEASED for ${emp.name}`);
@@ -2464,6 +2804,7 @@ export default function PayRunWizardSteps({
                           <th style={{ padding: '10px' }}>DAYS</th>
                           <th style={{ padding: '10px', textAlign: 'right' }}>BASIC</th>
                           <th style={{ padding: '10px', textAlign: 'right' }}>HRA</th>
+                          <th style={{ padding: '10px', textAlign: 'right' }}>OTHER</th>
                           <th style={{ padding: '10px', textAlign: 'right' }}>GROSS PAY</th>
                           <th style={{ padding: '10px', textAlign: 'right', color: 'var(--accent-primary)' }}>EPF EE</th>
                           <th style={{ padding: '10px', textAlign: 'right', color: '#3b82f6' }}>ESIC EE</th>
@@ -2488,6 +2829,7 @@ export default function PayRunWizardSteps({
                               <td style={{ padding: '10px' }}>{p.payableDays}/{p.workingDays}</td>
                               <td style={{ padding: '10px', textAlign: 'right' }}>₹{stat.basic.toLocaleString()}</td>
                               <td style={{ padding: '10px', textAlign: 'right' }}>₹{stat.hra.toLocaleString()}</td>
+                              <td style={{ padding: '10px', textAlign: 'right' }}>₹{(stat.other || 0).toLocaleString()}</td>
                               <td style={{ padding: '10px', textAlign: 'right', fontWeight: 600 }}>₹{stat.gross.toLocaleString()}</td>
                               <td style={{ padding: '10px', textAlign: 'right', color: 'var(--accent-primary)' }}>₹{stat.epfEe.toLocaleString()}</td>
                               <td style={{ padding: '10px', textAlign: 'right', color: '#3b82f6' }}>₹{stat.esicEe.toLocaleString()}</td>
@@ -2533,10 +2875,19 @@ export default function PayRunWizardSteps({
                   <button
                     className="btn btn-primary"
                     style={{ background: '#10b981', padding: '14px 40px', fontSize: '1rem', fontWeight: 700 }}
-                    onClick={() => {
-                      handleProcessRun(selectedRun.id);
+                    onClick={async () => {
+                      const fullPayload = getFullDraftPayload({ completedStep: 8, lastActiveStep: 8, status: 'LOCKED' });
+                      if (selectedRun && selectedRun.id) {
+                        try {
+                          await api.savePayRunState(selectedRun.id, fullPayload);
+                        } catch (e) {
+                          console.warn('Failed saving full state before lock:', e);
+                        }
+                      }
+                      await handleProcessRun(selectedRun.id, { isLock: true });
                       setStep8Stage('LOCKED');
                       logActivity(`Locked and froze payroll cycle: ${selectedRun.month}. Editing probability set to NULL.`);
+                      triggerExcelDownload();
                       alert('Payroll cycle permanently LOCKED! All editing is now set to NULL.');
                     }}
                   >

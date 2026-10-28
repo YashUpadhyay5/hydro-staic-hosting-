@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { api } from '../../../services/api';
 import {
   COMPLIANCE_FORMS_CONFIG,
   exportFormToExcel,
@@ -8,12 +9,15 @@ import {
   formatMonthYearLabel
 } from '../../../data/complianceFormsData';
 import ComplianceFormFullView from './ComplianceFormFullView';
+import { resolvePayrollRunItems, resolveOverrideValue } from '../../../services/payrollItemResolver';
 
 export default function ReportTab({
   employees = [],
   attendance = [],
   leaves = [],
-  payslips = [],
+  runItems = [],
+  selectedReportMonth,
+  setSelectedReportMonth,
   taxEmp,
   handleLoadTaxRecord,
   taxRegime,
@@ -24,21 +28,166 @@ export default function ReportTab({
   setSec80D,
   rentPaid,
   setRentPaid,
-  handleSaveTax
+  handleSaveTax,
+  setActiveTab
 }) {
   const [selectedForm, setSelectedForm] = useState(null);
-  const [selectedMonth, setSelectedMonth] = useState(getCurrentMonthYYYYMM());
+  const [selectedMonth, setSelectedMonth] = useState(selectedReportMonth || getCurrentMonthYYYYMM());
   const [selectedLocation, setSelectedLocation] = useState('ALL');
   const [selectedStatus, setSelectedStatus] = useState('ALL');
   const [activeSection, setActiveSection] = useState('compliance'); // 'compliance' | 'tax'
+  const [internalEmployees, setInternalEmployees] = useState([]);
+  const [internalRunItems, setInternalRunItems] = useState([]);
+  const [hasRunForMonth, setHasRunForMonth] = useState(false);
+  const [currentRunStep, setCurrentRunStep] = useState(0);
+  const [loadingPayRun, setLoadingPayRun] = useState(false);
+  const [payrollErrorModal, setPayrollErrorModal] = useState({ show: false, month: '', currentStep: 0 });
+  const [attendanceSettings, setAttendanceSettings] = useState({});
+  const [reportRefreshKey, setReportRefreshKey] = useState(0);
+
+  useEffect(() => {
+    const handleEmpUpdated = () => {
+      setReportRefreshKey(k => k + 1);
+      api.getEmployees({ limit: 1000 })
+        .then(res => {
+          const list = Array.isArray(res) ? res : (res?.data || []);
+          if (list.length > 0) setInternalEmployees(list);
+        })
+        .catch(() => {});
+    };
+    window.addEventListener('employee-updated', handleEmpUpdated);
+    return () => window.removeEventListener('employee-updated', handleEmpUpdated);
+  }, []);
+
+  // Auto-fetch employees if none were passed from parent
+  useEffect(() => {
+    if ((!employees || employees.length === 0) && internalEmployees.length === 0) {
+      api.getEmployees({ limit: 1000 })
+        .then(res => {
+          const list = Array.isArray(res) ? res : (res?.data || []);
+          if (list.length > 0) setInternalEmployees(list);
+        })
+        .catch(e => console.warn('Could not auto-fetch employees in ReportTab:', e));
+    }
+  }, [employees, internalEmployees.length]);
+
+  // Fetch attendance shift policy once
+  useEffect(() => {
+    api.getSettings()
+      .then(res => {
+        const s = res?.data || res || {};
+        setAttendanceSettings(s);
+      })
+      .catch(e => console.warn('Could not fetch settings in ReportTab:', e));
+  }, []);
+
+  const allEmployees = employees && employees.length > 0 ? employees : internalEmployees;
+
+  // Auto-fetch pay run items & wizard edits strictly for selectedMonth
+  useEffect(() => {
+    let isCancelled = false;
+    setLoadingPayRun(true);
+    api.getPayrollRuns()
+      .then(runs => {
+        if (isCancelled || !Array.isArray(runs)) return;
+        // Strictly find run for selectedMonth - NO FALLBACK to other months!
+        const targetRun = runs.find(r => r.month === selectedMonth && (r.status === 'PAID' || r.status === 'COMPLETED' || r.status === 'APPROVED'))
+          || runs.find(r => r.month === selectedMonth);
+
+        if (targetRun) {
+          return Promise.all([
+            api.getPayrollRunItems(targetRun.id).catch(() => []),
+            api.getPayRunState(targetRun.id).catch(() => null)
+          ]).then(([items, stateRes]) => {
+            if (isCancelled) return;
+            const ws = stateRes?.wizardState || targetRun.wizardState;
+            const parsedWs = typeof ws === 'string' ? JSON.parse(ws) : (ws || {});
+            const baseItems = Array.isArray(items) ? items : [];
+
+            const step = Number(parsedWs.completedStep || 0);
+            setCurrentRunStep(step);
+
+            // Pay run exists for this month -> mark as active and resolve live items with all wizard state
+            setHasRunForMonth(true);
+            const resolved = resolvePayrollRunItems(targetRun, baseItems, parsedWs, allEmployees, attendance, leaves);
+            setInternalRunItems(resolved);
+          });
+        } else {
+          setCurrentRunStep(0);
+          setHasRunForMonth(false);
+          setInternalRunItems([]);
+        }
+      })
+      .catch(e => {
+        console.warn('Could not auto-fetch pay run items in ReportTab:', e);
+        if (!isCancelled) {
+          setHasRunForMonth(false);
+          setInternalRunItems([]);
+        }
+      })
+      .finally(() => {
+        if (!isCancelled) {
+          setLoadingPayRun(false);
+        }
+      });
+
+    return () => { isCancelled = true; };
+  }, [selectedMonth, employees, reportRefreshKey]);
+
+  const effectiveRunItems = hasRunForMonth 
+    ? ((internalRunItems && internalRunItems.length > 0) ? internalRunItems : (runItems || []))
+    : [];
+  const isPayrollRun = Boolean(hasRunForMonth && effectiveRunItems.length > 0);
+
+  // Sync selectedMonth with selectedReportMonth from parent
+  useEffect(() => {
+    if (selectedReportMonth && selectedReportMonth !== selectedMonth) {
+      setSelectedMonth(selectedReportMonth);
+    }
+  }, [selectedReportMonth]);
 
   const monthLabel = formatMonthYearLabel(selectedMonth);
+
+  const handleOpenForm = (form) => {
+    const isWageForm = form.sheetName === 'Form W' || form.id === 'form-w' || form.sheetName === 'Form T' || form.id === 'form-t';
+    if (isWageForm && !isPayrollRun && !loadingPayRun) {
+      setPayrollErrorModal({ show: true, month: monthLabel, currentStep: currentRunStep });
+      return;
+    }
+    setSelectedForm(form);
+  };
+
+  const handleExportFormExcel = (form) => {
+    const isWageForm = form.sheetName === 'Form W' || form.id === 'form-w' || form.sheetName === 'Form T' || form.id === 'form-t';
+    if (isWageForm && !isPayrollRun && !loadingPayRun) {
+      setPayrollErrorModal({ show: true, month: monthLabel, currentStep: currentRunStep });
+      return;
+    }
+    exportFormToExcel(form.sheetName, selectedMonth, filteredEmployees, attendance, leaves, effectiveRunItems, attendanceSettings);
+  };
+
+  const handleExportFormPDF = (form) => {
+    const isWageForm = form.sheetName === 'Form W' || form.id === 'form-w' || form.sheetName === 'Form T' || form.id === 'form-t';
+    if (isWageForm && !isPayrollRun && !loadingPayRun) {
+      setPayrollErrorModal({ show: true, month: monthLabel, currentStep: currentRunStep });
+      return;
+    }
+    exportFormToPDF(`printable-compliance-view-${form.id}`, form.title, selectedMonth);
+  };
+
+  const handleExportAllForms = () => {
+    if (!isPayrollRun && !loadingPayRun) {
+      setPayrollErrorModal({ show: true, month: monthLabel, currentStep: currentRunStep });
+      return;
+    }
+    exportAllFormsToExcel(selectedMonth, filteredEmployees, attendance, leaves, effectiveRunItems, attendanceSettings);
+  };
 
   // Dynamic location list derived from DB employees
   const locationsList = useMemo(() => {
     const locSet = new Set(['ALL']);
-    if (employees && Array.isArray(employees)) {
-      employees.forEach(emp => {
+    if (allEmployees && Array.isArray(allEmployees)) {
+      allEmployees.forEach(emp => {
         const loc = emp.location || emp.site;
         if (loc && typeof loc === 'string' && loc.trim() !== '') {
           locSet.add(loc.trim());
@@ -49,12 +198,12 @@ export default function ReportTab({
     locSet.add('Branch Office');
     locSet.add('Field Sites');
     return Array.from(locSet);
-  }, [employees]);
+  }, [allEmployees]);
 
   // Dynamically filter employees by Location and Status
   const filteredEmployees = useMemo(() => {
-    if (!employees || !Array.isArray(employees)) return [];
-    return employees.filter(emp => {
+    if (!allEmployees || !Array.isArray(allEmployees)) return [];
+    return allEmployees.filter(emp => {
       // 1. Location Filter
       if (selectedLocation !== 'ALL') {
         const empLoc = String(emp.location || emp.site || '').trim().toLowerCase();
@@ -72,7 +221,7 @@ export default function ReportTab({
       }
       return true;
     });
-  }, [employees, selectedLocation, selectedStatus]);
+  }, [allEmployees, selectedLocation, selectedStatus]);
 
   // If a form is selected, render full-page view in the same tab
   if (selectedForm) {
@@ -81,7 +230,10 @@ export default function ReportTab({
         formConfig={selectedForm}
         onBack={() => setSelectedForm(null)}
         selectedMonth={selectedMonth}
-        setSelectedMonth={setSelectedMonth}
+        setSelectedMonth={(m) => {
+          setSelectedMonth(m);
+          if (setSelectedReportMonth) setSelectedReportMonth(m);
+        }}
         selectedLocation={selectedLocation}
         setSelectedLocation={setSelectedLocation}
         selectedStatus={selectedStatus}
@@ -90,7 +242,11 @@ export default function ReportTab({
         employees={filteredEmployees}
         attendance={attendance}
         leaves={leaves}
-        payslips={payslips}
+        runItems={effectiveRunItems}
+        loadingPayRun={loadingPayRun}
+        attendanceSettings={attendanceSettings}
+        currentRunStep={currentRunStep}
+        setActiveTab={setActiveTab}
       />
     );
   }
@@ -152,7 +308,10 @@ export default function ReportTab({
             <input
               type="month"
               value={selectedMonth}
-              onChange={e => setSelectedMonth(e.target.value)}
+              onChange={e => {
+                setSelectedMonth(e.target.value);
+                if (setSelectedReportMonth) setSelectedReportMonth(e.target.value);
+              }}
               style={{
                 padding: '9px 14px',
                 borderRadius: '10px',
@@ -242,7 +401,7 @@ export default function ReportTab({
 
           {/* Download All Forms */}
           <button
-            onClick={() => exportAllFormsToExcel(selectedMonth, filteredEmployees, attendance, leaves, payslips)}
+            onClick={handleExportAllForms}
             className="btn btn-primary"
             style={{
               display: 'flex',
@@ -310,7 +469,7 @@ export default function ReportTab({
                 cursor: 'pointer',
                 boxShadow: 'var(--card-shadow)'
               }}
-              onClick={() => setSelectedForm(form)}
+              onClick={() => handleOpenForm(form)}
             >
               <div>
                 {/* Card Header */}
@@ -395,7 +554,7 @@ export default function ReportTab({
                 onClick={e => e.stopPropagation()}
               >
                 <button
-                  onClick={() => setSelectedForm(form)}
+                  onClick={() => handleOpenForm(form)}
                   className="btn btn-primary"
                   style={{
                     flex: 1,
@@ -414,7 +573,7 @@ export default function ReportTab({
                 </button>
 
                 <button
-                  onClick={() => exportFormToExcel(form.sheetName, selectedMonth, filteredEmployees, attendance, leaves, payslips)}
+                  onClick={() => handleExportFormExcel(form)}
                   title={`Download Excel for ${monthLabel}`}
                   style={{
                     padding: '10px 14px',
@@ -430,7 +589,7 @@ export default function ReportTab({
                 </button>
 
                 <button
-                  onClick={() => exportFormToPDF(`printable-compliance-view-${form.id}`, form.title, selectedMonth)}
+                  onClick={() => handleExportFormPDF(form)}
                   title={`Download PDF for ${monthLabel}`}
                   style={{
                     padding: '10px 14px',
@@ -520,6 +679,111 @@ export default function ReportTab({
             <p style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
               Selecting <strong>New Regime</strong> gives a flat slab structure with standard deduction of ₹75,000. Selecting <strong>Old Regime</strong> allows claiming HRA exemptions (least of rent excess over 10% basic, actual HRA, or 50% basic) and deductions under Section 80C (up to ₹1,50,000) and 80D (up to ₹25,000). The taxation engine runs monthly projections and divides annual tax liabilities into equal monthly TDS cuts.
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* Error Popup Modal: Please Run The Payroll First */}
+      {payrollErrorModal.show && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            backdropFilter: 'blur(8px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '20px'
+          }}
+          onClick={() => setPayrollErrorModal({ show: false, month: '' })}
+        >
+          <div
+            className="card glass"
+            style={{
+              maxWidth: '460px',
+              width: '100%',
+              borderRadius: '20px',
+              padding: '32px',
+              background: 'var(--panel-bg, #121218)',
+              border: '1px solid rgba(239, 68, 68, 0.4)',
+              boxShadow: '0 20px 40px rgba(0, 0, 0, 0.6), 0 0 30px rgba(239, 68, 68, 0.2)',
+              textAlign: 'center',
+              position: 'relative'
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div
+              style={{
+                width: '64px',
+                height: '64px',
+                borderRadius: '50%',
+                backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 20px',
+                color: '#ef4444',
+                fontSize: '1.8rem'
+              }}
+            >
+              <i className="fa-solid fa-triangle-exclamation"></i>
+            </div>
+
+            <h3 style={{ margin: '0 0 12px', fontSize: '1.3rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+              Please Run the Payroll First
+            </h3>
+
+            <p style={{ margin: '0 0 24px', fontSize: '0.92rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+              Form W (Register of Wages) requires actual attendance and working days data filled and calculated from a processed pay run.
+              {payrollErrorModal.currentStep > 0 ? (
+                <> Payroll for <strong>{payrollErrorModal.month}</strong> is currently in draft at <strong>Step {payrollErrorModal.currentStep} of 8</strong>.</>
+              ) : (
+                <> No processed payroll records were found for <strong>{payrollErrorModal.month}</strong>.</>
+              )}
+              {" "}Please complete <strong>Step 7 (Review & Calculate)</strong> or <strong>Step 8 (Finalize & Lock)</strong> in the Pay Runs wizard before accessing or downloading this form.
+            </p>
+
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+              {setActiveTab && (
+                <button
+                  className="btn btn-primary"
+                  onClick={() => {
+                    setPayrollErrorModal({ show: false, month: '', currentStep: 0 });
+                    setActiveTab('payruns');
+                  }}
+                  style={{
+                    padding: '10px 22px',
+                    borderRadius: '10px',
+                    fontSize: '0.9rem',
+                    fontWeight: 600,
+                    background: 'var(--accent-primary)',
+                    borderColor: 'var(--accent-primary)'
+                  }}
+                >
+                  <i className="fa-solid fa-play" style={{ marginRight: '8px' }}></i>
+                  Go to Pay Runs
+                </button>
+              )}
+              <button
+                className="btn btn-outline"
+                onClick={() => setPayrollErrorModal({ show: false, month: '', currentStep: 0 })}
+                style={{
+                  padding: '10px 24px',
+                  borderRadius: '10px',
+                  fontSize: '0.9rem',
+                  fontWeight: 600,
+                  borderColor: 'rgba(255, 255, 255, 0.2)'
+                }}
+              >
+                Understood
+              </button>
+            </div>
           </div>
         </div>
       )}

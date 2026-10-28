@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { api } from '../../../services/api';
 import PayRunCycleSelector from './PayRunCycleSelector';
 import PayRunSummaryCards from './PayRunSummaryCards';
 import PayRunWizardSteps from './PayRunWizardSteps';
 import PayRunActivitySidebar from './PayRunActivitySidebar';
+import { resolvePayrollRunItems } from '../../../services/payrollItemResolver';
 
 export default function PayRunsTab({
   runs = [],
@@ -35,10 +36,20 @@ export default function PayRunsTab({
       const savedDraft = localStorage.getItem(`payroll_wizard_draft_${selectedRun.id}`);
       if (savedDraft) {
         const parsed = JSON.parse(savedDraft);
-        return parsed.completedStep || 0;
+        if (parsed.completedStep) return parsed.completedStep;
       }
     } catch (err) {
       console.error("Draft read error", err);
+    }
+    // Fallback to database wizardState stored on the run (multi-device sync)
+    try {
+      const ws = selectedRun.wizardState || selectedRun.wizard_state;
+      if (ws) {
+        const parsed = typeof ws === 'string' ? JSON.parse(ws) : ws;
+        if (parsed.completedStep) return parsed.completedStep;
+      }
+    } catch (err) {
+      console.error("Run wizardState read error", err);
     }
     return 0;
   };
@@ -120,6 +131,23 @@ export default function PayRunsTab({
     }
     return true;
   });
+
+  // Dynamically resolve items with latest employee salary and wizard state
+  const resolvedRunItems = useMemo(() => {
+    return resolvePayrollRunItems(selectedRun, selectedRunItems, selectedRun?.wizardState, activePayRunEmployees);
+  }, [selectedRun, selectedRunItems, activePayRunEmployees]);
+
+  useEffect(() => {
+    const handleEmpUpdated = () => {
+      if (selectedRun) {
+        api.getPayrollRunItems(selectedRun.id)
+          .then(items => setSelectedRunItems(items || []))
+          .catch(() => {});
+      }
+    };
+    window.addEventListener('employee-updated', handleEmpUpdated);
+    return () => window.removeEventListener('employee-updated', handleEmpUpdated);
+  }, [selectedRun]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -257,7 +285,7 @@ export default function PayRunsTab({
                 selectedRun={selectedRun} 
                 employees={activePayRunEmployees}
                 employeeCount={activePayRunEmployees.length} 
-                runItems={selectedRunItems}
+                runItems={resolvedRunItems}
               />
 
               {/* 3. Main Grid layout: Steps & Activity Sidebar */}
@@ -384,7 +412,7 @@ export default function PayRunsTab({
             <PayRunWizardSteps
               selectedRun={selectedRun}
               employees={activePayRunEmployees}
-              runItems={selectedRunItems}
+              runItems={resolvedRunItems}
               reimbursements={reimbursements}
               logActivity={logActivity}
               handleProcessRun={handleProcessRun}

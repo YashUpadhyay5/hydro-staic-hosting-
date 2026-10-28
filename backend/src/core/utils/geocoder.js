@@ -159,4 +159,16 @@ async function getAddressFromCoords(lat, lon) {
   });
 }
 
-module.exports = { getAddressFromCoords };
+function getCachedAddress(lat, lon) {
+  if (lat === null || lat === undefined || lon === null || lon === undefined) return null;
+  const latNum = Number(lat);
+  const lonNum = Number(lon);
+  if (isNaN(latNum) || isNaN(lonNum)) return null;
+  if (Math.abs(latNum - 28.6692) < 0.0005 && Math.abs(lonNum - 77.4538) < 0.0005) {
+    return "HRMS HQ Office, Sector 62, Noida, Uttar Pradesh, India";
+  }
+  const cached = geocodeCache.find(c => getDistanceMeters(c.lat, c.lon, latNum, lonNum) <= 50);
+  return cached ? cached.address : null;
+}
+
+module.exports = { getAddressFromCoords, getCachedAddress };

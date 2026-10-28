@@ -23,6 +23,9 @@ class NotificationService {
             stringData[key] = String(val);
           }
         }
+        stringData.title = String(title || '');
+        stringData.body = String(body || '');
+        stringData.message = String(body || '');
 
         const chunks = [];
         for (let i = 0; i < tokens.length; i += 500) {
@@ -33,6 +36,18 @@ class NotificationService {
           const message = {
             notification: { title, body },
             data: stringData,
+            android: {
+              priority: 'high',
+              notification: {
+                title,
+                body,
+                channelId: 'hrms_geofence_alerts',
+                priority: 'max',
+                defaultSound: true,
+                defaultVibrateTimings: true,
+                visibility: 'public'
+              }
+            },
             tokens: chunk
           };
           const response = await messaging.sendEachForMulticast(message);
@@ -78,28 +93,44 @@ class NotificationService {
     const notificationId = uuidv4();
     const safeCreatedBy = createdBy && createdBy !== 'SYSTEM' && createdBy !== 'ADMIN' ? createdBy : 'admin';
     
+    // Robustly resolve employee record by either id or empCode (e.g. EMP0021 or HMPL113)
+    const lookupId = String(employeeId || '').trim();
+    let employee = null;
+    if (lookupId) {
+      employee = await Employee.findOne({
+        where: {
+          [Op.or]: [
+            { id: lookupId },
+            { empCode: lookupId }
+          ]
+        }
+      });
+    }
+
+    const resolvedEmployeeId = employee ? employee.id : (lookupId || 'admin');
+
     const notification = await Notification.create({
       id: notificationId,
       title,
       body,
       type: 'SINGLE',
       target: 'EMPLOYEE',
-      targetId: employeeId,
+      targetId: resolvedEmployeeId,
       status: 'PROCESSING',
       createdBy: safeCreatedBy,
       payload: JSON.stringify(payload)
     });
 
-    const tokens = await DeviceToken.findAll({ where: { employeeId } });
+    const possibleIds = Array.from(new Set([lookupId, resolvedEmployeeId, employee?.empCode].filter(Boolean)));
+    const tokens = await DeviceToken.findAll({ where: { employeeId: { [Op.in]: possibleIds } } });
     const tokenStrings = tokens.map(t => t.token);
     
-    const employee = await Employee.findByPk(employeeId);
     if (employee && employee.fcmToken && !tokenStrings.includes(employee.fcmToken)) {
       tokenStrings.push(employee.fcmToken);
     }
     
     if (tokenStrings.length === 0) {
-      tokenStrings.push(`default_internal_token_${employeeId}`);
+      tokenStrings.push(`default_internal_token_${resolvedEmployeeId}`);
     }
 
     const results = await this.sendPushNotification(tokenStrings, title, body, payload);
@@ -107,7 +138,7 @@ class NotificationService {
 
     await this.logNotification(
       notificationId, 
-      employeeId, 
+      resolvedEmployeeId, 
       success ? 'SENT' : 'FAILED', 
       success ? null : 'Delivery Failed'
     );
@@ -115,7 +146,30 @@ class NotificationService {
     await Notification.update({ status: success ? 'SENT' : 'FAILED' }, { where: { id: notificationId } });
     
     // Automatically mirror sent notification to 1-on-1 Chat messages so it appears in the mobile app chat
-    await this.syncToChat(employeeId, title, body, safeCreatedBy);
+    await this.syncToChat(resolvedEmployeeId, title, body, safeCreatedBy);
+
+    // Emit live real-time notification to user's connected socket rooms
+    try {
+      const { getIO } = require('../../../../sockets/socketGateway');
+      const io = getIO();
+      if (io) {
+        const notifData = {
+          id: notificationId,
+          title,
+          body,
+          payload,
+          targetId: resolvedEmployeeId,
+          timestamp: Date.now()
+        };
+        io.to(`user:${resolvedEmployeeId}`).emit('notification', notifData);
+        io.to(`user:${resolvedEmployeeId}`).emit('new_notification', notifData);
+        if (lookupId && lookupId !== resolvedEmployeeId) {
+          io.to(`user:${lookupId}`).emit('notification', notifData);
+          io.to(`user:${lookupId}`).emit('new_notification', notifData);
+        }
+        io.emit('GEOFENCE_ALERT', notifData);
+      }
+    } catch (sockErr) {}
 
     return { success, results, notificationId };
   }
@@ -124,6 +178,27 @@ class NotificationService {
     const notificationId = uuidv4();
     const safeCreatedBy = createdBy && createdBy !== 'SYSTEM' && createdBy !== 'ADMIN' ? createdBy : 'admin';
     
+    // Fetch all employees matching any of the IDs or empCodes
+    const employees = await Employee.findAll({
+      where: {
+        [Op.or]: [
+          { id: { [Op.in]: employeeIds } },
+          { empCode: { [Op.in]: employeeIds } }
+        ]
+      }
+    });
+
+    const empByLookup = new Map();
+    employees.forEach(emp => {
+      empByLookup.set(emp.id, emp);
+      if (emp.empCode) empByLookup.set(emp.empCode, emp);
+    });
+
+    const resolvedDbIds = Array.from(new Set(employeeIds.map(id => {
+      const emp = empByLookup.get(id);
+      return emp ? emp.id : id;
+    })));
+
     await Notification.create({
       id: notificationId,
       title,
@@ -135,28 +210,29 @@ class NotificationService {
       payload: JSON.stringify(payload)
     });
 
-    const tokens = await DeviceToken.findAll({ where: { employeeId: { [Op.in]: employeeIds } } });
+    const tokens = await DeviceToken.findAll({ where: { employeeId: { [Op.in]: [...employeeIds, ...resolvedDbIds] } } });
     
     const tokensByEmp = {};
     tokens.forEach(t => {
-      if (!tokensByEmp[t.employeeId]) tokensByEmp[t.employeeId] = [];
-      tokensByEmp[t.employeeId].push(t.token);
+      const targetEmp = empByLookup.get(t.employeeId);
+      const key = targetEmp ? targetEmp.id : t.employeeId;
+      if (!tokensByEmp[key]) tokensByEmp[key] = [];
+      tokensByEmp[key].push(t.token);
     });
 
-    const employees = await Employee.findAll({ where: { id: { [Op.in]: employeeIds } } });
     employees.forEach(emp => {
       if (!tokensByEmp[emp.id]) tokensByEmp[emp.id] = [];
       if (emp.fcmToken && !tokensByEmp[emp.id].includes(emp.fcmToken)) {
         tokensByEmp[emp.id].push(emp.fcmToken);
       }
-      if (tokensByEmp[emp.id].length === 0) {
-        tokensByEmp[emp.id].push(`default_internal_token_${emp.id}`);
-      }
     });
 
     let overallSuccess = false;
-    for (const empId of employeeIds) {
-      const empTokens = tokensByEmp[empId] || [`default_internal_token_${empId}`];
+    for (const empId of resolvedDbIds) {
+      const empTokens = tokensByEmp[empId] || [];
+      if (empTokens.length === 0) {
+        empTokens.push(`default_internal_token_${empId}`);
+      }
       
       const results = await this.sendPushNotification(empTokens, title, body, payload);
       const success = results.some(r => r.success);
@@ -240,7 +316,9 @@ class NotificationService {
         const { getIO } = require('../../../../sockets/socketGateway');
         const io = getIO();
         if (io) {
+          io.to(`chat:${directChat.id}`).emit('new_message', newMsg);
           io.to(`chat_${directChat.id}`).emit('new_message', newMsg);
+          io.to(`user:${empId}`).emit('new_message', newMsg);
         }
       } catch (sErr) {}
     } catch (err) {

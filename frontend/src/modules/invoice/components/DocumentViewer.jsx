@@ -6,7 +6,7 @@ function DocumentViewer({
     return null;
 
   const token = localStorage.getItem("token") || "";
-  const imageUrl = `http://${window.location.hostname}:8000/api/documents/${document.document_id}/file?token=${token}`;
+  const imageUrl = `/api/v1/invoice/documents/${document.document_id}/file?token=${token}`;
 
   return (
     <div className="document-viewer">

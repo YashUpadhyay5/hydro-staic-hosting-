@@ -29,8 +29,8 @@ export async function downloadInvoiceFile(docOrId, customFilename) {
 
   const token = localStorage.getItem("token") || localStorage.getItem("adminToken") || "";
   const apiBaseUrl = (import.meta.env && import.meta.env.VITE_API_URL)
-    ? import.meta.env.VITE_API_URL.replace(/\/$/, '')
-    : `http://${window.location.hostname}:8000/api`;
+    ? `${import.meta.env.VITE_API_URL.replace(/\/$/, '')}/v1/invoice`
+    : `/api/v1/invoice`;
 
   const downloadUrl = `${apiBaseUrl}/documents/${docId}/file?download=true&token=${encodeURIComponent(token)}`;
 

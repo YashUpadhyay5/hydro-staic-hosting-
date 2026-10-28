@@ -7,19 +7,24 @@ const ShiftEngine = require('../../../../shared/services/ShiftEngine');
 const sequelize = require('../../../../config/database');
 const { Op } = require('sequelize');
 const { getAddressFromCoords } = require('../../../../core/utils/geocoder');
-const { getCachedEmployees } = require('../../../../core/utils/employeeCache');
-
-const LEGACY_ALIASES = {
-  'emp0128': 'HMPL39',
-  'mandeep': 'HMPL39',
-  'mandeep singh': 'HMPL39'
-};
+const { getCachedEmployees, resolveCanonicalEmployee } = require('../../../../core/utils/employeeCache');
+const GeofenceAlertService = require('../../../../shared/services/GeofenceAlertService');
+const SpecialEarnedCreditService = require('../../leave/services/SpecialEarnedCreditService');
 
 const getAuthoritativeISTDate = (d = new Date()) => {
   try {
     return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date(d));
   } catch {
     return new Date().toISOString().split('T')[0];
+  }
+};
+
+const formatISTTime = (ts) => {
+  try {
+    const d = ts ? new Date(ts) : new Date();
+    return d.toLocaleTimeString('en-US', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+  } catch {
+    return new Date().toLocaleTimeString();
   }
 };
 
@@ -32,20 +37,25 @@ const cleanTimestamp = (val) => {
   return s;
 };
 
-// Helper to find employee by id, emp_code, or name
+// Helper to find employee by id, emp_code, or name dynamically
 async function findEmployee(identifier, name) {
   if (!identifier && !name) return null;
-  let emp = null;
-  const rawSearchTerms = [identifier, name].filter(Boolean).map(s => String(s).trim().toLowerCase());
-  const searchTerms = [];
-  rawSearchTerms.forEach(t => {
-    searchTerms.push(t);
-    if (LEGACY_ALIASES[t]) searchTerms.push(LEGACY_ALIASES[t].toLowerCase());
-  });
+  const { empMap } = await getCachedEmployees();
+  
+  if (identifier) {
+    const res = await resolveCanonicalEmployee(identifier, empMap);
+    if (res && res.employee) return res.employee;
+  }
+  if (name) {
+    const res = await resolveCanonicalEmployee(name, empMap);
+    if (res && res.employee) return res.employee;
+  }
 
-  for (const term of searchTerms) {
+  // Database fallback if employee was just created and not in cache
+  const rawSearchTerms = [identifier, name].filter(Boolean).map(s => String(s).trim().toLowerCase());
+  for (const term of rawSearchTerms) {
     if (!term) continue;
-    emp = await Employee.findOne({
+    const emp = await Employee.findOne({
       where: {
         [Op.or]: [
           sequelize.where(sequelize.fn('lower', sequelize.col('id')), term),
@@ -54,9 +64,9 @@ async function findEmployee(identifier, name) {
         ]
       }
     });
-    if (emp) break;
+    if (emp) return emp;
   }
-  return emp;
+  return null;
 }
 
 // Helper to enrich a batch of attendance records with employee details and session battery telemetry
@@ -114,7 +124,7 @@ async function enrichRecordsBatch(records, empMap, empAliasesMap) {
       const todayStartMs = Date.now() - (48 * 60 * 60 * 1000);
       const fps = await sequelize.query(`
         SELECT user_id as userId, date, battery_level as batteryLevel, battery_temp as batteryTemp, timestamp
-        FROM location_footprints INDEXED BY idx_footprints_ts_user
+        FROM location_footprints
         WHERE timestamp >= ${todayStartMs}
           AND battery_level IS NOT NULL
         ORDER BY timestamp DESC
@@ -147,9 +157,7 @@ async function enrichRecordsBatch(records, empMap, empAliasesMap) {
       const emp = empMap ? (
         empMap.get(uKey1) || 
         empMap.get(uKey2) || 
-        empMap.get(uKey3) ||
-        (LEGACY_ALIASES[uKey1] && empMap.get(LEGACY_ALIASES[uKey1].toLowerCase())) ||
-        (LEGACY_ALIASES[uKey2] && empMap.get(LEGACY_ALIASES[uKey2].toLowerCase()))
+        empMap.get(uKey3)
       ) : null;
 
       if (emp) {
@@ -164,6 +172,12 @@ async function enrichRecordsBatch(records, empMap, empAliasesMap) {
         plain.email = emp.email || '';
         plain.phone = emp.phone || emp.mobile || '';
         plain.profilePhotoUrl = emp.profilePhotoUrl || emp.avatar || null;
+        const isOfficeEmp = String(emp.designation || '').trim().toUpperCase() === 'OFFICE';
+        const effectiveWorkMode = plain.isSwitched 
+          ? (plain.workMode || 'field') 
+          : (isOfficeEmp ? 'office' : (plain.workMode || 'field'));
+        plain.workMode = effectiveWorkMode;
+
         plain.employee = {
           id: emp.id,
           empCode: emp.empCode || emp.emp_code || emp.id,
@@ -174,7 +188,7 @@ async function enrichRecordsBatch(records, empMap, empAliasesMap) {
           email: emp.email || '',
           phone: emp.phone || emp.mobile || '',
           profilePhotoUrl: emp.profilePhotoUrl || emp.avatar || null,
-          workMode: emp.workMode || emp.primaryWorkMode || plain.workMode || 'office'
+          workMode: effectiveWorkMode
         };
       } else {
         plain.empCode = plain.empCode || plain.userId;
@@ -191,15 +205,19 @@ async function enrichRecordsBatch(records, empMap, empAliasesMap) {
       plain.shiftCode = plain.shiftCode || shift.code;
       plain.shiftLabel = shift.label;
 
-      // Inverted Punch Sanitization (where checkOut <= checkIn on a completed past day):
+      // Inverted / Zero-Duration Punch Sanitization:
       if (plain.checkIn && plain.checkOut) {
         const inMins = ShiftEngine.parseTimeToMinutes(plain.checkIn);
         const outMins = ShiftEngine.parseTimeToMinutes(plain.checkOut);
         if (inMins != null && outMins != null && outMins <= inMins) {
-          // Inverted / invalid punch: auto-heal with shift end
-          plain.checkOut = shift.end;
-          plain.clockOutMethod = 'AUTO_SHIFT_END';
-          plain.workingHours = ShiftEngine.calculateWorkingHours(plain.checkIn, plain.checkOut);
+          if (inMins === outMins) {
+            // Identical punch (e.g. 0-second session or immediate clock-out)
+            plain.workingHours = '00:00:00';
+          } else {
+            // Strictly inverted punch (checkOut earlier than checkIn)
+            plain.clockOutMethod = plain.clockOutMethod || 'INVALID_INVERTED_PUNCH';
+            plain.workingHours = '00:00:00';
+          }
         }
       }
 
@@ -270,9 +288,14 @@ async function enrichRecordsBatch(records, empMap, empAliasesMap) {
 
 router.get('/', async (req, res) => {
   try {
-    const { userId, date, page, limit, chunked } = req.query;
+    const { userId, date, month, page, limit, chunked } = req.query;
     const whereClause = {};
-    if (date) {
+
+    // Month filter (YYYY-MM) — used by payroll compliance forms for full-month attendance
+    if (month && !date) {
+      whereClause.date = { [Op.like]: `${month}%` };
+      SpecialEarnedCreditService.syncCreditsForMonth(month).catch(err => console.warn('[SpecialEarnedCreditSync] Warning:', err.message));
+    } else if (date) {
       const istTargetDate = getAuthoritativeISTDate(date);
       const dateVariants = new Set([date, istTargetDate]);
       [date, istTargetDate].forEach(d => {
@@ -367,10 +390,15 @@ router.post('/', async (req, res) => {
   try {
     const { userId, userName, date, checkIn, checkOut, workingHours, coords, workMode } = req.body;
     const rawUserId = userId || (req.user && req.user.id);
-    const emp = await findEmployee(rawUserId, userName);
-    const activeUserId = emp ? (emp.empCode || emp.emp_code || emp.id) : rawUserId;
-    const activeUserName = emp ? emp.name : (userName || 'Employee');
-    const possibleUserIds = emp ? [emp.id, emp.empCode, emp.emp_code, rawUserId].filter(Boolean) : [rawUserId].filter(Boolean);
+    const { empAliasesMap } = await getCachedEmployees();
+    const resolvedCanonical = await resolveCanonicalEmployee(rawUserId);
+    const emp = resolvedCanonical ? resolvedCanonical.employee : await findEmployee(rawUserId, userName);
+    const activeUserId = resolvedCanonical ? resolvedCanonical.canonicalId : (emp ? (emp.empCode || emp.emp_code || emp.id) : rawUserId);
+    const activeUserName = resolvedCanonical ? resolvedCanonical.canonicalName : (emp ? emp.name : (userName || 'Employee'));
+    const cachedAliases = (empAliasesMap && rawUserId) ? (empAliasesMap.get(String(rawUserId).trim().toLowerCase()) || []) : [];
+    const possibleUserIds = emp 
+      ? Array.from(new Set([emp.id, emp.empCode, emp.emp_code, rawUserId, activeUserId, ...cachedAliases].filter(Boolean))) 
+      : Array.from(new Set([rawUserId, ...cachedAliases].filter(Boolean)));
 
     const cleanCheckIn = cleanTimestamp(checkIn);
     const cleanCheckOut = cleanTimestamp(checkOut);
@@ -387,14 +415,16 @@ router.post('/', async (req, res) => {
     const latVal = parsedCoords ? (parsedCoords.lat != null ? parsedCoords.lat : parsedCoords.latitude) : null;
     const lonVal = parsedCoords ? (parsedCoords.lon != null ? parsedCoords.lon : (parsedCoords.lng != null ? parsedCoords.lng : parsedCoords.longitude)) : null;
 
-    const todayDate = date ? (date.length === 10 ? date : getAuthoritativeISTDate(date)) : getAuthoritativeISTDate();
+    const authoritativeToday = getAuthoritativeISTDate();
+    const requestedDate = date ? (date.length === 10 ? date : getAuthoritativeISTDate(date)) : authoritativeToday;
+    const todayDate = requestedDate > authoritativeToday ? authoritativeToday : requestedDate;
 
     // Safeguard 0: Auto-close any dangling unclosed sessions from previous dates for this employee dynamically
     try {
       const stalePastRecords = await Attendance.findAll({
         where: {
           userId: { [Op.in]: possibleUserIds },
-          date: { [Op.ne]: todayDate },
+          date: { [Op.lt]: todayDate },
           [Op.or]: [
             { checkOut: null },
             { checkOut: '' },
@@ -421,7 +451,7 @@ router.post('/', async (req, res) => {
 
     // Check if this is a clock-out update (since valid cleanCheckOut is provided)
     if (cleanCheckOut) {
-      const activeRecord = await Attendance.findOne({
+      let activeRecord = await Attendance.findOne({
         where: {
           userId: { [Op.in]: possibleUserIds },
           [Op.or]: [
@@ -439,6 +469,21 @@ router.post('/', async (req, res) => {
         order: [['createdAt', 'DESC']]
       });
 
+      // Fallback: If no unclosed session found, check today's most recent session to update clock-out
+      if (!activeRecord) {
+        activeRecord = await Attendance.findOne({
+          where: {
+            userId: { [Op.in]: possibleUserIds },
+            [Op.or]: [
+              { date: todayDate },
+              { date: getAuthoritativeISTDate() },
+              sequelize.where(sequelize.fn('date', sequelize.col('createdAt')), todayDate)
+            ]
+          },
+          order: [['updatedAt', 'DESC']]
+        });
+      }
+
       if (activeRecord) {
         const empShift = ShiftEngine.resolveEmployeeShift(emp);
         activeRecord.userId = activeUserId;
@@ -449,6 +494,7 @@ router.post('/', async (req, res) => {
         activeRecord.workingHours = workingHours || ShiftEngine.calculateWorkingHours(activeRecord.checkIn, cleanCheckOut);
         if (coords) activeRecord.coords = typeof coords === 'string' ? coords : JSON.stringify(coords);
         await activeRecord.save();
+        GeofenceAlertService.resetTrackingState(activeUserId, null);
 
         // Create Clock-Out GPS End Anchor Footprint
         if (latVal != null && lonVal != null) {
@@ -480,6 +526,9 @@ router.post('/', async (req, res) => {
         }
 
         console.log(`[Attendance Clock-Out] Successfully updated session ${activeRecord.id} for user ${activeUserId} to clocked-out at ${cleanCheckOut} (${activeRecord.clockOutMethod}).`);
+        if (emp) {
+          SpecialEarnedCreditService.evaluateAndCredit(activeRecord, emp).catch(err => console.warn('[SpecialEarnedCredit ClockOut] Warning:', err.message));
+        }
 
         const io = req.app ? req.app.get('io') : null;
         if (io) {
@@ -498,10 +547,31 @@ router.post('/', async (req, res) => {
         }
 
         return res.status(200).json(activeRecord);
+      } else {
+        // Clock-out requested, but no attendance record exists for today
+        return res.status(400).json({
+          error: 'No active clock-in session found for today. Please clock in first.'
+        });
       }
     }
 
-    // Debounce Safeguard: Prevent rapid double-tap duplicate sessions within 15 seconds
+    // Prepare Clock-In parameters & Authoritative Server Timestamp
+    const resolvedShift = ShiftEngine.resolveEmployeeShift(emp);
+    const inMethod = req.body.checkInMethod || (latVal != null && lonVal != null ? 'MANUAL_APP' : 'MANUAL_WEB');
+
+    // Authoritative check-in timestamp: prevent replaying yesterday's stale cached check-in
+    const serverISTTime = formatISTTime();
+    let authoritativeCheckIn = serverISTTime;
+    if (cleanCheckIn) {
+      const clientMins = ShiftEngine.parseTimeToMinutes(cleanCheckIn);
+      const serverMins = ShiftEngine.parseTimeToMinutes(serverISTTime);
+      // If client timestamp is within 30 minutes of server IST time, allow client timestamp; otherwise enforce server time
+      if (clientMins != null && serverMins != null && Math.abs(clientMins - serverMins) <= 30) {
+        authoritativeCheckIn = cleanCheckIn;
+      }
+    }
+
+    // Single Active Session Guarantee: An employee can NEVER have multiple concurrent open shifts for the same day
     const existingActive = await Attendance.findOne({
       where: {
         userId: { [Op.in]: possibleUserIds },
@@ -520,12 +590,26 @@ router.post('/', async (req, res) => {
       order: [['createdAt', 'DESC']]
     });
 
-    if (existingActive && existingActive.createdAt) {
-      const timeSinceCreated = Date.now() - new Date(existingActive.createdAt).getTime();
-      if (timeSinceCreated < 15000) {
-        console.log(`[Attendance Clock-In Debounce] Returned existing active session ${existingActive.id} created ${timeSinceCreated}ms ago.`);
+    if (existingActive) {
+      // If the open session was an AUTO_RECOVERY_PUNCH and the user is now explicitly punching in from the app, upgrade it
+      if (existingActive.checkInMethod === 'AUTO_RECOVERY_PUNCH') {
+        console.log(`[Attendance Clock-In Upgrade] Upgraded auto-recovery session ${existingActive.id} to manual clock-in for user ${activeUserId}.`);
+        existingActive.checkIn = authoritativeCheckIn;
+        existingActive.checkInMethod = inMethod;
+        if (coords) existingActive.coords = typeof coords === 'string' ? coords : JSON.stringify(coords);
+        if (!existingActive.isSwitched) {
+          const isOffice = emp && String(emp.designation || '').trim().toUpperCase() === 'OFFICE';
+          existingActive.workMode = isOffice ? 'office' : 'field';
+        }
+        await existingActive.save();
+        if (emp) {
+          SpecialEarnedCreditService.evaluateAndCredit(existingActive, emp).catch(err => console.warn('[SpecialEarnedCredit Upgrade] Warning:', err.message));
+        }
         return res.status(200).json(existingActive);
       }
+
+      console.log(`[Attendance Clock-In Exists] Employee ${activeUserId} already has an active open session ${existingActive.id} for today.`);
+      return res.status(200).json(existingActive);
     }
 
     // Auto-Merge Reconnection Safeguard:
@@ -570,32 +654,34 @@ router.post('/', async (req, res) => {
       }
     }
 
-    // Create record (Clock In)
-    const resolvedShift = ShiftEngine.resolveEmployeeShift(emp);
-    const inMethod = req.body.checkInMethod || (latVal != null && lonVal != null ? 'MANUAL_APP' : 'MANUAL_WEB');
-    const outMethod = cleanCheckOut ? (req.body.clockOutMethod || (latVal != null && lonVal != null ? 'MANUAL_APP' : 'MANUAL_WEB')) : null;
+    // Resolve authoritative default work mode from employee master profile
+    const isOffice = emp && String(emp.designation || '').trim().toUpperCase() === 'OFFICE';
+    const initialWorkMode = isOffice ? 'office' : 'field';
 
+    // Create record (Clock In)
     const newRecord = await Attendance.create({ 
       userId: activeUserId, 
       userName: activeUserName, 
       date: todayDate, 
-      checkIn: cleanCheckIn, 
-      checkOut: cleanCheckOut, 
-      workingHours: workingHours || (cleanCheckIn && cleanCheckOut ? ShiftEngine.calculateWorkingHours(cleanCheckIn, cleanCheckOut) : null), 
+      checkIn: authoritativeCheckIn, 
+      checkOut: null, 
+      workingHours: null, 
       coords: coords ? (typeof coords === 'string' ? coords : JSON.stringify(coords)) : null,
-      workMode: workMode || 'office',
+      workMode: initialWorkMode,
       isSwitched: false,
       checkInMethod: inMethod,
-      clockOutMethod: outMethod,
+      clockOutMethod: null,
       shiftCode: resolvedShift.code
     });
+
+    GeofenceAlertService.resetTrackingState(activeUserId, newRecord.id);
 
     if (latVal != null && lonVal != null) {
       // Create strict Pin #1 Clock-In GPS Start Anchor Footprint
       try {
         const Footprint = require('../../../../shared/models/Footprint');
         const clockInTs = cleanCheckIn ? new Date(cleanCheckIn).getTime() : Date.now();
-        const targetDate = date || new Date(clockInTs).toISOString().split('T')[0];
+        const targetDate = date || getAuthoritativeISTDate(clockInTs);
         
         await Footprint.create({
           userId: String(activeUserId),
@@ -641,6 +727,9 @@ router.post('/', async (req, res) => {
       }
     }
 
+    if (emp) {
+      SpecialEarnedCreditService.evaluateAndCredit(newRecord, emp).catch(err => console.warn('[SpecialEarnedCredit NewRecord] Warning:', err.message));
+    }
     return res.status(201).json(newRecord);
   } catch (error) {
     console.error('Error creating/updating attendance:', error);
@@ -648,18 +737,34 @@ router.post('/', async (req, res) => {
   }
 });
 
-// POST /switch-mode : Switch active work mode mid-shift to field
+// POST /switch-mode : Switch active work mode mid-shift (Office <-> Field for Office staff only)
 router.post('/switch-mode', async (req, res) => {
   try {
-    const userId = req.body.userId || (req.user && req.user.id);
-    if (!userId) {
+    const rawUserId = req.body.userId || (req.user && req.user.id);
+    if (!rawUserId) {
       return res.status(400).json({ error: 'User context or userId parameter required.' });
     }
 
+    const emp = await findEmployee(rawUserId);
+    const activeUserId = emp ? (emp.empCode || emp.emp_code || emp.id) : rawUserId;
+    const isOffice = emp && String(emp.designation || '').trim().toUpperCase() === 'OFFICE';
+
+    // Restriction: Field staff cannot switch to office mode
+    if (!isOffice) {
+      return res.status(403).json({ error: 'Field staff are not permitted to switch to Office mode.' });
+    }
+
+    const possibleUserIds = emp ? [emp.id, emp.empCode, emp.emp_code, rawUserId].filter(Boolean) : [rawUserId].filter(Boolean);
     const activeSession = await Attendance.findOne({
       where: {
-        userId,
-        checkOut: null
+        userId: { [Op.in]: possibleUserIds },
+        [Op.or]: [
+          { checkOut: null },
+          { checkOut: '' },
+          { checkOut: '-' },
+          { checkOut: 'null' },
+          { checkOut: 'undefined' }
+        ]
       },
       order: [['createdAt', 'DESC']]
     });
@@ -668,16 +773,44 @@ router.post('/switch-mode', async (req, res) => {
       return res.status(404).json({ error: 'No active clock-in session found to switch.' });
     }
 
-    if (activeSession.workMode === 'field') {
-      return res.status(400).json({ error: 'Session is already in Field Work mode.' });
+    const requestedMode = req.body.mode ? String(req.body.mode).trim().toLowerCase() : null;
+    let newMode;
+    let isSwitched;
+
+    if (requestedMode === 'office') {
+      newMode = 'office';
+      isSwitched = false;
+    } else if (requestedMode === 'field') {
+      newMode = 'field';
+      isSwitched = true;
+    } else {
+      // Toggle logic: If currently field, toggle to office; if currently office, toggle to field
+      if (activeSession.workMode === 'field') {
+        newMode = 'office';
+        isSwitched = false;
+      } else {
+        newMode = 'field';
+        isSwitched = true;
+      }
     }
 
-    activeSession.workMode = 'field';
-    activeSession.isSwitched = true;
+    activeSession.workMode = newMode;
+    activeSession.isSwitched = isSwitched;
     await activeSession.save();
 
-    console.log(`[Shift Switch] Switched active session ${activeSession.id} to Field mode for user ${userId}`);
-    return res.status(200).json({ message: 'Switched to Field Work mode successfully.', session: activeSession });
+    console.log(`[Shift Switch] Switched active session ${activeSession.id} to ${newMode} mode (isSwitched: ${isSwitched}) for user ${activeUserId}`);
+
+    const io = req.app ? req.app.get('io') : null;
+    if (io) {
+      try {
+        io.emit('ATTENDANCE_UPDATE', { date: activeSession.date });
+      } catch (sockErr) {}
+    }
+
+    return res.status(200).json({ 
+      message: `Switched to ${newMode === 'field' ? 'Field' : 'Office'} mode successfully.`, 
+      session: activeSession 
+    });
   } catch (error) {
     console.error('Error switching work mode:', error);
     return res.status(500).json({ error: error.message });
@@ -696,6 +829,17 @@ router.post('/heartbeat', async (req, res) => {
     return res.status(200).json({ message: 'Heartbeat registered successfully.', session });
   } catch (error) {
     console.error('Error handling heartbeat endpoint:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/sync-special-credits', async (req, res) => {
+  try {
+    const { month } = req.body;
+    const result = await SpecialEarnedCreditService.syncCreditsForMonth(month);
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error('Error syncing special credits:', error);
     return res.status(500).json({ error: error.message });
   }
 });

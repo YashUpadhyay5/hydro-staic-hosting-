@@ -101,6 +101,41 @@ exports.getHistory = async (req, res) => {
       include: [{ model: NotificationLog, as: 'logs' }]
     });
 
+    // Collect all employee IDs to batch-resolve recipient details
+    const empLookupIds = new Set();
+    notifications.rows.forEach(n => {
+      if (n.targetId) empLookupIds.add(String(n.targetId).trim());
+      let payloadObj = {};
+      try { payloadObj = JSON.parse(n.payload || '{}'); } catch(e) {}
+      if (payloadObj.employeeId) empLookupIds.add(String(payloadObj.employeeId).trim());
+      (n.logs || []).forEach(l => {
+        if (l.employeeId) empLookupIds.add(String(l.employeeId).trim());
+      });
+    });
+
+    const empIdsArray = Array.from(empLookupIds).filter(Boolean);
+    const empMap = new Map();
+    if (empIdsArray.length > 0) {
+      try {
+        const foundEmployees = await Employee.findAll({
+          where: {
+            [Op.or]: [
+              { id: { [Op.in]: empIdsArray } },
+              { empCode: { [Op.in]: empIdsArray } }
+            ]
+          },
+          attributes: ['id', 'empCode', 'name', 'department', 'designation', 'avatar', 'phoneNo']
+        });
+        foundEmployees.forEach(e => {
+          const plain = e.get ? e.get({ plain: true }) : e;
+          if (plain.id) empMap.set(String(plain.id).trim().toLowerCase(), plain);
+          if (plain.empCode) empMap.set(String(plain.empCode).trim().toLowerCase(), plain);
+        });
+      } catch (err) {
+        console.warn('[NotificationHistory Warning] Error looking up employees:', err.message);
+      }
+    }
+
     const formattedRows = notifications.rows.map(n => {
       const logs = n.logs || [];
       let payloadObj = {};
@@ -112,6 +147,38 @@ exports.getHistory = async (req, res) => {
       
       const isSent = n.status === 'SENT' || successLogs.length > 0;
 
+      // Resolve recipient employee details
+      let targetEmp = null;
+      if (n.targetId) {
+        targetEmp = empMap.get(String(n.targetId).trim().toLowerCase());
+      }
+      if (!targetEmp && payloadObj.employeeId) {
+        targetEmp = empMap.get(String(payloadObj.employeeId).trim().toLowerCase());
+      }
+      if (!targetEmp && logs.length > 0 && logs[0].employeeId) {
+        targetEmp = empMap.get(String(logs[0].employeeId).trim().toLowerCase());
+      }
+
+      let recipientLabel = 'N/A';
+      if (n.target === 'ALL') {
+        recipientLabel = 'All Employees';
+      } else if (n.target === 'DEPARTMENT') {
+        recipientLabel = `Dept: ${n.targetId || payloadObj.department || 'All'}`;
+      } else if (targetEmp) {
+        recipientLabel = `${targetEmp.name} (${targetEmp.empCode || targetEmp.id})`;
+      } else if (payloadObj.employeeName) {
+        recipientLabel = `${payloadObj.employeeName} (${payloadObj.empCode || payloadObj.employeeId || n.targetId || ''})`;
+      } else if (n.targetId) {
+        recipientLabel = String(n.targetId);
+      }
+
+      const breachDetails = (payloadObj.type === 'OUTSIDE_GEOFENCE' || payloadObj.nearestGeofence) ? {
+        nearestGeofence: payloadObj.nearestGeofence || 'Work Location',
+        distanceMeters: payloadObj.distanceMeters || 0,
+        consecutiveCount: payloadObj.consecutiveCount || 1,
+        timestamp: payloadObj.timestamp || null
+      } : null;
+
       return {
         ...n.toJSON(),
         status: isSent ? 'SENT' : n.status,
@@ -119,7 +186,15 @@ exports.getHistory = async (req, res) => {
         recipientCount: totalRecipients,
         successCount: isSent ? (successLogs.length > 0 ? successLogs.length : totalRecipients) : 0,
         failureCount: isSent ? 0 : (failureLogs.length > 0 ? failureLogs.length : totalRecipients),
-        sentTime: n.updatedAt || n.createdAt
+        sentTime: n.updatedAt || n.createdAt,
+        recipient: targetEmp || (payloadObj.employeeName ? {
+          name: payloadObj.employeeName,
+          empCode: payloadObj.empCode || payloadObj.employeeId,
+          department: payloadObj.department || '',
+          designation: payloadObj.designation || ''
+        } : null),
+        recipientName: recipientLabel,
+        breachDetails
       };
     });
 
@@ -141,7 +216,15 @@ exports.getLogs = async (req, res) => {
       where: whereClause,
       order: [['createdAt', 'DESC']],
       limit: parseInt(limit),
-      offset: parseInt(offset)
+      offset: parseInt(offset),
+      include: [
+        {
+          model: Employee,
+          as: 'employee',
+          attributes: ['id', 'empCode', 'name', 'department', 'designation', 'avatar'],
+          required: false
+        }
+      ]
     });
     
     res.json({ success: true, data: logs.rows, total: logs.count, page: parseInt(page), limit: parseInt(limit) });

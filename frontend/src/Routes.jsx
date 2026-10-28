@@ -5,7 +5,6 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './core/authentication/Login';
 import Dashboard from './core/layouts/Dashboard';
 
-// Lazy-loaded route components for high-speed initial page loads
 const HrmsModule = React.lazy(() => import('./modules/hrms/HrmsModule'));
 const InvoiceLayout = React.lazy(() => import('./modules/invoice/components/Layout'));
 const UploadPage = React.lazy(() => import('./modules/invoice/pages/UploadPage'));
@@ -13,6 +12,19 @@ const ValidationPage = React.lazy(() => import('./modules/invoice/pages/Validati
 const ArchivePage = React.lazy(() => import('./modules/invoice/pages/ArchivePage'));
 const AnalyticsPage = React.lazy(() => import('./modules/invoice/pages/AnalyticsPage'));
 const SettingsPage = React.lazy(() => import('./modules/invoice/pages/SettingsPage'));
+
+// Non-blocking background prefetch during idle time for 0ms route transitions
+if (typeof window !== 'undefined') {
+    const prefetchModules = () => {
+        import('./modules/hrms/HrmsModule');
+        import('./modules/invoice/pages/UploadPage');
+    };
+    if ('requestIdleCallback' in window) {
+        window.requestIdleCallback(prefetchModules);
+    } else {
+        setTimeout(prefetchModules, 150);
+    }
+}
 
 // Import style sheets
 import './modules/invoice/styles/dashboard.css';

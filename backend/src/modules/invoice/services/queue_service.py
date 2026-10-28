@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 from models.queue_document import QueueDocument
 from datetime import datetime
+import json
 
 
 class QueueService:
@@ -115,18 +116,7 @@ class QueueService:
                         for bk, bv in inv_bank.items():
                             if bv and not ob.get(bk):
                                 ob[bk] = bv
-                        ext["bank_details"] = ob
-        else:
-            if db_doc.saved or db_doc.status == "Saved":
-                import os
-                if db_doc.file_path and os.path.exists(db_doc.file_path):
-                    try:
-                        os.remove(db_doc.file_path)
-                    except Exception as e:
-                        print(f"Error removing file {db_doc.file_path}: {e}")
-                db.delete(db_doc)
-                db.commit()
-                return None
+
 
         return {
             "document_id": db_doc.document_id,
@@ -193,11 +183,17 @@ class QueueService:
             )
 
         # Automatically format filename as "Vendor Name - Invoice Number"
-        extraction = data.get("final_extraction") or (data.get("ocr_result", {}).get("extraction") if data.get("ocr_result") else None)
+        extraction = data.get("final_extraction") or (data.get("ocr_result", {}).get("extraction") if isinstance(data.get("ocr_result"), dict) else None)
         if not extraction:
-            extraction = db_doc.final_extraction or (db_doc.ocr_result.get("extraction") if db_doc.ocr_result else None)
+            extraction = db_doc.final_extraction or (db_doc.ocr_result.get("extraction") if isinstance(db_doc.ocr_result, dict) else None)
 
-        if extraction:
+        if isinstance(extraction, str):
+            try:
+                extraction = json.loads(extraction)
+            except Exception:
+                extraction = None
+
+        if extraction and isinstance(extraction, dict):
             vendor = extraction.get("vendor_details", {}) or {}
             invoice = extraction.get("invoice_details", {}) or {}
             raw_v_name = vendor.get("name")
@@ -249,24 +245,14 @@ class QueueService:
             ).all()
         }
         
+        # Update status for existing saved docs without deleting any documents
         modified = False
         for doc in docs:
             exists = doc.document_id in existing_group_ids
-            
             if exists:
                 if not doc.saved or doc.status != "Saved":
                     doc.saved = True
                     doc.status = "Saved"
-                    modified = True
-            else:
-                if doc.saved or doc.status == "Saved":
-                    import os
-                    if doc.file_path and os.path.exists(doc.file_path):
-                        try:
-                            os.remove(doc.file_path)
-                        except Exception as e:
-                            print(f"Error removing file {doc.file_path}: {e}")
-                    db.delete(doc)
                     modified = True
 
         if modified:
@@ -282,9 +268,33 @@ class QueueService:
             grand_total = 0.0
             processing_time_ms = 0.0
 
-            # Extract grand_total from final_extraction or ocr_result
-            extraction = doc.final_extraction or (doc.ocr_result.get("extraction") if doc.ocr_result else None)
-            if extraction:
+            # Extract grand_total from final_extraction or ocr_result safely
+            extraction = doc.final_extraction
+            if isinstance(extraction, str):
+                if extraction.strip() in ['null', 'None', '', 'undefined']:
+                    extraction = None
+                else:
+                    try:
+                        extraction = json.loads(extraction)
+                    except Exception:
+                        extraction = None
+
+            if not extraction and doc.ocr_result:
+                ocr = doc.ocr_result
+                if isinstance(ocr, str):
+                    try:
+                        ocr = json.loads(ocr)
+                    except Exception:
+                        ocr = None
+                if isinstance(ocr, dict):
+                    extraction = ocr.get("extraction")
+                    if isinstance(extraction, str):
+                        try:
+                            extraction = json.loads(extraction)
+                        except Exception:
+                            extraction = None
+
+            if extraction and isinstance(extraction, dict):
                 ts = extraction.get("tax_summary", {}) or {}
                 val = ts.get("grand_total") or ts.get("calculated_grand_total") or 0.0
                 if isinstance(val, str):
@@ -294,10 +304,16 @@ class QueueService:
                 except ValueError:
                     grand_total = 0.0
 
-            # Extract processing_time_ms from ocr_result metadata
-            if doc.ocr_result and isinstance(doc.ocr_result, dict):
-                metadata = doc.ocr_result.get("metadata", {}) or {}
-                pt_val = metadata.get("processing_time_ms") or doc.ocr_result.get("executionTime") or doc.ocr_result.get("inference_time_ms") or 0.0
+            # Extract processing_time_ms from ocr_result metadata safely
+            ocr = doc.ocr_result
+            if isinstance(ocr, str):
+                try:
+                    ocr = json.loads(ocr)
+                except Exception:
+                    ocr = None
+            if ocr and isinstance(ocr, dict):
+                metadata = ocr.get("metadata", {}) or {}
+                pt_val = metadata.get("processing_time_ms") or ocr.get("executionTime") or ocr.get("inference_time_ms") or 0.0
                 if isinstance(pt_val, str):
                     pt_val = pt_val.replace(",", "").strip()
                 try:

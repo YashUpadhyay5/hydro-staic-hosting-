@@ -5,17 +5,12 @@ const Attendance = require('../../../../shared/models/Attendance');
 const Employee = require('../../../../shared/models/Employee');
 const ShiftEngine = require('../../../../shared/services/ShiftEngine');
 const sequelize = require('../../../../config/database');
-const { getAddressFromCoords } = require('../../../../core/utils/geocoder');
+const { getAddressFromCoords, getCachedAddress } = require('../../../../core/utils/geocoder');
 const { resolveCellToCoords } = require('../../../../core/utils/cellResolver');
 const { Op } = require('sequelize');
 const RouteReplayService = require('../services/RouteReplayService');
-const { getCachedEmployees } = require('../../../../core/utils/employeeCache');
-
-const LEGACY_ALIASES = {
-  'emp0128': 'HMPL39',
-  'mandeep': 'HMPL39',
-  'mandeep singh': 'HMPL39'
-};
+const { getCachedEmployees, resolveCanonicalEmployee } = require('../../../../core/utils/employeeCache');
+const GeofenceAlertService = require('../../../../shared/services/GeofenceAlertService');
 
 const getAuthoritativeISTDate = (d = new Date()) => {
   try {
@@ -249,11 +244,14 @@ router.get('/latest-all', async (req, res) => {
     `;
     const results = await sequelize.query(query, { type: sequelize.QueryTypes.SELECT }).catch(() => []);
     
-    // Filter results so actively clocked-in employees are captured
+    // Filter results so actively clocked-in employees are captured,
+    // as well as employees actively transmitting valid GPS breadcrumbs today
+    const recentActivityWindowMs = Date.now() - (4 * 60 * 60 * 1000);
     const filteredResults = results.filter(r => {
       if (!r.user_id) return false;
       const uid = String(r.user_id).trim().toLowerCase();
-      return clockedInMap.has(uid);
+      const isActivelyTransmitting = Number(r.timestamp) >= recentActivityWindowMs && r.latitude != null && r.longitude != null;
+      return clockedInMap.has(uid) || isActivelyTransmitting;
     });
 
     // Map employee lookup by any identifier (id, empCode, name)
@@ -287,6 +285,19 @@ router.get('/latest-all', async (req, res) => {
       if (emp.empCode) empLookup.set(String(emp.empCode).trim().toLowerCase(), info);
       if (emp.emp_code) empLookup.set(String(emp.emp_code).trim().toLowerCase(), info);
       if (emp.name) empLookup.set(String(emp.name).trim().toLowerCase(), info);
+
+      // Dynamically register legacy codes and aliases from customFields
+      let legacyList = [];
+      try {
+        const cf = typeof emp.customFields === 'string' ? JSON.parse(emp.customFields) : (emp.customFields || {});
+        if (Array.isArray(cf.legacyCodes)) legacyList.push(...cf.legacyCodes);
+        if (Array.isArray(cf.aliases)) legacyList.push(...cf.aliases);
+        if (cf.legacyId) legacyList.push(cf.legacyId);
+        if (cf.oldCode) legacyList.push(cf.oldCode);
+      } catch (e) {}
+      legacyList.filter(Boolean).forEach(v => {
+        empLookup.set(String(v).trim().toLowerCase(), info);
+      });
     });
 
     // Collapse to the absolute latest footprint per canonical employee
@@ -355,12 +366,19 @@ router.get('/latest-all', async (req, res) => {
       const attUid = String(att.userId || '').trim().toLowerCase();
       const attUName = String(att.userName || '').trim().toLowerCase();
       const attCode = String(att.empCode || '').trim().toLowerCase();
+      const empInfo = empLookup.get(attUid) || empLookup.get(attUName) || empLookup.get(attCode);
+      const canonicalId = empInfo ? empInfo.canonicalId : (att.empCode || att.userId || att.userName);
+      const canonicalKey = String(canonicalId || '').trim().toLowerCase();
       
       const isCovered = (attUid && coveredUserIds.has(attUid)) || 
                         (attUName && coveredUserIds.has(attUName)) || 
-                        (attCode && coveredUserIds.has(attCode));
+                        (attCode && coveredUserIds.has(attCode)) ||
+                        (canonicalKey && coveredUserIds.has(canonicalKey));
 
       if (!isCovered) {
+        if (canonicalKey) coveredUserIds.add(canonicalKey);
+        if (attUid) coveredUserIds.add(attUid);
+        if (attUName) coveredUserIds.add(attUName);
         let parsedCoords = null;
         if (att.coords) {
           try {
@@ -372,8 +390,6 @@ router.get('/latest-all', async (req, res) => {
         const lon = parsedCoords ? (parsedCoords.lon || parsedCoords.lng || parsedCoords.longitude) : 77.3807;
 
         const mode = (att.workMode || 'OFFICE').toUpperCase();
-        const empInfo = empLookup.get(attUid) || empLookup.get(attUName) || empLookup.get(attCode);
-        const canonicalId = empInfo ? empInfo.canonicalId : (att.empCode || att.userId || att.userName);
 
         footprints.push({
           id: att.id,
@@ -418,17 +434,29 @@ router.get('/latest-all', async (req, res) => {
       }
     });
 
-    // Enrich all footprints with real, readable physical street addresses
-    await Promise.all(footprints.map(async f => {
+    // Fast 0ms spatial cache enrichment without blocking the HTTP response
+    footprints.forEach(f => {
       if ((!f.address || f.address === 'N/A' || f.address === 'Location Logged') && f.latitude && f.longitude) {
-        try {
-          const resolvedAddr = await getAddressFromCoords(f.latitude, f.longitude);
-          if (resolvedAddr) {
-            f.address = resolvedAddr;
-          }
-        } catch (e) {}
+        const cached = getCachedAddress(f.latitude, f.longitude);
+        if (cached) {
+          f.address = cached;
+        }
       }
-    }));
+    });
+
+    // Asynchronously resolve missing addresses in background so subsequent calls have them cached
+    setTimeout(() => {
+      footprints.forEach(async f => {
+        if ((!f.address || f.address === 'N/A' || f.address === 'Location Logged') && f.latitude && f.longitude) {
+          try {
+            const resolvedAddr = await getAddressFromCoords(f.latitude, f.longitude);
+            if (resolvedAddr) {
+              f.address = resolvedAddr;
+            }
+          } catch (e) {}
+        }
+      });
+    }, 10);
 
     latestAllCache = footprints;
     lastCacheTime = now;
@@ -566,6 +594,8 @@ router.post('/batch', async (req, res) => {
   const uploadedIds = [];
   const failedIds = [];
   const duplicateIds = [];
+  const pendingGeocodeTasks = [];
+  const successfulPings = [];
   let recordsInserted = 0;
   let recordsSkipped = 0;
 
@@ -573,20 +603,40 @@ router.post('/batch', async (req, res) => {
   let transaction;
   try {
     transaction = await sequelize.transaction();
-    console.log(`[FOOTPRINT BATCH TX] Transaction Started (TX ID: ${transaction.id || 'ACTIVE'})`);
+    const { empMap, empAliasesMap } = await getCachedEmployees();
 
     for (let index = 0; index < records.length; index++) {
       const record = records[index];
       const recordUuid = record.uuid || record.id || record.pingId || `generated-${Date.now()}-${index}`;
-      const userId = record.userId || record.user_id;
+      
+      // Dynamic canonical employee normalization
+      const rawUserStr = String(record.userId || record.user_id || '').trim();
+      const resolvedEmp = await resolveCanonicalEmployee(rawUserStr, empMap);
+      let userId = resolvedEmp ? resolvedEmp.canonicalId : rawUserStr;
+      record.userId = userId;
+      if (resolvedEmp && !record.userName) record.userName = resolvedEmp.canonicalName;
+
+      // Skip diagnostic rejected fix pings sent from mobile app buffer
+      if (record.reason && String(record.reason).toUpperCase().startsWith('REJECTED')) {
+        recordsSkipped++;
+        continue;
+      }
+
       const rawTimestamp = record.timestamp;
       
       let validTimestamp = Number(rawTimestamp);
       if (!validTimestamp || isNaN(validTimestamp) || validTimestamp <= 100000000000) {
         validTimestamp = Date.now();
       }
+      if (validTimestamp > Date.now() + 5 * 60 * 1000) {
+        validTimestamp = Date.now();
+      }
 
-      const targetDate = record.date || new Date(validTimestamp).toISOString().split('T')[0];
+      const todayIST = getAuthoritativeISTDate();
+      let targetDate = record.date || getAuthoritativeISTDate(validTimestamp);
+      if (targetDate > todayIST) {
+        targetDate = todayIST;
+      }
 
       // CHANGE 3: PER RECORD LOGGING & DUPLICATE CHECK
       let isDuplicate = false;
@@ -611,6 +661,10 @@ router.post('/batch', async (req, res) => {
         continue;
       }
 
+      // NOTE: Rapid refinement debounce REMOVED — ping interval is controlled from app settings,
+      // so the backend should save all GPS pings arriving from devices without suppression.
+      // Only exact-timestamp duplicate check (above) is retained to prevent network retries.
+
       // Check required fields
       if (!userId) {
         failedIds.push(recordUuid);
@@ -628,31 +682,28 @@ router.post('/batch', async (req, res) => {
         }
       }
 
-      const rawUserStr = String(userId).trim().toLowerCase();
-      const searchTerms = [String(userId)];
-      if (LEGACY_ALIASES[rawUserStr]) {
-        searchTerms.push(LEGACY_ALIASES[rawUserStr]);
+      const userAliases = (empAliasesMap && empAliasesMap.get(String(userId).trim().toLowerCase())) || [String(userId)];
+      let empObj = resolvedEmp ? resolvedEmp.employee : null;
+      if (!empObj && userId) {
+        try {
+          const Employee = require('../../../../shared/models/Employee');
+          empObj = await Employee.findOne({
+            where: {
+              [Op.or]: [
+                { id: { [Op.in]: userAliases } },
+                { empCode: { [Op.in]: userAliases } },
+                sequelize.where(sequelize.fn('lower', sequelize.col('emp_code')), { [Op.in]: userAliases.map(s => s.toLowerCase()) }),
+                { name: { [Op.in]: userAliases } }
+              ]
+            },
+            transaction
+          });
+        } catch (e) {}
       }
 
-      const Employee = require('../../../../shared/models/Employee');
-      let empObj = null;
-      try {
-        empObj = await Employee.findOne({
-          where: {
-            [Op.or]: [
-              { id: { [Op.in]: searchTerms } },
-              { empCode: { [Op.in]: searchTerms } },
-              sequelize.where(sequelize.fn('lower', sequelize.col('emp_code')), { [Op.in]: searchTerms.map(s => s.toLowerCase()) }),
-              { name: { [Op.in]: searchTerms } }
-            ]
-          },
-          transaction
-        });
-      } catch (e) {}
-
       const activeUserIds = empObj 
-        ? Array.from(new Set([empObj.id, empObj.empCode, empObj.emp_code, empObj.name, String(userId), ...searchTerms].filter(Boolean)))
-        : [String(userId), ...searchTerms];
+        ? Array.from(new Set([empObj.id, empObj.empCode, empObj.emp_code, empObj.name, String(userId), ...userAliases].filter(Boolean)))
+        : Array.from(new Set([String(userId), ...userAliases].filter(Boolean)));
 
       let attRecord = await Attendance.findOne({
         where: {
@@ -666,7 +717,12 @@ router.post('/batch', async (req, res) => {
             {
               [Op.or]: [
                 { date: { [Op.in]: [targetDate, altDate] } },
-                sequelize.where(sequelize.fn('date', sequelize.col('createdAt')), targetDate)
+                {
+                  [Op.and]: [
+                    { date: { [Op.or]: [null, ''] } },
+                    sequelize.where(sequelize.fn('date', sequelize.col('createdAt')), targetDate)
+                  ]
+                }
               ]
             }
           ]
@@ -687,9 +743,25 @@ router.post('/batch', async (req, res) => {
         continue;
       }
 
-      if (!attRecord || !attRecord.checkIn) {
-        // SELF-HEALING AUTO-RECOVERY: Employee is actively sending valid telemetry from device
-        // but active attendance session was not saved (e.g. PM2 reload / server restart during clock-in punch).
+      // Auto-recover attendance session if the footprint explicitly represents a clock-in punch event,
+      // OR if the employee has live GPS telemetry during active shift hours without any recorded shift today.
+      const isExplicitClockInAnchor = record.reason === 'CLOCK_IN_START_ANCHOR';
+      const istHour = (() => {
+        try {
+          const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', hour: 'numeric', hour12: false }).format(new Date(validTimestamp));
+          return parseInt(parts, 10);
+        } catch {
+          return new Date(validTimestamp).getUTCHours() + 5;
+        }
+      })();
+      const isWorkingShiftHours = (istHour >= 8 && istHour < 19);
+      const isValidGpsPing = record.latitude != null && record.longitude != null && (record.accuracy == null || parseFloat(record.accuracy) <= 500);
+
+      const isForToday = (targetDate === todayIST);
+      const shouldAutoRecoverShift = isForToday && (!attRecord || !attRecord.checkIn) && (isExplicitClockInAnchor || (isValidGpsPing && isWorkingShiftHours));
+      if (shouldAutoRecoverShift) {
+        // RECOVERY OF DROPPED CLOCK-IN: Explicit clock-in anchor or live shift GPS ping
+        // heals active attendance session when mobile punch dropped.
         try {
           const resolvedShift = ShiftEngine.resolveEmployeeShift(empObj);
           const autoCheckInTime = formatISTTime(validTimestamp);
@@ -701,9 +773,7 @@ router.post('/batch', async (req, res) => {
 
           let autoAddress = null;
           if (parsedLat != null && parsedLon != null) {
-            try {
-              autoAddress = await getAddressFromCoords(parsedLat, parsedLon);
-            } catch (e) {}
+            autoAddress = getCachedAddress(parsedLat, parsedLon) || null;
           }
 
           if (attRecord) {
@@ -713,6 +783,8 @@ router.post('/batch', async (req, res) => {
             if (!attRecord.address && autoAddress) attRecord.address = autoAddress;
             await attRecord.save({ transaction });
           } else {
+            const isOfficeEmp = empObj && String(empObj.designation || '').trim().toUpperCase() === 'OFFICE';
+            const resolvedWorkMode = isOfficeEmp ? 'office' : 'field';
             attRecord = await Attendance.create({
               userId: activeUid,
               userName: activeUName,
@@ -722,12 +794,22 @@ router.post('/batch', async (req, res) => {
               workingHours: null,
               coords: coordsJson,
               address: autoAddress,
-              workMode: (empObj && (empObj.primary_work_mode || empObj.work_mode)) ? (empObj.primary_work_mode || empObj.work_mode) : 'field',
+              workMode: resolvedWorkMode,
               isSwitched: false,
               checkInMethod: 'AUTO_RECOVERY_PUNCH',
               clockOutMethod: null,
               shiftCode: resolvedShift.code
             }, { transaction });
+            GeofenceAlertService.resetTrackingState(activeUid, attRecord.id);
+          }
+
+          if (!autoAddress && parsedLat != null && parsedLon != null && attRecord) {
+            const healAttId = attRecord.id;
+            getAddressFromCoords(parsedLat, parsedLon).then(async (resolvedAddr) => {
+              if (resolvedAddr) {
+                await Attendance.update({ address: resolvedAddr }, { where: { id: healAttId } }).catch(() => {});
+              }
+            }).catch(() => {});
           }
 
           console.log(`[FOOTPRINT SELF-HEAL] Auto-created/recovered active Attendance record for ${activeUid} (${activeUName}) on ${targetDate} at ${autoCheckInTime}`);
@@ -814,12 +896,12 @@ router.post('/batch', async (req, res) => {
           }
         } else {
           if (!finalAddress && finalLat && finalLon) {
-            try {
-              finalAddress = await getAddressFromCoords(finalLat, finalLon);
-            } catch (e) {}
+            finalAddress = getCachedAddress(finalLat, finalLon) || null;
           }
           // Update in-memory cache whenever valid coordinates arrive
-          lastKnownLocationMap.set(String(userId), { latitude: finalLat, longitude: finalLon, accuracy: finalAccuracy, address: finalAddress });
+          if (finalAddress) {
+            lastKnownLocationMap.set(String(userId), { latitude: finalLat, longitude: finalLon, accuracy: finalAccuracy, address: finalAddress });
+          }
         }
 
         const newFp = await Footprint.create({
@@ -847,7 +929,29 @@ router.post('/batch', async (req, res) => {
           isMockLocation: record.isMockLocation || false
         }, { transaction });
 
+        if (!finalAddress && finalLat && finalLon) {
+          pendingGeocodeTasks.push({
+            id: newFp.id || recordUuid,
+            userId: String(userId),
+            lat: finalLat,
+            lon: finalLon,
+            accuracy: finalAccuracy
+          });
+        }
+
         uploadedIds.push(newFp.id || recordUuid);
+        successfulPings.push({
+          ...record,
+          id: newFp.id || recordUuid,
+          userId: String(userId),
+          latitude: finalLat,
+          longitude: finalLon,
+          accuracy: finalAccuracy,
+          timestamp: validTimestamp,
+          date: targetDate,
+          trackingMethod: record.trackingMethod || record.provider || 'GPS',
+          isMockLocation: record.isMockLocation || false
+        });
         recordsInserted++;
         console.log(`[FOOTPRINT PER-RECORD LOG] UUID: ${newFp.id || recordUuid} | UserId: ${userId} | Timestamp: ${validTimestamp} | Duplicate Check: PASSED | Insert: SUCCESS | Reason: Successfully inserted into location_footprints.`);
       } catch (recordError) {
@@ -869,6 +973,68 @@ router.post('/batch', async (req, res) => {
     await transaction.commit();
     console.log(`[FOOTPRINT BATCH TX] Transaction Committed Successfully.`);
     console.log(`[FOOTPRINT AUDIT] [POST /api/footprints/batch] -> 3. Database Insert Completed`);
+
+    // ASYNC BACKGROUND GEOCODING: Resolve addresses asynchronously outside transaction with zero DB locks held
+    if (pendingGeocodeTasks.length > 0) {
+      setImmediate(async () => {
+        for (const task of pendingGeocodeTasks) {
+          try {
+            const addr = await getAddressFromCoords(task.lat, task.lon);
+            if (addr) {
+              await Footprint.update({ address: addr }, { where: { id: task.id } }).catch(() => {});
+              lastKnownLocationMap.set(task.userId, { latitude: task.lat, longitude: task.lon, accuracy: task.accuracy, address: addr });
+            }
+          } catch (_) {}
+        }
+      });
+    }
+
+    // CONSECUTIVE OUTSIDE GEOFENCE ALERT EVALUATION:
+    // Evaluate valid GPS pings chronologically to monitor consecutive outside pings and trigger alerts
+    if (successfulPings.length > 0) {
+      try {
+        const sortedPings = [...successfulPings].sort((a, b) => (Number(a.timestamp) || 0) - (Number(b.timestamp) || 0));
+        for (const pingItem of sortedPings) {
+          const evalResult = await GeofenceAlertService.evaluatePing(pingItem).catch(err => {
+            console.warn(`[Batch Geofence Alert Error for ${pingItem.userId}]:`, err.message);
+            return null;
+          });
+          if (evalResult && evalResult.status === 'OUTSIDE') {
+            console.log(`[Batch Geofence Evaluation] User ${evalResult.userId}: OUTSIDE (Consecutive: ${evalResult.consecutiveCount}, Distance: ${evalResult.distanceMeters}m, AlertSent: ${evalResult.alertSent}, AlertTriggered: ${evalResult.alertTriggered})`);
+          }
+        }
+      } catch (evalErr) {
+        console.warn('[Batch Geofence Evaluation Warning]:', evalErr.message);
+      }
+    }
+
+    // Intercept batch footprints as tracking heartbeats for recovery logic
+    try {
+      const HeartbeatMonitorService = require('../../../../shared/services/HeartbeatMonitorService');
+      const userTelemetryMap = new Map();
+      for (const record of records) {
+        const uId = record.userId || record.user_id;
+        if (!uId) continue;
+        const current = userTelemetryMap.get(uId) || {};
+        userTelemetryMap.set(uId, {
+          manufacturer: record.manufacturer || current.manufacturer,
+          model: record.model || current.model,
+          androidVersion: record.androidVersion || current.androidVersion,
+          batteryLevel: record.batteryLevel !== undefined ? record.batteryLevel : (record.battery_level !== undefined ? record.battery_level : current.batteryLevel),
+          networkType: record.networkType || record.network_type || current.networkType,
+          gpsEnabled: record.gpsEnabled !== undefined ? record.gpsEnabled : (record.locationEnabled !== undefined ? record.locationEnabled : current.gpsEnabled),
+          trackingReliabilityScore: record.trackingReliabilityScore || current.trackingReliabilityScore
+        });
+      }
+
+      for (const [uId, tel] of userTelemetryMap.entries()) {
+        HeartbeatMonitorService.registerHeartbeat(uId, tel).catch(err => {
+          console.warn(`[Batch Heartbeat Intercept Error for ${uId}]:`, err.message);
+        });
+      }
+    } catch (hbErr) {
+      console.warn('[Heartbeat Service Batch Import Warning]:', hbErr.message);
+    }
   } catch (batchError) {
     if (transaction) await transaction.rollback();
     console.error(`[FOOTPRINT BATCH TX ERROR] Transaction Rolled Back due to critical error:`, batchError);
@@ -921,8 +1087,25 @@ router.post('/', async (req, res) => {
       isMockLocation
     } = req.body;
 
+    // Filter out mobile internal diagnostic reject logs that should never be stored as active footprints
+    if (reason && typeof reason === 'string' && reason.toUpperCase().startsWith('REJECTED')) {
+      console.log(`[Footprint Router] Ignored diagnostic reject log '${reason}' for user ${userId}`);
+      return res.status(200).json({ status: 'ignored_diagnostic', message: `Filtered out mobile internal log: ${reason}` });
+    }
+
+    // Dynamic canonical employee normalization
+    const { empMap, empAliasesMap } = await getCachedEmployees();
+    const resolvedEmp = await resolveCanonicalEmployee(userId, empMap);
+    const activeUserId = resolvedEmp ? resolvedEmp.canonicalId : String(userId);
+    const activeUserName = resolvedEmp ? resolvedEmp.canonicalName : req.body.userName;
+    const userAliases = (empAliasesMap && empAliasesMap.get(String(userId).trim().toLowerCase())) || [String(userId)];
+
     // Check if employee is clocked out for the given date (or today)
-    const targetDate = date || new Date().toISOString().split('T')[0];
+    const todayIST = getAuthoritativeISTDate();
+    let targetDate = date || todayIST;
+    if (targetDate > todayIST) {
+      targetDate = todayIST;
+    }
     let altDate = targetDate;
     if (targetDate && targetDate.includes('-')) {
       const parts = targetDate.split('-');
@@ -931,30 +1114,32 @@ router.post('/', async (req, res) => {
       }
     }
 
-    if (userId) {
+    let empObj = resolvedEmp ? resolvedEmp.employee : null;
+    if (!empObj && userId) {
       const Employee = require('../../../../shared/models/Employee');
-      let empObj = null;
       try {
         empObj = await Employee.findOne({
           where: {
             [Op.or]: [
-              { id: String(userId) },
-              { empCode: String(userId) },
-              { name: String(userId) }
+              { id: { [Op.in]: userAliases } },
+              { empCode: { [Op.in]: userAliases } },
+              { name: { [Op.in]: userAliases } }
             ]
           }
         });
       } catch (e) {}
+    }
 
-      const activeUserIds = empObj 
-        ? Array.from(new Set([empObj.id, empObj.empCode, empObj.name, String(userId)].filter(Boolean)))
-        : [String(userId)];
+    const activeUserIds = empObj 
+      ? Array.from(new Set([empObj.id, empObj.empCode, empObj.name, activeUserId, String(userId), ...userAliases].filter(Boolean)))
+      : Array.from(new Set([activeUserId, String(userId), ...userAliases].filter(Boolean)));
 
+    if (userId) {
       let todayAttendance = await Attendance.findOne({
         where: {
           [Op.or]: [
-            { userId: { [Op.or]: activeUserIds } },
-            { userName: { [Op.or]: activeUserIds } }
+            { userId: { [Op.in]: activeUserIds } },
+            { userName: { [Op.in]: activeUserIds } }
           ],
           date: { [Op.or]: [targetDate, altDate] }
         },
@@ -968,25 +1153,44 @@ router.post('/', async (req, res) => {
         String(todayAttendance.checkOut).trim() !== '-';
 
       if (isTrueCheckOut) {
-        console.log(`[Footprint Router] Ignored footprint ping for userId ${userId} on ${targetDate}: Employee is CLOCKED OUT (checkOut: ${todayAttendance.checkOut})`);
+        console.log(`[Footprint Router] Ignored footprint ping for userId ${activeUserId} (raw: ${userId}) on ${targetDate}: Employee is CLOCKED OUT (checkOut: ${todayAttendance.checkOut})`);
         return res.status(200).json({
           status: 'ignored_clocked_out',
           message: 'Footprint ignored: Employee has clocked out for today.'
         });
       }
 
-      if (!todayAttendance || !todayAttendance.checkIn) {
-        // SELF-HEALING AUTO-RECOVERY: Employee is actively sending valid telemetry from device
-        // but active attendance session was not saved (e.g. PM2 reload / server restart during clock-in punch).
+      // Auto-recover attendance session if the footprint explicitly represents a clock-in punch event,
+      // OR if the employee has live GPS telemetry during active shift hours without any recorded shift today.
+      let validTs = Number(timestamp);
+      if (!validTs || isNaN(validTs) || validTs <= 100000000000) {
+        validTs = Date.now();
+      }
+      if (validTs > Date.now() + 5 * 60 * 1000) {
+        validTs = Date.now();
+      }
+      const isExplicitClockInAnchor = reason === 'CLOCK_IN_START_ANCHOR';
+      const istHour = (() => {
+        try {
+          const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', hour: 'numeric', hour12: false }).format(new Date(validTs));
+          return parseInt(parts, 10);
+        } catch {
+          return new Date(validTs).getUTCHours() + 5;
+        }
+      })();
+      const isWorkingShiftHours = (istHour >= 8 && istHour < 19);
+      const isValidGpsPing = latitude != null && longitude != null && (accuracy == null || parseFloat(accuracy) <= 500);
+
+      const isForToday = (targetDate === todayIST);
+      const shouldAutoRecoverShift = isForToday && (!todayAttendance || !todayAttendance.checkIn) && (isExplicitClockInAnchor || (isValidGpsPing && isWorkingShiftHours));
+      if (shouldAutoRecoverShift) {
+        // RECOVERY OF DROPPED CLOCK-IN: Explicit clock-in anchor or live shift GPS ping
+        // heals active attendance session when mobile punch dropped.
         try {
           const resolvedShift = ShiftEngine.resolveEmployeeShift(empObj);
-          let validTs = Number(timestamp);
-          if (!validTs || isNaN(validTs) || validTs <= 100000000000) {
-            validTs = Date.now();
-          }
           const autoCheckInTime = formatISTTime(validTs);
-          const activeUid = empObj ? (empObj.empCode || empObj.emp_code || empObj.id) : String(userId);
-          const activeUName = empObj ? empObj.name : String(userId);
+          const activeUid = activeUserId;
+          const activeUName = activeUserName || (empObj ? empObj.name : String(userId));
           const parsedLat = latitude != null ? parseFloat(latitude) : null;
           const parsedLon = longitude != null ? parseFloat(longitude) : null;
           const coordsJson = (parsedLat != null && parsedLon != null) ? JSON.stringify({ lat: parsedLat, lon: parsedLon }) : null;
@@ -997,6 +1201,8 @@ router.post('/', async (req, res) => {
             if (!todayAttendance.coords && coordsJson) todayAttendance.coords = coordsJson;
             await todayAttendance.save();
           } else {
+            const isOfficeEmp = empObj && String(empObj.designation || '').trim().toUpperCase() === 'OFFICE';
+            const resolvedWorkMode = isOfficeEmp ? 'office' : 'field';
             todayAttendance = await Attendance.create({
               userId: activeUid,
               userName: activeUName,
@@ -1005,12 +1211,13 @@ router.post('/', async (req, res) => {
               checkOut: null,
               workingHours: null,
               coords: coordsJson,
-              workMode: (empObj && (empObj.primary_work_mode || empObj.work_mode)) ? (empObj.primary_work_mode || empObj.work_mode) : 'field',
+              workMode: resolvedWorkMode,
               isSwitched: false,
               checkInMethod: 'AUTO_RECOVERY_PUNCH',
               clockOutMethod: null,
               shiftCode: resolvedShift.code
             });
+            GeofenceAlertService.resetTrackingState(activeUid, todayAttendance.id);
           }
 
           console.log(`[FOOTPRINT SELF-HEAL] Auto-created/recovered active Attendance record for ${activeUid} (${activeUName}) on ${targetDate} at ${autoCheckInTime}`);
@@ -1057,7 +1264,7 @@ router.post('/', async (req, res) => {
       // Find latest footprint with coordinates for this user
       const lastCoordPoint = await Footprint.findOne({
         where: {
-          userId: userId,
+          userId: { [Op.in]: activeUserIds },
           latitude: { [Op.ne]: null },
           longitude: { [Op.ne]: null }
         },
@@ -1069,14 +1276,14 @@ router.post('/', async (req, res) => {
         finalLon = lastCoordPoint.longitude;
         finalAccuracy = lastCoordPoint.accuracy || 50;
         finalAddress = lastCoordPoint.address;
-        console.log(`[Footprint Geocode Backend Fallback] Reused last known coords (${finalLat}, ${finalLon}) and address for user ${userId}`);
+        console.log(`[Footprint Geocode Backend Fallback] Reused last known coords (${finalLat}, ${finalLon}) and address for user ${activeUserId}`);
       } else {
         // Fallback to Noida Office
         finalLat = 28.6692;
         finalLon = 77.4538;
         finalAccuracy = 100;
         finalAddress = "HRMS HQ Office, Sector 62, Noida, Uttar Pradesh, India";
-        console.log(`[Footprint Geocode Backend Fallback] No last coordinates. Defaulted to office coordinates for user ${userId}`);
+        console.log(`[Footprint Geocode Backend Fallback] No last coordinates. Defaulted to office coordinates for user ${activeUserId}`);
       }
     }
     
@@ -1085,8 +1292,42 @@ router.post('/', async (req, res) => {
       validTimestamp = Date.now();
     }
 
+    // 1. Guard against duplicate pings (same userId and exact timestamp from network retries)
+    if (activeUserId && validTimestamp) {
+      const existingFp = await Footprint.findOne({
+        where: {
+          userId: { [Op.in]: activeUserIds },
+          timestamp: validTimestamp
+        }
+      });
+      if (existingFp) {
+        console.log(`[Footprint Router] Duplicate footprint ignored for user ${activeUserId} at timestamp ${validTimestamp}`);
+        return res.status(200).json(existingFp);
+      }
+    }
+
+    // NOTE: Rapid satellite refinement debounce REMOVED — ping interval is controlled from app settings,
+    // so the backend should save all GPS pings arriving from devices without suppression.
+    // Only exact-timestamp duplicate check (above) is retained to prevent network retries.
+
+    // Register heartbeat signal for every incoming ping so stationary workers keep their tracking active
+    try {
+      const HeartbeatMonitorService = require('../../../../shared/services/HeartbeatMonitorService');
+      HeartbeatMonitorService.registerHeartbeat(activeUserId, {
+        manufacturer: req.body.manufacturer,
+        model: req.body.model,
+        androidVersion: req.body.androidVersion,
+        batteryLevel: req.body.batteryLevel,
+        networkType: req.body.networkType,
+        gpsEnabled: req.body.gpsEnabled,
+        trackingReliabilityScore: req.body.trackingReliabilityScore
+      }).catch(err => console.warn('[Footprint Heartbeat Error]:', err.message));
+    } catch (e) {
+      console.warn('[Heartbeat Service Import Warning]:', e.message);
+    }
+
     const newPoint = await Footprint.create({ 
-      userId, 
+      userId: activeUserId, 
       latitude: finalLat, 
       longitude: finalLon, 
       timestamp: validTimestamp, 
@@ -1111,7 +1352,7 @@ router.post('/', async (req, res) => {
     // Intercept footprint creation as a tracking heartbeat for recovery logic (Phase 16)
     try {
       const HeartbeatMonitorService = require('../../../../shared/services/HeartbeatMonitorService');
-      HeartbeatMonitorService.registerHeartbeat(userId, {
+      HeartbeatMonitorService.registerHeartbeat(activeUserId, {
         manufacturer: req.body.manufacturer,
         model: req.body.model,
         androidVersion: req.body.androidVersion,
@@ -1134,6 +1375,15 @@ router.post('/', async (req, res) => {
       }).catch(err => {
         console.warn("[Footprint Geocode Error] Failed to resolve address:", err.message);
       });
+    }
+
+    // CONSECUTIVE OUTSIDE GEOFENCE ALERT EVALUATION:
+    try {
+      GeofenceAlertService.evaluatePing(newPoint).catch(err => {
+        console.warn(`[Single Geofence Alert Error for ${activeUserId}]:`, err.message);
+      });
+    } catch (evalErr) {
+      console.warn('[Single Geofence Evaluation Warning]:', evalErr.message);
     }
 
     return res.status(201).json(newPoint);

@@ -47,7 +47,8 @@ export default function Layout() {
     const hasProcessing = documents.some(d => 
       ["PROCESSING", "UPLOADING", "PENDING", "PROCESS"].includes(d.status?.toUpperCase())
     );
-    const intervalTime = hasProcessing ? 1500 : 5000;
+    // Adaptive polling: 2.5s when OCR is actively processing, 60s when idle
+    const intervalTime = hasProcessing ? 2500 : 60000;
     const interval = setInterval(loadDocuments, intervalTime);
     return () => clearInterval(interval);
   }, [documents]);
@@ -289,7 +290,7 @@ export default function Layout() {
               className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
               title={!isExpanded ? item.label : undefined}
               onClick={(e) => {
-                if (item.to === "/validation" && window.location.pathname.includes("validation")) {
+                if (item.to.includes("validation") && window.location.pathname.includes("validation")) {
                   window.dispatchEvent(new Event("reset-validation-dashboard"));
                 }
               }}

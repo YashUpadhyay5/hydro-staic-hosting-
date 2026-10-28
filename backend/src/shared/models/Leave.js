@@ -62,6 +62,11 @@ const Leave = sequelize.define('Leave', {
     type: DataTypes.BIGINT,
     field: 'applied_at',
     allowNull: false,
+  },
+  actionBy: {
+    type: DataTypes.STRING,
+    field: 'action_by',
+    allowNull: true,
   }
 }, {
   tableName: 'location_leaves',

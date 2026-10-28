@@ -6,6 +6,7 @@ const { Op } = require('sequelize');
 const { documentsUpload: upload, getStoragePath } = require('../../../../core/middleware/upload');
 const path = require('path');
 const fs = require('fs');
+const archiver = require('archiver');
 
 const sequelize = require('../../../../config/database');
 
@@ -243,6 +244,90 @@ router.delete('/:id', async (req, res) => {
   } catch (error) {
     console.error('Error deleting document:', error);
     return res.status(500).json({ error: error.message });
+  }
+});
+
+// GET & POST /download-zip - High-Performance Streaming ZIP with DEFLATE Level 9 Compression
+router.all('/download-zip', async (req, res) => {
+  try {
+    const userId = req.query.userId || req.body?.userId;
+    const idsParam = req.query.ids || req.body?.ids;
+    let requestedIds = [];
+    if (idsParam) {
+      requestedIds = Array.isArray(idsParam) ? idsParam : idsParam.split(',').map(s => s.trim());
+    }
+
+    let whereClause = {};
+    if (requestedIds.length > 0) {
+      whereClause.id = { [Op.in]: requestedIds };
+    } else if (userId && userId !== 'admin') {
+      whereClause = {
+        [Op.or]: [
+          { targetType: 'ALL' },
+          { targetUserId: String(userId) },
+          { uploaderId: String(userId) }
+        ]
+      };
+    }
+
+    const documents = await Document.findAll({ where: whereClause });
+    if (!documents || documents.length === 0) {
+      return res.status(404).json({ error: 'No documents found to archive.' });
+    }
+
+    // Set streaming ZIP headers
+    const zipFilename = `hrms_documents_${Date.now()}.zip`;
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${zipFilename}"`);
+    res.setHeader('Cache-Control', 'no-cache');
+
+    const archive = archiver('zip', {
+      zlib: { level: 9 }, // Maximum DEFLATE compression level
+      forceZip64: true
+    });
+
+    archive.on('warning', (err) => {
+      if (err.code === 'ENOENT') {
+        console.warn('[Archiver Warning]:', err.message);
+      } else {
+        throw err;
+      }
+    });
+
+    archive.on('error', (err) => {
+      console.error('[Archiver Error]:', err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Archive compression failed.' });
+      }
+    });
+
+    // Pipe archive directly into HTTP response stream (0ms disk write overhead)
+    archive.pipe(res);
+
+    for (const doc of documents) {
+      if (!doc.filePath) continue;
+      let fullPath;
+      if (doc.filePath.startsWith('/static/uploads/')) {
+        const filename = path.basename(doc.filePath);
+        fullPath = path.join(__dirname, '..', 'uploads', filename);
+      } else {
+        fullPath = path.join(getStoragePath(), doc.filePath);
+      }
+
+      if (fs.existsSync(fullPath)) {
+        const ext = path.extname(fullPath);
+        const safeTitle = (doc.title || 'document').replace(/[^a-zA-Z0-9_\-\.]/g, '_');
+        const entryName = `${safeTitle}_${doc.id}${ext}`;
+        archive.file(fullPath, { name: entryName });
+      }
+    }
+
+    await archive.finalize();
+  } catch (error) {
+    console.error('ZIP generation error:', error);
+    if (!res.headersSent) {
+      return res.status(500).json({ error: error.message });
+    }
   }
 });
 

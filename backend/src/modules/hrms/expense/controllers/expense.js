@@ -115,10 +115,10 @@ exports.createExpenseClaim = async (req, res) => {
 exports.updateExpenseStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
+    const { status, actionBy } = req.body;
 
-    if (!['approved', 'rejected'].includes(status)) {
-      return res.status(400).json({ error: 'Invalid status. Must be approved or rejected.' });
+    if (!['approved', 'rejected', 'pending'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status. Must be approved, rejected, or pending.' });
     }
 
     const expense = await Expense.findByPk(id);
@@ -127,9 +127,14 @@ exports.updateExpenseStatus = async (req, res) => {
     }
 
     expense.status = status;
+    if (status === 'approved' || status === 'rejected') {
+      expense.actionBy = actionBy || req.user?.name || req.user?.empCode || req.user?.id || 'Admin';
+    } else if (status === 'pending') {
+      expense.actionBy = null;
+    }
     await expense.save();
 
-    console.log(`--- [BACKEND] Expense ${id} status updated to ${status} ---`);
+    console.log(`--- [BACKEND] Expense ${id} status updated to ${status} by ${expense.actionBy} ---`);
     return res.status(200).json(expense);
   } catch (error) {
     console.error('❌ Update expense status exception:', error);
@@ -144,7 +149,7 @@ exports.updateExpenseStatus = async (req, res) => {
 exports.updateExpense = async (req, res) => {
   try {
     const { id } = req.params;
-    const { category, amount, description, billNo, billDate, merchantName, siteName, status } = req.body;
+    const { category, amount, description, billNo, billDate, merchantName, siteName, status, actionBy } = req.body;
     console.log(`--- [BACKEND] API hit: Updating expense ${id} ---`, req.body);
 
     const expense = await Expense.findByPk(id);
@@ -165,7 +170,13 @@ exports.updateExpense = async (req, res) => {
     if (merchantName !== undefined) expense.merchantName = merchantName ? merchantName.trim() : null;
     if (siteName !== undefined) expense.siteName = siteName ? siteName.trim() : null;
     if (status !== undefined && ['approved', 'rejected', 'pending'].includes(String(status).toLowerCase())) {
-      expense.status = String(status).toLowerCase();
+      const lowerStatus = String(status).toLowerCase();
+      expense.status = lowerStatus;
+      if (lowerStatus === 'approved' || lowerStatus === 'rejected') {
+        expense.actionBy = actionBy || req.user?.name || req.user?.empCode || req.user?.id || expense.actionBy || 'Admin';
+      } else if (lowerStatus === 'pending') {
+        expense.actionBy = null;
+      }
     }
 
     if (req.file) {

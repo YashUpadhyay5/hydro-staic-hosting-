@@ -44,7 +44,7 @@ export default function HolidayCalendarModal({ isOpen, onClose, onHolidaysUpdate
   useEffect(() => {
     const fetchDbCalendars = async () => {
       try {
-        const res = await fetch(`http://${window.location.hostname}:8000/api/v1/holidays/calendars`);
+        const res = await fetch(`/api/v1/holidays/calendars`);
         if (res.ok) {
           const dbData = await res.json();
           if (Array.isArray(dbData) && dbData.length > 0) {
@@ -72,7 +72,7 @@ export default function HolidayCalendarModal({ isOpen, onClose, onHolidaysUpdate
     try {
       localStorage.setItem('hrms_location_holiday_calendars', JSON.stringify(calendars));
       if (calendars && calendars.length > 0) {
-        fetch(`http://${window.location.hostname}:8000/api/v1/holidays/calendars/sync`, {
+        fetch(`/api/v1/holidays/calendars/sync`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ calendars })
@@ -209,7 +209,7 @@ export default function HolidayCalendarModal({ isOpen, onClose, onHolidaysUpdate
     if (!window.confirm('Are you sure you want to delete this location calendar?')) return;
 
     try {
-      await fetch(`http://${window.location.hostname}:8000/api/v1/holidays/calendars/${calId}`, {
+      await fetch(`/api/v1/holidays/calendars/${calId}`, {
         method: 'DELETE'
       }).catch(err => console.warn('Delete calendar API error:', err));
     } catch (err) {

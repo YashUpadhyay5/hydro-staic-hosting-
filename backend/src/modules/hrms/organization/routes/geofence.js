@@ -119,4 +119,43 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
+// GET Employee Geofence Tracking Status
+router.get('/tracking-status/:employeeId', async (req, res) => {
+  try {
+    const { employeeId } = req.params;
+    const EmployeeGeofenceTrackingState = require('../../../../shared/models/EmployeeGeofenceTrackingState');
+    const GeofenceAlertService = require('../../../../shared/services/GeofenceAlertService');
+    const Employee = require('../../../../shared/models/Employee');
+    const { getCachedEmployees, resolveCanonicalEmployee } = require('../../../../core/utils/employeeCache');
+
+    const { empMap } = await getCachedEmployees();
+    const resolvedEmp = await resolveCanonicalEmployee(employeeId, empMap);
+    const canonicalId = resolvedEmp ? resolvedEmp.canonicalId : String(employeeId);
+    const empObj = resolvedEmp ? resolvedEmp.employee : await Employee.findByPk(canonicalId);
+
+    const state = await EmployeeGeofenceTrackingState.findByPk(canonicalId);
+    const assignedGeofences = empObj ? await GeofenceAlertService.resolveAssignedGeofences(empObj) : [];
+
+    return res.status(200).json({
+      employeeId: canonicalId,
+      state: state || {
+        employeeId: canonicalId,
+        consecutiveOutsideCount: 0,
+        alertSent: false,
+        lastStatus: 'NONE'
+      },
+      assignedGeofences: assignedGeofences.map(g => ({
+        id: g.id,
+        name: g.name,
+        latitude: g.latitude,
+        longitude: g.longitude,
+        radius: g.radius
+      }))
+    });
+  } catch (error) {
+    console.error('Error fetching employee tracking status:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;

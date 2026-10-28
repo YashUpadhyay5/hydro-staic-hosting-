@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 
 export default function PayRunSummaryCards({ selectedRun, employees = [], employeeCount, runItems = [] }) {
-  if (!selectedRun) return null;
-
   const [epfActive, setEpfActive] = useState(true);
   const [esicActive, setEsicActive] = useState(true);
   const [lwfActive, setLwfActive] = useState(true);
   const [detailModalType, setDetailModalType] = useState(null); // 'COST' | 'DEDUCTIONS' | null
+
+  if (!selectedRun) return null;
 
   // Calculate dynamic metrics from actual runItems list or fallback to employees base salary sum
   const totalEmployees = employeeCount || employees.length || 9;
@@ -14,7 +14,7 @@ export default function PayRunSummaryCards({ selectedRun, employees = [], employ
   // Calculate total database compensation sum for fallbacks (divides annual CTC by 12)
   const totalBaseSalary = employees.reduce((sum, emp) => {
     const rawGross = Number(emp.compensationGross || emp.salary || 0);
-    const monthlyBase = rawGross > 0 ? Math.round(rawGross / 12) : 50000;
+    const monthlyBase = rawGross > 0 ? (rawGross > 100000 ? Math.round(rawGross / 12) : rawGross) : 50000;
     return sum + monthlyBase;
   }, 0);
 
@@ -31,7 +31,69 @@ export default function PayRunSummaryCards({ selectedRun, employees = [], employ
     : (Number(selectedRun.totalNet || 0) > 0 ? Number(selectedRun.totalNet) : Math.round(totalCost * 0.85));
 
   const totalDeductions = totalCost - netDisbursed;
-  
+
+  // Per-employee figures: the stored (server-calculated) payroll items once the run is processed,
+  // otherwise a rough estimate from the registered monthly salary
+  const num = (v) => Number(v) || 0;
+  const pick = (obj, ...keys) => {
+    for (const k of keys) {
+      if (obj && obj[k] != null) return num(obj[k]);
+    }
+    return 0;
+  };
+  const breakdownRows = runItems.length > 0
+    ? runItems.filter(item => item.status !== 'SKIPPED_EXIT').map(item => {
+        const d = item.deductionsBreakdown || {};
+        const emp = employees.find(e => String(e.id) === String(item.employeeId)) || item.employee || {};
+        const gross = num(item.grossEarned);
+        const epfEe = pick(d, 'EPF_EE', 'PF_EE');
+        const esicEe = pick(d, 'ESI_EE');
+        const lwfEe = pick(d, 'LWF', 'LWF_EE');
+        const pt = pick(d, 'PT');
+        const totalDed = num(item.totalDeductions);
+        return {
+          id: item.employeeId,
+          name: emp.name || item.employeeName || item.employeeId,
+          code: emp.empCode || item.employeeId,
+          designation: emp.designation,
+          gross,
+          // Employer EPF matches the employee's 12%; employer ESIC is 3.25% where ESIC applies
+          epfEr: epfEe,
+          esicEr: esicEe > 0 ? Math.ceil(gross * 0.0325) : 0,
+          lwfEr: lwfEe > 0 ? Math.round(40 / 12) : 0,
+          epfEe,
+          esicEe,
+          lwfEe,
+          pt,
+          otherDed: Math.max(0, totalDed - epfEe - esicEe - lwfEe - pt),
+          totalDed
+        };
+      })
+    : employees.map(emp => {
+        const rawGross = Number(emp.compensationGross || emp.salary || 0);
+        const gross = rawGross > 0 ? (rawGross > 100000 ? Math.round(rawGross / 12) : rawGross) : 50000;
+        const epfEe = Math.round(Math.min(gross * 0.70, 15000) * 0.12);
+        const esicEe = emp.esiEligible !== false && gross <= 21000 ? Math.ceil(gross * 0.0075) : 0;
+        const pt = emp.ptEligible !== false ? 208 : 0;
+        return {
+          id: emp.id,
+          name: emp.name,
+          code: emp.empCode || emp.id,
+          designation: emp.designation,
+          gross,
+          epfEr: epfEe,
+          esicEr: esicEe > 0 ? Math.ceil(gross * 0.0325) : 0,
+          lwfEr: 0,
+          epfEe,
+          esicEe,
+          lwfEe: 0,
+          pt,
+          otherDed: 0,
+          totalDed: epfEe + esicEe + pt
+        };
+      });
+  const sumOf = (field) => breakdownRows.reduce((sum, row) => sum + row[field], 0);
+
   // Dynamic statutory components detection and calculation (EPF 12% basic, ESIC 3.25% gross, LWF ₹40/yr = ₹3.33/mo)
   const activeComponents = [];
   if (epfActive) activeComponents.push('EPF');
@@ -42,18 +104,7 @@ export default function PayRunSummaryCards({ selectedRun, employees = [], employ
     ? `Contributions (${activeComponents.join(', ')})`
     : `Contributions (None)`;
 
-  const employerContributions = runItems.length > 0 
-    ? runItems.reduce((sum, item) => {
-        const epf = epfActive ? Number(item.employerEpf || (item.deductionsBreakdown && item.deductionsBreakdown.EPF_EE) || Math.round(Number(item.grossEarned || 0) * 0.50 * 0.12)) : 0;
-        const esic = esicActive ? Number(item.employerEsic || (item.deductionsBreakdown && item.deductionsBreakdown.ESIC_ER) || Math.round(Number(item.grossEarned || 0) * 0.0325)) : 0;
-        const lwf = lwfActive ? Math.round(40 / 12) : 0;
-        return sum + epf + esic + lwf;
-      }, 0)
-    : Math.round(
-        (epfActive ? totalCost * 0.50 * 0.12 : 0) +
-        (esicActive ? totalCost * 0.0325 : 0) +
-        (lwfActive ? totalEmployees * (40 / 12) : 0)
-      );
+  const employerContributions = (epfActive ? sumOf('epfEr') : 0) + (esicActive ? sumOf('esicEr') : 0) + (lwfActive ? sumOf('lwfEr') : 0);
 
   // Calculate dynamic Calendar Days based on selected month and year
   const getCalendarDays = () => {
@@ -186,7 +237,7 @@ export default function PayRunSummaryCards({ selectedRun, employees = [], employ
                   {detailModalType === 'COST' ? 'Total Employer Payroll Cost Breakdown' : 'Total Employee Deductions Breakdown'}
                 </h3>
                 <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                  Detailed itemized financial audit for pay period {selectedRun.month} ({employees.length} Employees)
+                  Detailed itemized financial audit for pay period {selectedRun.month} ({breakdownRows.length} Employees){runItems.length === 0 ? ' - estimate, payroll not processed yet' : ''}
                 </span>
               </div>
               <button className="btn btn-ghost" onClick={() => setDetailModalType(null)} style={{ fontSize: '1.1rem', cursor: 'pointer' }}>✕</button>
@@ -201,11 +252,11 @@ export default function PayRunSummaryCards({ selectedRun, employees = [], employ
                 </div>
                 <div style={{ background: 'rgba(79, 70, 229, 0.1)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(79, 70, 229, 0.2)' }}>
                   <span style={{ fontSize: '0.7rem', color: 'var(--accent-primary)', display: 'block' }}>EMPLOYER EPF (12%)</span>
-                  <strong style={{ fontSize: '1rem', color: 'var(--accent-primary)' }}>₹{Math.round(totalCost * 0.50 * 0.12).toLocaleString()}</strong>
+                  <strong style={{ fontSize: '1rem', color: 'var(--accent-primary)' }}>₹{sumOf('epfEr').toLocaleString()}</strong>
                 </div>
                 <div style={{ background: 'rgba(59, 130, 246, 0.1)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(59, 130, 246, 0.2)' }}>
                   <span style={{ fontSize: '0.7rem', color: '#3b82f6', display: 'block' }}>EMPLOYER ESIC (3.25%)</span>
-                  <strong style={{ fontSize: '1rem', color: '#3b82f6' }}>₹{Math.round(totalCost * 0.0325).toLocaleString()}</strong>
+                  <strong style={{ fontSize: '1rem', color: '#3b82f6' }}>₹{sumOf('esicEr').toLocaleString()}</strong>
                 </div>
                 <div style={{ background: 'rgba(16, 185, 129, 0.1)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
                   <span style={{ fontSize: '0.7rem', color: '#10b981', display: 'block' }}>TOTAL PAYROLL COST</span>
@@ -216,15 +267,15 @@ export default function PayRunSummaryCards({ selectedRun, employees = [], employ
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
                 <div style={{ background: 'rgba(239, 68, 68, 0.08)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
                   <span style={{ fontSize: '0.7rem', color: '#ef4444', display: 'block' }}>EMPLOYEE EPF (12%)</span>
-                  <strong style={{ fontSize: '1rem', color: '#ef4444' }}>₹{Math.round(totalCost * 0.50 * 0.12).toLocaleString()}</strong>
+                  <strong style={{ fontSize: '1rem', color: '#ef4444' }}>₹{sumOf('epfEe').toLocaleString()}</strong>
                 </div>
                 <div style={{ background: 'rgba(245, 158, 11, 0.08)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(245, 158, 11, 0.2)' }}>
                   <span style={{ fontSize: '0.7rem', color: '#f59e0b', display: 'block' }}>EMPLOYEE ESIC (0.75%)</span>
-                  <strong style={{ fontSize: '1rem', color: '#f59e0b' }}>₹{Math.round(totalCost * 0.0075).toLocaleString()}</strong>
+                  <strong style={{ fontSize: '1rem', color: '#f59e0b' }}>₹{sumOf('esicEe').toLocaleString()}</strong>
                 </div>
                 <div style={{ background: 'rgba(139, 92, 246, 0.08)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(139, 92, 246, 0.2)' }}>
                   <span style={{ fontSize: '0.7rem', color: '#8b5cf6', display: 'block' }}>PROFESSIONAL TAX (PT)</span>
-                  <strong style={{ fontSize: '1rem', color: '#8b5cf6' }}>₹{(employees.length * 200).toLocaleString()}</strong>
+                  <strong style={{ fontSize: '1rem', color: '#8b5cf6' }}>₹{sumOf('pt').toLocaleString()}</strong>
                 </div>
                 <div style={{ background: 'rgba(239, 68, 68, 0.12)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
                   <span style={{ fontSize: '0.7rem', color: '#ef4444', display: 'block' }}>TOTAL DEDUCTIONS</span>
@@ -253,48 +304,41 @@ export default function PayRunSummaryCards({ selectedRun, employees = [], employ
                         <th style={{ padding: '10px 14px', textAlign: 'right', color: '#f59e0b' }}>ESIC EE (0.75%)</th>
                         <th style={{ padding: '10px 14px', textAlign: 'right' }}>LWF EE</th>
                         <th style={{ padding: '10px 14px', textAlign: 'right', color: '#8b5cf6' }}>PROF. TAX</th>
+                        <th style={{ padding: '10px 14px', textAlign: 'right' }}>OTHER (VPF / TDS / ADVANCE)</th>
                         <th style={{ padding: '10px 14px', textAlign: 'right', color: '#ef4444' }}>TOTAL DED.</th>
                       </>
                     )}
                   </tr>
                 </thead>
                 <tbody style={{ fontSize: '0.8rem' }}>
-                  {employees.map(emp => {
-                    const rawGross = Number(emp.compensationGross || emp.salary || 0);
-                    const gross = rawGross > 0 ? Math.round(rawGross / 12) : 50000;
-                    
-                    const epfEr = Math.round(gross * 0.50 * 0.12);
-                    const esicEr = Math.round(gross * 0.0325);
-                    const lwfEr = Math.round(40 / 12);
-                    const totalEmpCost = gross + epfEr + esicEr + lwfEr;
-
-                    const epfEe = Math.round(gross * 0.50 * 0.12);
-                    const esicEe = Math.round(gross * 0.0075);
-                    const lwfEe = Math.round(20 / 12);
-                    const pt = 200;
-                    const totalEmpDed = epfEe + esicEe + lwfEe + pt;
+                  {breakdownRows.map(row => {
+                    const employerEpf = epfActive ? row.epfEr : 0;
+                    const employerEsic = esicActive ? row.esicEr : 0;
+                    const employerLwf = lwfActive ? row.lwfEr : 0;
+                    const totalEmpCost = row.gross + employerEpf + employerEsic + employerLwf;
 
                     return (
-                      <tr key={emp.id} style={{ borderBottom: '1px solid rgba(0,0,0,0.03)' }}>
+                      <tr key={row.id} style={{ borderBottom: '1px solid rgba(0,0,0,0.03)' }}>
                         <td style={{ padding: '10px 14px' }}>
-                          <strong>{emp.name}</strong><br/>
-                          <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>{emp.empCode || emp.id} • {emp.designation || 'Staff'}</span>
+                          <strong>{row.name}</strong><br/>
+                          <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>{row.code} • {row.designation || 'Staff'}</span>
                         </td>
                         {detailModalType === 'COST' ? (
                           <>
-                            <td style={{ padding: '10px 14px', textAlign: 'right' }}>₹{gross.toLocaleString()}</td>
-                            <td style={{ padding: '10px 14px', textAlign: 'right', color: 'var(--accent-primary)' }}>₹{epfEr.toLocaleString()}</td>
-                            <td style={{ padding: '10px 14px', textAlign: 'right', color: '#3b82f6' }}>₹{esicEr.toLocaleString()}</td>
-                            <td style={{ padding: '10px 14px', textAlign: 'right', color: '#10b981' }}>₹{lwfEr.toLocaleString()}</td>
+                            <td style={{ padding: '10px 14px', textAlign: 'right' }}>₹{row.gross.toLocaleString()}</td>
+                            <td style={{ padding: '10px 14px', textAlign: 'right', color: 'var(--accent-primary)' }}>₹{employerEpf.toLocaleString()}</td>
+                            <td style={{ padding: '10px 14px', textAlign: 'right', color: '#3b82f6' }}>₹{employerEsic.toLocaleString()}</td>
+                            <td style={{ padding: '10px 14px', textAlign: 'right', color: '#10b981' }}>₹{employerLwf.toLocaleString()}</td>
                             <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700, color: 'var(--text-primary)' }}>₹{totalEmpCost.toLocaleString()}</td>
                           </>
                         ) : (
                           <>
-                            <td style={{ padding: '10px 14px', textAlign: 'right', color: '#ef4444' }}>₹{epfEe.toLocaleString()}</td>
-                            <td style={{ padding: '10px 14px', textAlign: 'right', color: '#f59e0b' }}>₹{esicEe.toLocaleString()}</td>
-                            <td style={{ padding: '10px 14px', textAlign: 'right' }}>₹{lwfEe.toLocaleString()}</td>
-                            <td style={{ padding: '10px 14px', textAlign: 'right', color: '#8b5cf6' }}>₹{pt.toLocaleString()}</td>
-                            <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700, color: '#ef4444' }}>₹{totalEmpDed.toLocaleString()}</td>
+                            <td style={{ padding: '10px 14px', textAlign: 'right', color: '#ef4444' }}>₹{row.epfEe.toLocaleString()}</td>
+                            <td style={{ padding: '10px 14px', textAlign: 'right', color: '#f59e0b' }}>₹{row.esicEe.toLocaleString()}</td>
+                            <td style={{ padding: '10px 14px', textAlign: 'right' }}>₹{row.lwfEe.toLocaleString()}</td>
+                            <td style={{ padding: '10px 14px', textAlign: 'right', color: '#8b5cf6' }}>₹{row.pt.toLocaleString()}</td>
+                            <td style={{ padding: '10px 14px', textAlign: 'right' }}>₹{row.otherDed.toLocaleString()}</td>
+                            <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700, color: '#ef4444' }}>₹{row.totalDed.toLocaleString()}</td>
                           </>
                         )}
                       </tr>

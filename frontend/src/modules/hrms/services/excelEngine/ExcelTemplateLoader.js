@@ -1,8 +1,9 @@
-import ExcelJS from 'exceljs';
 import { TEMPLATE_BASE64 } from './templateBinary.js';
 
 export class ExcelTemplateLoader {
   static async loadTemplate() {
+    // Dynamic import — ExcelJS (1.3 MB) only downloads when user actually clicks Export Excel
+    const { default: ExcelJS } = await import('exceljs');
     const workbook = new ExcelJS.Workbook();
     try {
       // Decode base64 template string to ArrayBuffer

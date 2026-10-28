@@ -47,7 +47,19 @@ const renderConfidenceBadge = (score, sug = null, currentVal = null) => {
   );
 };
 
-function TotalAmountSummary({ data = {}, items = [], fields = [], additionalCharges = 0, onAdditionalChargesChange, onChange }) {
+function TotalAmountSummary({
+  data = {},
+  items = [],
+  fields = [],
+  additionalCharges = 0,
+  onAdditionalChargesChange,
+  onChange,
+  activeStep = 1,
+  onActiveStepChange,
+  verifiedFields = {},
+  onMarkFieldVerified,
+  sequentialFields = [],
+}) {
 
   const shouldShow = (key) => {
     if (fields && fields.length > 0) {
@@ -98,191 +110,140 @@ function TotalAmountSummary({ data = {}, items = [], fields = [], additionalChar
 
     const rate = getTaxRate();
 
-    switch (field) {
-      case "cgst":
-        return parseFloat((taxable * ((rate / 2) / 100)).toFixed(2));
-      case "sgst":
-        return parseFloat((taxable * ((rate / 2) / 100)).toFixed(2));
-      case "igst":
-        return parseFloat((taxable * (rate / 100)).toFixed(2));
-      case "grand_total":
-        return parseFloat((taxable + cgst + sgst + igst + cess + roundOff + extra).toFixed(2));
-      default:
-        return null;
+    if (field === "cgst" && cgst > 0) {
+      return Math.round((taxable * (rate / 2)) / 100 * 100) / 100;
     }
+    if (field === "sgst" && sgst > 0) {
+      return Math.round((taxable * (rate / 2)) / 100 * 100) / 100;
+    }
+    if (field === "igst" && igst > 0) {
+      return Math.round((taxable * rate) / 100 * 100) / 100;
+    }
+    if (field === "grand_total") {
+      const totalTax = (cgst + sgst + igst + cess);
+      return Math.round((taxable + totalTax + roundOff + extra) * 100) / 100;
+    }
+    return null;
   };
 
+  const calcGrandTotal = Math.round((
+    (parseFloat(effectiveTaxableAmount) || 0) +
+    (parseFloat(data.cgst) || 0) +
+    (parseFloat(data.sgst) || 0) +
+    (parseFloat(data.igst) || 0) +
+    (parseFloat(data.cess) || 0) +
+    (parseFloat(data.round_off) || 0) +
+    (parseFloat(additionalCharges) || 0)
+  ) * 100) / 100;
 
-
-  const handleChange = (field, value) => {
-    const numVal = value === "" ? "" : parseFloat(value) || 0;
-    
-    const updated = {
+  const handleChange = (field, val) => {
+    const cleanVal = val === "" ? "" : parseFloat(val) || 0;
+    const updatedData = {
       ...data,
-      [field]: numVal,
+      [field]: cleanVal,
     };
 
-    if (field === "taxable_amount") {
-      updated.subtotal = numVal;
-      const isIGST = (parseFloat(data.igst) > 0) || (parseFloat(data.cgst) === 0 && parseFloat(data.sgst) === 0);
-      const taxable = numVal || 0;
-      const rate = getTaxRate();
-      if (isIGST) {
-        updated.igst = parseFloat((taxable * (rate / 100)).toFixed(2));
-        updated.cgst = 0;
-        updated.sgst = 0;
-      } else {
-        updated.cgst = parseFloat((taxable * ((rate / 2) / 100)).toFixed(2));
-        updated.sgst = parseFloat((taxable * ((rate / 2) / 100)).toFixed(2));
-        updated.igst = 0;
-      }
-    }
-
-    const taxable = parseFloat(updated.taxable_amount) || parseFloat(updated.subtotal) || parseFloat(effectiveTaxableAmount) || 0;
-    const cgst = parseFloat(updated.cgst) || 0;
-    const sgst = parseFloat(updated.sgst) || 0;
-    const igst = parseFloat(updated.igst) || 0;
-    const cess = parseFloat(updated.cess) || 0;
-    const roundOff = parseFloat(updated.round_off) || 0;
+    // Auto-recalculate grand_total dynamically
+    const newTaxable = parseFloat(updatedData.taxable_amount !== undefined ? updatedData.taxable_amount : effectiveTaxableAmount) || 0;
+    const newCgst = parseFloat(updatedData.cgst) || 0;
+    const newSgst = parseFloat(updatedData.sgst) || 0;
+    const newIgst = parseFloat(updatedData.igst) || 0;
+    const newCess = parseFloat(updatedData.cess) || 0;
+    const newRoundOff = parseFloat(updatedData.round_off) || 0;
     const extra = parseFloat(additionalCharges) || 0;
 
-    updated.grand_total = parseFloat((taxable + cgst + sgst + igst + cess + roundOff + extra).toFixed(2));
-    
-    onChange(updated);
+    if (field !== "grand_total") {
+      updatedData.grand_total = Math.round((newTaxable + newCgst + newSgst + newIgst + newCess + newRoundOff + extra) * 100) / 100;
+    }
+
+    onChange(updatedData);
   };
 
-  const handleAdditionalChargesChange = (val) => {
-    const extra = val === "" ? "" : parseFloat(val) || 0;
-    onAdditionalChargesChange(extra);
+  const renderFieldRow = (fieldKey, labelText, value, isHighlight = false) => {
+    if (!shouldShow(fieldKey)) return null;
 
-    const taxable = parseFloat(data.taxable_amount) || parseFloat(data.subtotal) || parseFloat(effectiveTaxableAmount) || 0;
-    const cgst = parseFloat(data.cgst) || 0;
-    const sgst = parseFloat(data.sgst) || 0;
-    const igst = parseFloat(data.igst) || 0;
-    const cess = parseFloat(data.cess) || 0;
-    const roundOff = parseFloat(data.round_off) || 0;
-    
-    const newGrandTotal = parseFloat((taxable + cgst + sgst + igst + cess + roundOff + extra).toFixed(2));
-    onChange({
-      ...data,
-      grand_total: newGrandTotal,
-    });
+    const seqItem = sequentialFields.find(s => s.sectionId === "tax_summary" && (s.fieldKey === fieldKey || (fieldKey === "taxable_amount" && s.fieldKey === "subtotal")));
+    const boxNumber = seqItem ? seqItem.boxNumber : null;
+    const isActiveStep = boxNumber !== null && boxNumber === activeStep;
+    const isFieldVerified = verifiedFields?.[`tax_summary.${fieldKey}`] || verifiedFields?.[`tax_summary.subtotal`];
+
+    // Effective display value for grand total if not explicitly set
+    const displayValue = (fieldKey === "grand_total" && (value === undefined || value === null || String(value).trim() === ""))
+      ? calcGrandTotal
+      : value;
+
+    return (
+      <div
+        key={fieldKey}
+        data-box-step={boxNumber}
+        className={`summary-row ${isHighlight ? "highlight" : ""} ${isActiveStep ? "active-field-group" : ""}`}
+        style={isHighlight ? { borderTop: "2px solid var(--primary-color)", display: "flex", alignItems: "center", padding: "8px 12px", borderRadius: "6px" } : { display: "flex", alignItems: "center", padding: "6px 12px", borderRadius: "6px" }}
+        onClick={() => {
+          if (boxNumber && onActiveStepChange) onActiveStepChange(boxNumber);
+        }}
+      >
+        <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flex: 1, paddingRight: "10px", margin: 0 }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+            <span style={{ fontWeight: isActiveStep ? "700" : isHighlight ? "700" : "500", textTransform: isHighlight ? "uppercase" : "none" }}>
+              {labelText}
+            </span>
+            {isFieldVerified && (
+              <span style={{ fontSize: "10px", color: "#059669", backgroundColor: "rgba(16, 185, 129, 0.15)", border: "1px solid rgba(16, 185, 129, 0.35)", padding: "1px 6px", borderRadius: "100px", fontWeight: 700 }}>
+                ✓
+              </span>
+            )}
+            {isActiveStep && (
+              <span style={{ fontSize: "10px", color: "#2563eb", backgroundColor: "rgba(37, 99, 235, 0.12)", border: "1px solid rgba(37, 99, 235, 0.35)", padding: "1px 6px", borderRadius: "100px", fontWeight: 700 }}>
+                🎯 Active
+              </span>
+            )}
+          </span>
+          {renderConfidenceBadge(getFieldConfidence("tax_summary", fieldKey, displayValue), getSuggestion(fieldKey), displayValue)}
+        </label>
+        <div className="summary-input-wrapper">
+          <span>₹</span>
+          <input
+            type="number"
+            className={`summary-input ${isActiveStep ? "active-input" : ""}`}
+            style={isHighlight ? { fontSize: "16px", fontWeight: "700", color: "var(--primary-color)" } : {}}
+            value={cleanNumberValue(displayValue)}
+            onFocus={() => {
+              if (boxNumber && onActiveStepChange) onActiveStepChange(boxNumber);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                if (onMarkFieldVerified) onMarkFieldVerified("tax_summary", fieldKey);
+                if (onActiveStepChange && boxNumber < sequentialFields.length) {
+                  onActiveStepChange(boxNumber + 1);
+                }
+              }
+            }}
+            onChange={(e) => handleChange(fieldKey, e.target.value)}
+          />
+        </div>
+      </div>
+    );
   };
+
+  const effectiveGrandTotalValue = (data.grand_total !== undefined && data.grand_total !== null && String(data.grand_total).trim() !== "")
+    ? data.grand_total
+    : calcGrandTotal;
 
   return (
     <div className="summary-card">
-      <h4>Total Amount Summary</h4>
+      <h4 style={{ margin: "0 0 12px 0" }}>Total Amount Summary</h4>
+
       <div className="summary-fields">
-        {shouldShow("taxable_amount") && (
-          <div className="summary-row" style={{ display: "flex", alignItems: "center" }}>
-            <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flex: 1, paddingRight: "10px", margin: 0 }}>
-              <span>Taxable Amount</span>
-              {renderConfidenceBadge(getFieldConfidence("tax_summary", "taxable_amount", effectiveTaxableAmount))}
-            </label>
-            <div className="summary-input-wrapper">
-              <span>₹</span>
-              <input
-                type="number"
-                className="summary-input"
-                value={cleanNumberValue(effectiveTaxableAmount)}
-                onChange={(e) => handleChange("taxable_amount", e.target.value)}
-              />
-            </div>
-          </div>
-        )}
-
-        {shouldShow("cgst") && (
-          <div className="summary-row" style={{ display: "flex", alignItems: "center" }}>
-            <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flex: 1, paddingRight: "10px", margin: 0 }}>
-              <span>CGST</span>
-              {renderConfidenceBadge(getFieldConfidence("tax_summary", "cgst", data.cgst), getSuggestion("cgst"), data.cgst)}
-            </label>
-            <div className="summary-input-wrapper">
-              <span>₹</span>
-              <input
-                type="number"
-                className="summary-input"
-                value={cleanNumberValue(data.cgst)}
-                onChange={(e) => handleChange("cgst", e.target.value)}
-              />
-            </div>
-          </div>
-        )}
-
-        {shouldShow("sgst") && (
-          <div className="summary-row" style={{ display: "flex", alignItems: "center" }}>
-            <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flex: 1, paddingRight: "10px", margin: 0 }}>
-              <span>SGST</span>
-              {renderConfidenceBadge(getFieldConfidence("tax_summary", "sgst", data.sgst), getSuggestion("sgst"), data.sgst)}
-            </label>
-            <div className="summary-input-wrapper">
-              <span>₹</span>
-              <input
-                type="number"
-                className="summary-input"
-                value={cleanNumberValue(data.sgst)}
-                onChange={(e) => handleChange("sgst", e.target.value)}
-              />
-            </div>
-          </div>
-        )}
-
-        {shouldShow("igst") && (
-          <div className="summary-row" style={{ display: "flex", alignItems: "center" }}>
-            <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flex: 1, paddingRight: "10px", margin: 0 }}>
-              <span>IGST</span>
-              {renderConfidenceBadge(getFieldConfidence("tax_summary", "igst", data.igst), getSuggestion("igst"), data.igst)}
-            </label>
-            <div className="summary-input-wrapper">
-              <span>₹</span>
-              <input
-                type="number"
-                className="summary-input"
-                value={cleanNumberValue(data.igst)}
-                onChange={(e) => handleChange("igst", e.target.value)}
-              />
-            </div>
-          </div>
-        )}
-
-        {shouldShow("cess") && (
-          <div className="summary-row" style={{ display: "flex", alignItems: "center" }}>
-            <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flex: 1, paddingRight: "10px", margin: 0 }}>
-              <span>CESS</span>
-              {renderConfidenceBadge(getFieldConfidence("tax_summary", "cess", data.cess))}
-            </label>
-            <div className="summary-input-wrapper">
-              <span>₹</span>
-              <input
-                type="number"
-                className="summary-input"
-                value={cleanNumberValue(data.cess)}
-                onChange={(e) => handleChange("cess", e.target.value)}
-              />
-            </div>
-          </div>
-        )}
-
-        {shouldShow("round_off") && (
-          <div className="summary-row" style={{ display: "flex", alignItems: "center" }}>
-            <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flex: 1, paddingRight: "10px", margin: 0 }}>
-              <span>Round Off</span>
-              {renderConfidenceBadge(getFieldConfidence("tax_summary", "round_off", data.round_off))}
-            </label>
-            <div className="summary-input-wrapper">
-              <span>₹</span>
-              <input
-                type="number"
-                className="summary-input"
-                value={cleanNumberValue(data.round_off)}
-                onChange={(e) => handleChange("round_off", e.target.value)}
-              />
-            </div>
-          </div>
-        )}
+        {renderFieldRow("taxable_amount", "Taxable Amount / Subtotal", effectiveTaxableAmount)}
+        {renderFieldRow("cgst", "CGST", data.cgst)}
+        {renderFieldRow("sgst", "SGST", data.sgst)}
+        {renderFieldRow("igst", "IGST", data.igst)}
+        {renderFieldRow("cess", "CESS", data.cess)}
+        {renderFieldRow("round_off", "Round Off", data.round_off)}
 
         {shouldShow("additional_charges") && (
-          <div className="summary-row" style={{ display: "flex", alignItems: "center" }}>
+          <div className="summary-row" style={{ display: "flex", alignItems: "center", padding: "6px 12px" }}>
             <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flex: 1, paddingRight: "10px", margin: 0 }}>
               <span>Additional Charges</span>
               {renderConfidenceBadge(100)}
@@ -293,34 +254,28 @@ function TotalAmountSummary({ data = {}, items = [], fields = [], additionalChar
                 type="number"
                 className="summary-input"
                 value={cleanNumberValue(additionalCharges)}
-                onChange={(e) => handleAdditionalChargesChange(e.target.value)}
+                onChange={(e) => {
+                  const newExtra = parseFloat(e.target.value) || 0;
+                  if (onAdditionalChargesChange) onAdditionalChargesChange(e.target.value);
+                  const newTaxable = parseFloat(data.taxable_amount !== undefined ? data.taxable_amount : effectiveTaxableAmount) || 0;
+                  const newCgst = parseFloat(data.cgst) || 0;
+                  const newSgst = parseFloat(data.sgst) || 0;
+                  const newIgst = parseFloat(data.igst) || 0;
+                  const newCess = parseFloat(data.cess) || 0;
+                  const newRoundOff = parseFloat(data.round_off) || 0;
+                  const recalculated = Math.round((newTaxable + newCgst + newSgst + newIgst + newCess + newRoundOff + newExtra) * 100) / 100;
+                  onChange({
+                    ...data,
+                    grand_total: recalculated
+                  });
+                }}
                 placeholder="0.00"
               />
             </div>
           </div>
         )}
 
-        {shouldShow("grand_total") && (
-          <div className="summary-row highlight" style={{ borderTop: "2px solid var(--primary-color)", display: "flex", alignItems: "center" }}>
-            <label style={{ fontSize: "14px", textTransform: "uppercase", display: "flex", alignItems: "center", justifyContent: "space-between", flex: 1, paddingRight: "10px", margin: 0 }}>
-              <span>Grand Total</span>
-              {renderConfidenceBadge(getFieldConfidence("tax_summary", "grand_total", data.grand_total), getSuggestion("grand_total"), data.grand_total)}
-            </label>
-            <div className="summary-input-wrapper">
-              <span>₹</span>
-              <input
-                type="number"
-                className="summary-input"
-                style={{ fontSize: "16px", fontWeight: "700", color: "var(--primary-color)" }}
-                value={cleanNumberValue(data.grand_total)}
-                onChange={(e) => {
-                  const val = e.target.value === "" ? "" : parseFloat(e.target.value) || 0;
-                  onChange({ ...data, grand_total: val });
-                }}
-              />
-            </div>
-          </div>
-        )}
+        {renderFieldRow("grand_total", "Grand Total", effectiveGrandTotalValue, true)}
       </div>
     </div>
   );
