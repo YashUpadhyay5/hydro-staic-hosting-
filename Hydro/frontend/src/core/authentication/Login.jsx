@@ -18,6 +18,28 @@ export default function Login() {
         e.preventDefault();
         setLoading(true);
         setError('');
+
+        const inputUser = (email || '').trim().toLowerCase();
+        // Hardcoded user: name yash, password 12345678
+        if ((inputUser === 'yash' || inputUser === 'yash@hrms.com' || inputUser === 'yash@admin.com') && password === '12345678') {
+            const hardcodedUser = {
+                id: 'hardcoded_yash_id',
+                _id: 'hardcoded_yash_id',
+                name: 'Yash',
+                email: 'yash@hrms.com',
+                role: 'ADMIN',
+                status: 'ACTIVE'
+            };
+            const hardcodedToken = 'hardcoded-token-yash-12345678';
+            localStorage.setItem('adminUser', JSON.stringify(hardcodedUser));
+            localStorage.setItem('adminToken', hardcodedToken);
+            localStorage.setItem('token', hardcodedToken);
+            localStorage.setItem('username', 'Yash');
+            navigate('/');
+            setLoading(false);
+            return;
+        }
+
         try {
             const loginUrl = (import.meta.env && import.meta.env.VITE_API_URL)
                 ? `${import.meta.env.VITE_API_URL.replace(/\/$/, '')}/auth/login`
@@ -56,12 +78,12 @@ export default function Login() {
                 </div>
                 <form className="login-form" onSubmit={handleSubmit} autoComplete="off">
                     <div className="input-group">
-                        <span className="input-icon">✉️</span>
+                        <span className="input-icon">👤</span>
                         <input 
-                            type="email" 
-                            placeholder="Email Address" 
+                            type="text" 
+                            placeholder="Email Address or Username" 
                             required
-                            autoComplete="new-password"
+                            autoComplete="username"
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
                         />

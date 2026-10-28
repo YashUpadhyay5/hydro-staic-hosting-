@@ -168,7 +168,7 @@ export default function LeavesView({ employees = [], activeEmployees, onOpenBala
     }, [filteredLeaves, startIndex, endIndex]);
 
     return (
-        <div id="leaves-view" className="view active" style={{ height: '100%', minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: '16px', overflow: 'hidden' }}>
+        <div id="leaves-view" className="view active" style={{ minHeight: '100%', flex: 1, display: 'flex', flexDirection: 'column', gap: '16px' }}>
             {/* Toolbar: Filters & Search */}
             <div className="glass" style={{ padding: '16px 20px', display: 'flex', flexWrap: 'wrap', gap: '15px', alignItems: 'flex-end', justifyContent: 'space-between', flexShrink: 0 }}>
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
@@ -345,6 +345,7 @@ export default function LeavesView({ employees = [], activeEmployees, onOpenBala
 
             {/* Table Container */}
             <div className="table-container glass custom-scrollbar" style={{ padding: 0, flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'auto', borderRadius: '16px' }}>
+                <div className="desktop-table-view">
                 <table id="leaves-table">
                     <thead>
                         <tr>
@@ -403,6 +404,73 @@ export default function LeavesView({ employees = [], activeEmployees, onOpenBala
                         )}
                     </tbody>
                 </table>
+                </div>
+
+                {/* Mobile Leave Cards */}
+                <div className="mobile-cards-only" style={{ padding: '8px 12px' }}>
+                    {loading && paginatedLeaves.length === 0 ? (
+                        <LoadingSpinner message="Fetching Leave Requests..." minHeight="180px" />
+                    ) : error && paginatedLeaves.length === 0 ? (
+                        <div className="error-text" style={{ textAlign: 'center', padding: '30px' }}>Failed to load leaves</div>
+                    ) : paginatedLeaves.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af' }}>No leave requests found.</div>
+                    ) : (
+                        paginatedLeaves.map(leave => {
+                            const { empCode, empName } = getEmployeeDisplayInfo(leave);
+                            const isPending = String(leave.status || '').toLowerCase() === 'pending';
+                            return (
+                                <div key={leave.id} className="mobile-record-card">
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                        <div>
+                                            <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{empName}</h4>
+                                            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{empCode} • Applied: {formatDate(leave.appliedAt)}</span>
+                                        </div>
+                                        <span className={`badge-status badge-${String(leave.status || '').toLowerCase()}`}>
+                                            {String(leave.status || '').toUpperCase()}
+                                        </span>
+                                    </div>
+
+                                    <div style={{ background: 'var(--input-bg, #f8fafc)', padding: '8px 12px', borderRadius: '8px', fontSize: '12px' }}>
+                                        <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '2px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                            <i className="fa-solid fa-calendar-days" style={{ color: '#2563eb' }}></i>
+                                            {formatDate(leave.startDate)} – {formatDate(leave.endDate)}
+                                        </div>
+                                        <div style={{ color: 'var(--text-secondary)', fontSize: '11.5px' }}>
+                                            {leave.reason || 'No reason provided'}
+                                        </div>
+                                    </div>
+
+                                    {leave.actionBy && !isPending && (
+                                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                                            Processed by: <b>{leave.actionBy}</b>
+                                        </div>
+                                    )}
+
+                                    {isPending && !isTrackingManager && (
+                                        <div style={{ display: 'flex', gap: '8px', paddingTop: '6px', borderTop: '1px solid var(--border-glass, #e2e8f0)' }}>
+                                            <button 
+                                                type="button"
+                                                className="btn btn-success" 
+                                                onClick={() => handleUpdateStatus(leave.id, 'approved')}
+                                                style={{ flex: 1, minHeight: '40px', borderRadius: '8px', fontSize: '13px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                                            >
+                                                <i className="fa-solid fa-check"></i> Approve
+                                            </button>
+                                            <button 
+                                                type="button"
+                                                className="btn btn-danger" 
+                                                onClick={() => handleUpdateStatus(leave.id, 'rejected')}
+                                                style={{ flex: 1, minHeight: '40px', borderRadius: '8px', fontSize: '13px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                                            >
+                                                <i className="fa-solid fa-xmark"></i> Reject
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })
+                    )}
+                </div>
 
                 {/* Pagination Footer */}
                 {totalItems > 0 && (

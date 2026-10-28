@@ -248,8 +248,8 @@ export default function MediaView({ employees = [] }) {
     };
 
     return (
-        <div id="media-view" className="view active" style={{ height: '100%', minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: '16px', overflow: 'hidden' }}>
-            <div className="view-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+        <div id="media-view" className="view active" style={{ minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div className="view-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', flexShrink: 0 }}>
                 <h2>Geotagged Photos & Clusters</h2>
                 
                 {/* Tab buttons */}

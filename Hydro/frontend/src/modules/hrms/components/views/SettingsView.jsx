@@ -260,7 +260,7 @@ export default function SettingsView() {
       )}
 
       {/* 4 STRIPE-STYLE KPI SUMMARY CARDS IN ONE ROW */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '20px', marginBottom: '32px' }}>
+      <div className="kpi-grid-mobile" style={{ marginBottom: '24px' }}>
         
         {/* Card 1: Attendance Policy */}
         <div className="glass" style={{ background: 'var(--bg-glass)', borderRadius: '16px', padding: '20px 24px', border: '1px solid var(--border-glass)', boxShadow: 'var(--shadow-sm)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
@@ -323,7 +323,7 @@ export default function SettingsView() {
       </div>
 
       {/* SYMMETRICAL EQUAL-WIDTH 3-COLUMN DESKTOP GRID LAYOUT (1fr 1fr 1fr) */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '24px', alignItems: 'stretch' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px', alignItems: 'stretch' }}>
         
         {/* LEFT COLUMN: SHIFT ENGINE & ATTENDANCE POLICY */}
         <div className="glass" style={{ background: 'var(--bg-glass)', borderRadius: '16px', padding: '28px', border: '1px solid var(--border-glass)', boxShadow: 'var(--shadow-sm)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
@@ -619,7 +619,7 @@ export default function SettingsView() {
                 <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px' }}>
                   Location Update Interval
                 </label>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '4px', background: 'var(--input-bg)', padding: '4px', borderRadius: '10px', border: '1px solid var(--border-glass)' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(60px, 1fr))', gap: '4px', background: 'var(--input-bg)', padding: '4px', borderRadius: '10px', border: '1px solid var(--border-glass)', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
                   {[
                     { val: '10 Seconds', label: '10s', badge: 'Ultra' },
                     { val: '30 Seconds', label: '30s', badge: 'Realtime' },

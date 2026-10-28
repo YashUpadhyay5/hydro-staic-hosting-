@@ -23,7 +23,7 @@ const prefetchViewChunk = (viewId) => {
     }
 };
 
-export default function Sidebar({ adminUser, currentView, trackingOrigin, onViewChange, onLogout, isSidebarOpen, isCollapsed, onToggleCollapse, badgeCounts = {} }) {
+export default function Sidebar({ adminUser, currentView, trackingOrigin, onViewChange, onLogout, isSidebarOpen, isCollapsed, onToggleCollapse, badgeCounts = {}, onClose }) {
     const [isHovered, setIsHovered] = React.useState(false);
     
     const navSections = [
@@ -38,9 +38,9 @@ export default function Sidebar({ adminUser, currentView, trackingOrigin, onView
             title: 'CORE HRMS',
             items: [
                 { id: 'dashboard-view', label: 'Dashboard', icon: 'fa-chart-pie' },
-                { id: 'employees-view', label: 'Employees', icon: 'fa-users' },
+                { id: 'employees-view', label: 'Employees', icon: 'fa-user-group' },
                 { id: 'attendance-view', label: 'Attendance', icon: 'fa-clock-rotate-left' },
-                { id: 'leaves-view', label: 'Leaves', icon: 'fa-calendar-minus' },
+                { id: 'leaves-view', label: 'Leaves', icon: 'fa-calendar-days' },
                 { id: 'expenses-view', label: 'Expenses', icon: 'fa-file-invoice-dollar' },
                 { id: 'payroll-view', label: 'Payroll', icon: 'fa-money-check-dollar' }
             ]
@@ -51,22 +51,22 @@ export default function Sidebar({ adminUser, currentView, trackingOrigin, onView
                 { id: 'live-tracking-view', label: 'Live Tracking', icon: 'fa-location-dot' },
                 { id: 'route-replay-view', label: 'Route Replay', icon: 'fa-route' },
                 { id: 'geofence-view', label: 'Geofence', icon: 'fa-draw-polygon' },
-                { id: 'site-info-view', label: 'Site Info', icon: 'fa-map-location-dot' }
+                { id: 'site-info-view', label: 'Site Info', icon: 'fa-city' }
             ]
         },
         {
             title: 'ORGANIZATION',
             items: [
-                { id: 'documents-view', label: 'Documents', icon: 'fa-folder-open' },
+                { id: 'documents-view', label: 'Documents', icon: 'fa-folder' },
                 { id: 'media-view', label: 'Photos & Media', icon: 'fa-images' },
                 { id: 'notifications-view', label: 'Notification Center', icon: 'fa-bell' },
                 { id: 'whatsapp-settings-view', label: 'WhatsApp Summary', icon: 'fa-comment-dots' },
-                { id: 'settings-view', label: 'Settings', icon: 'fa-sliders' }
+                { id: 'settings-view', label: 'Settings', icon: 'fa-sliders', isDesktopOnly: true }
             ]
         }
     ];
 
-    const isExpanded = !isCollapsed || isHovered;
+    const isExpanded = isSidebarOpen || !isCollapsed || isHovered;
 
     // Determine parent route if viewing employee-tracking-view
     const effectiveActiveView = currentView === 'employee-tracking-view'
@@ -93,7 +93,7 @@ export default function Sidebar({ adminUser, currentView, trackingOrigin, onView
             className={`sidebar glass ${isSidebarOpen ? 'open' : ''} ${isCollapsed ? 'collapsed' : ''} ${isHovered ? 'hover-expanded' : ''}`} 
             onMouseEnter={() => setIsHovered(true)}
             onMouseLeave={() => setIsHovered(false)}
-            style={{ position: 'relative', overflow: 'visible' }}
+            style={{ overflow: 'visible' }}
         >
             {/* Smooth Floating Collapse Button */}
             <div 
@@ -125,20 +125,40 @@ export default function Sidebar({ adminUser, currentView, trackingOrigin, onView
                 </svg>
             </div>
 
-            {/* Sidebar Brand Header */}
-            <div className="sidebar-header" style={{ justifyContent: !isExpanded ? 'center' : 'flex-start', padding: !isExpanded ? '10px 0' : '10px 12px', gap: '8px', borderBottom: '1px solid var(--border-glass)', minHeight: '46px' }}>
-                <div style={{ width: '28px', height: '28px', borderRadius: '7px', background: isTrackingManager ? '#d97706' : isFieldInvoiceManager ? '#059669' : '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 5px rgba(37, 99, 235, 0.2)', flexShrink: 0 }}>
-                    <i className={`fa-solid ${isNonAdminManager ? 'fa-user-shield' : 'fa-building-user'}`} style={{ fontSize: '13px', color: '#ffffff' }}></i>
+            {/* Sidebar Brand Header (Matches Mobile Mockup) */}
+            <div className="sidebar-header" style={{ justifyContent: !isExpanded ? 'center' : 'flex-start', padding: !isExpanded ? '10px 0' : '12px 14px', gap: '10px', borderBottom: '1px solid var(--border-glass)', minHeight: '52px' }}>
+                <div style={{ width: '32px', height: '32px', borderRadius: '10px', background: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgba(37, 99, 235, 0.25)', flexShrink: 0 }}>
+                    <i className="fa-solid fa-building-user" style={{ fontSize: '15px', color: '#ffffff' }}></i>
                 </div>
                 {isExpanded && (
-                    <div style={{ minWidth: 0 }}>
-                        <h2 style={{ fontSize: '12.5px', fontWeight: 700, margin: 0, color: 'var(--text-primary)', letterSpacing: '-0.1px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {isTrackingManager ? 'Tracking Manager' : isFieldInvoiceManager ? 'Field & Invoice' : 'HRMS Suite'}
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                        <h2 style={{ fontSize: '15px', fontWeight: 700, margin: 0, color: 'var(--text-primary)', letterSpacing: '-0.2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            HRMS Suite
                         </h2>
-                        <span style={{ fontSize: '9px', fontWeight: 700, color: isTrackingManager ? '#d97706' : isFieldInvoiceManager ? '#059669' : '#2563eb', textTransform: 'uppercase', letterSpacing: '0.4px', display: 'block', marginTop: '1px' }}>
-                            {isTrackingManager ? 'Operations' : isFieldInvoiceManager ? 'Field Ops' : 'Enterprise'}
+                        <span style={{ fontSize: '9px', fontWeight: 700, color: '#2563eb', letterSpacing: '0.8px', textTransform: 'uppercase', display: 'block', marginTop: '1px' }}>
+                            ENTERPRISE
                         </span>
                     </div>
+                )}
+                {onClose && (
+                    <button 
+                        type="button" 
+                        onClick={onClose} 
+                        className="sidebar-mobile-close-btn"
+                        aria-label="Close menu"
+                        style={{
+                            marginLeft: 'auto',
+                            background: 'transparent',
+                            border: 'none',
+                            color: 'var(--text-muted, #64748b)',
+                            fontSize: '18px',
+                            cursor: 'pointer',
+                            padding: '4px 8px',
+                            display: 'none'
+                        }}
+                    >
+                        <i className="fa-solid fa-xmark"></i>
+                    </button>
                 )}
             </div>
 
@@ -170,9 +190,10 @@ export default function Sidebar({ adminUser, currentView, trackingOrigin, onView
                                 if (item.isExternal) {
                                     return (
                                         <Link 
-                                            key={item.id}
+                                            key={item.id} 
                                             to={item.path} 
-                                            className="nav-item"
+                                            className={`nav-item ${item.isDesktopOnly ? 'desktop-only-inline' : ''}`} 
+                                            onClick={() => onClose && onClose()}
                                             title={!isExpanded ? item.label : undefined}
                                         >
                                             <div className="nav-icon-box" style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -185,6 +206,15 @@ export default function Sidebar({ adminUser, currentView, trackingOrigin, onView
                                                             top: '-5px',
                                                             right: '-7px',
                                                             background: badgeTheme.bg,
+                                                            color: '#ffffff',
+                                                            width: '14px',
+                                                            height: '14px',
+                                                            borderRadius: '50%',
+                                                            display: 'inline-flex',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'center',
+                                                            fontSize: '9px',
+                                                            fontWeight: 700,
                                                             boxShadow: `0 2px 5px ${badgeTheme.shadow}`
                                                         }}
                                                     >
@@ -197,8 +227,19 @@ export default function Sidebar({ adminUser, currentView, trackingOrigin, onView
                                                 <span 
                                                     className="nav-badge-pill"
                                                     style={{
+                                                        marginLeft: 'auto',
                                                         background: badgeTheme.bg,
-                                                        boxShadow: `0 2px 5px ${badgeTheme.shadow}`
+                                                        color: '#ffffff',
+                                                        fontSize: '11px',
+                                                        fontWeight: 700,
+                                                        width: '18px',
+                                                        height: '18px',
+                                                        borderRadius: '50%',
+                                                        display: 'inline-flex',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'center',
+                                                        boxShadow: `0 2px 5px ${badgeTheme.shadow}`,
+                                                        flexShrink: 0
                                                     }}
                                                 >
                                                     {badgeCount > 99 ? '99+' : badgeCount}
@@ -208,16 +249,18 @@ export default function Sidebar({ adminUser, currentView, trackingOrigin, onView
                                     );
                                 }
 
-                                const isActive = currentView === item.id || item.id === effectiveActiveView;
+                                const targetViewId = item.targetView || item.id;
+                                const isActive = currentView === targetViewId || item.id === effectiveActiveView || targetViewId === effectiveActiveView;
                                 return (
                                     <a 
                                         key={item.id}
                                         href="#" 
-                                        className={`nav-item ${isActive ? 'active' : ''}`}
-                                        onMouseEnter={() => prefetchViewChunk(item.id)}
+                                        className={`nav-item ${isActive ? 'active' : ''} ${item.isDesktopOnly ? 'desktop-only-inline' : ''}`}
+                                        onMouseEnter={() => prefetchViewChunk(targetViewId)}
                                         onClick={(e) => {
                                             e.preventDefault();
-                                            onViewChange(item.id);
+                                            onViewChange(targetViewId);
+                                            if (onClose) onClose();
                                         }}
                                         title={!isExpanded ? item.label : undefined}
                                     >
@@ -231,6 +274,15 @@ export default function Sidebar({ adminUser, currentView, trackingOrigin, onView
                                                         top: '-5px',
                                                         right: '-7px',
                                                         background: badgeTheme.bg,
+                                                        color: '#ffffff',
+                                                        width: '14px',
+                                                        height: '14px',
+                                                        borderRadius: '50%',
+                                                        display: 'inline-flex',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'center',
+                                                        fontSize: '9px',
+                                                        fontWeight: 700,
                                                         boxShadow: `0 2px 5px ${badgeTheme.shadow}`
                                                     }}
                                                 >
@@ -243,8 +295,19 @@ export default function Sidebar({ adminUser, currentView, trackingOrigin, onView
                                             <span 
                                                 className="nav-badge-pill"
                                                 style={{
+                                                    marginLeft: 'auto',
                                                     background: badgeTheme.bg,
-                                                    boxShadow: `0 2px 5px ${badgeTheme.shadow}`
+                                                    color: '#ffffff',
+                                                    fontSize: '11px',
+                                                    fontWeight: 700,
+                                                    width: '18px',
+                                                    height: '18px',
+                                                    borderRadius: '50%',
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    boxShadow: `0 2px 5px ${badgeTheme.shadow}`,
+                                                    flexShrink: 0
                                                 }}
                                             >
                                                 {badgeCount > 99 ? '99+' : badgeCount}
@@ -258,20 +321,20 @@ export default function Sidebar({ adminUser, currentView, trackingOrigin, onView
                 })}
             </nav>
 
-            {/* Compact Footer Profile Card */}
-            <div className="sidebar-footer" style={{ padding: '8px 10px', borderTop: '1px solid var(--border-glass)', background: 'var(--bg-glass)', borderBottomLeftRadius: '12px', borderBottomRightRadius: '12px' }}>
-                <div className="admin-profile" style={{ display: 'flex', alignItems: 'center', justifyContent: !isExpanded ? 'center' : 'space-between', gap: '8px', margin: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-                        <div className="avatar" style={{ width: '28px', height: '28px', fontSize: '11px', flexShrink: 0 }}>
-                            <i className={`fa-solid ${isNonAdminManager ? 'fa-user-shield' : 'fa-user-tie'}`} style={{ color: 'white' }}></i>
+            {/* Compact Footer Profile Card (Matches Mobile Mockup) */}
+            <div className="sidebar-footer" style={{ padding: '12px 14px', borderTop: '1px solid var(--border-glass)', background: 'var(--bg-glass)' }}>
+                <div className="admin-profile" style={{ display: 'flex', alignItems: 'center', justifyContent: !isExpanded ? 'center' : 'space-between', gap: '10px', margin: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                        <div className="avatar" style={{ width: '34px', height: '34px', borderRadius: '50%', background: '#2563eb', color: '#ffffff', fontSize: '12.5px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                            {adminUser?.name ? adminUser.name.substring(0, 3).toUpperCase() : 'AA1'}
                         </div>
                         {isExpanded && (
                             <div className="admin-info" style={{ minWidth: 0 }}>
-                                <span id="admin-name" style={{ fontSize: '11.5px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>
-                                    {adminUser?.name || (isTrackingManager ? 'Tracking Mgr' : isFieldInvoiceManager ? 'Field Mgr' : 'Admin')}
+                                <span id="admin-name" style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>
+                                    {adminUser?.name || 'AA1'}
                                 </span>
-                                <span className="role-badge" style={{ fontSize: '8px', padding: '1px 5px', background: isTrackingManager ? '#d97706' : isFieldInvoiceManager ? '#059669' : undefined }}>
-                                    {isTrackingManager ? 'TRACKING' : isFieldInvoiceManager ? 'FIELD' : 'ADMIN'}
+                                <span style={{ fontSize: '10.5px', color: 'var(--text-muted, #64748b)', fontWeight: 600, display: 'block' }}>
+                                    Admin
                                 </span>
                             </div>
                         )}
@@ -284,19 +347,19 @@ export default function Sidebar({ adminUser, currentView, trackingOrigin, onView
                             style={{
                                 background: 'transparent',
                                 border: 'none',
-                                color: '#94a3b8',
+                                color: 'var(--text-muted, #64748b)',
                                 cursor: 'pointer',
-                                padding: '4px',
-                                borderRadius: '4px',
+                                padding: '6px',
+                                borderRadius: '8px',
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
                                 transition: 'color 0.15s ease'
                             }}
                             onMouseEnter={(e) => e.currentTarget.style.color = '#dc2626'}
-                            onMouseLeave={(e) => e.currentTarget.style.color = '#94a3b8'}
+                            onMouseLeave={(e) => e.currentTarget.style.color = '#64748b'}
                         >
-                            <i className="fa-solid fa-arrow-right-from-bracket" style={{ fontSize: '12px' }}></i>
+                            <i className="fa-solid fa-arrow-right-from-bracket" style={{ fontSize: '16px' }}></i>
                         </button>
                     )}
                 </div>

@@ -125,7 +125,7 @@ export default function LeaveBalancesView({ onOpenEmployee, onBackToRequests }) 
                 )}
             </div>
 
-            <div className="glass lb-table-wrap custom-scrollbar">
+            <div className="glass lb-table-wrap custom-scrollbar desktop-table-view">
                 <table className="lb-table">
                     <thead>
                         <tr>
@@ -192,7 +192,73 @@ export default function LeaveBalancesView({ onOpenEmployee, onBackToRequests }) 
                     </tbody>
                 </table>
 
-                {result && result.total > 0 && (
+                
+            {/* Mobile Cards Only View */}
+            <div className="mobile-cards-only" style={{ display: 'none', flexDirection: 'column', gap: '10px', marginBottom: '12px' }}>
+                {loading && !rows.length ? (
+                    <div className="card glass" style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                        Loading leave balances...
+                    </div>
+                ) : error ? (
+                    <div className="card glass" style={{ padding: '20px', textAlign: 'center' }}>
+                        <div className="lb-error-text" role="alert" style={{ marginBottom: 10 }}>{error}</div>
+                        <button className="lb-btn" onClick={() => setReloadToken((n) => n + 1)}>Retry</button>
+                    </div>
+                ) : rows.length === 0 ? (
+                    <div className="card glass" style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                        No active employees match these filters.
+                    </div>
+                ) : (
+                    rows.map((row) => (
+                        <div 
+                            key={row.employeeId} 
+                            className="mobile-record-card" 
+                            onClick={() => open(row)} 
+                            style={{ cursor: 'pointer', padding: '14px', borderRadius: '12px', background: 'var(--panel-bg)', border: '1px solid var(--border-glass)', display: 'flex', flexDirection: 'column', gap: '10px' }}
+                        >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                    <Avatar name={row.name} photo={row.profilePhoto} />
+                                    <div>
+                                        <div style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--text-primary)' }}>{row.name}</div>
+                                        <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
+                                            <span style={{ color: '#2563eb', fontWeight: 600 }}>{row.empCode}</span> {row.department ? '· ' + row.department : ''}
+                                        </div>
+                                    </div>
+                                </div>
+                                <button className="lb-link" onClick={(e) => { e.stopPropagation(); open(row); }}>
+                                    Details <i className="fa-solid fa-chevron-right" style={{ fontSize: '0.7rem' }}></i>
+                                </button>
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', background: 'var(--input-bg)', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border-glass)' }}>
+                                <div>
+                                    <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 600, display: 'block' }}>CONSUMED LEAVE</span>
+                                    <strong className="lb-num lb-red" style={{ fontSize: '1rem' }}>{fmtDays(row.consumedLeave)}</strong>
+                                </div>
+                                <div>
+                                    <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 600, display: 'block' }}>REMAINING LEAVE</span>
+                                    <strong className="lb-num lb-green" style={{ fontSize: '1rem' }}>{fmtDays(row.remainingLeave)}</strong>
+                                </div>
+                            </div>
+
+                            {row.remainingSpecial > 0 && (
+                                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                                    EL {fmtDays(row.remainingEl)} · <span className="lb-purple" style={{ fontWeight: 600 }}>Sun/Hol {fmtDays(row.remainingSpecial)}</span>
+                                </div>
+                            )}
+
+                            {row.registerChanges > 0 && (
+                                <div className="lb-register-flag" style={{ fontSize: '0.72rem' }}>
+                                    <i className="fa-solid fa-triangle-exclamation"></i> {row.registerChanges} differ{row.registerChanges === 1 ? 's' : ''} from register
+                                </div>
+                            )}
+                        </div>
+                    ))
+                )}
+            </div>
+
+            {result && result.total > 0 && (
                     <div className="lb-pagination">
                         <span>{from}–{to} of {result.total}</span>
                         <div style={{ display: 'flex', gap: 8 }}>

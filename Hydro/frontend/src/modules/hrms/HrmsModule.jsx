@@ -152,6 +152,15 @@ function App() {
         'notifications-view': 0
     });
 
+    const userInitials = React.useMemo(() => {
+        const name = (adminUser?.name || 'Admin').trim();
+        const parts = name.split(/\s+/);
+        if (parts.length >= 2) {
+            return (parts[0][0] + parts[1][0]).toUpperCase();
+        }
+        return name.substring(0, 2).toUpperCase() || 'AD';
+    }, [adminUser?.name]);
+
     useEffect(() => {
         if (theme === 'dark') {
             document.body.classList.add('dark-theme');
@@ -427,13 +436,49 @@ function App() {
                         return next;
                     });
                 }}
+                onClose={() => setIsSidebarOpen(false)}
             />
-            <main className="main-content" style={{ overflow: 'hidden', height: '100vh', display: 'flex', flexDirection: 'column' }}>
+            <main className="main-content" style={{ display: 'flex', flexDirection: 'column' }}>
                 <header className="top-header glass" style={{ flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', top: 0, zIndex: 100, background: 'var(--panel-bg)', boxShadow: '0 1px 4px rgba(0,0,0,0.03)', margin: '0 0 10px 0', borderRadius: '10px', padding: '6px 14px', minHeight: '46px' }}>
-                    <div className="header-left">
+                    {/* Desktop Header Left */}
+                    <div className="header-left desktop-header-title">
                         <h1 id="current-view-title" style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-primary)' }}>{getViewTitle()}</h1>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+
+                    {/* Mobile Header Bar (Matches Mobile Mockup) */}
+                    <div className="mobile-header-bar">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <button 
+                                type="button"
+                                className="mobile-hamburger-btn"
+                                onClick={() => setIsSidebarOpen(true)}
+                                aria-label="Open Navigation Menu"
+                            >
+                                <i className="fa-solid fa-bars"></i>
+                            </button>
+                            <div className="mobile-brand-pill" onClick={() => navigateToView('dashboard-view')} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <div className="mobile-brand-icon">
+                                    <i className="fa-solid fa-building-user"></i>
+                                </div>
+                                <div className="mobile-brand-text">
+                                    <span className="mobile-brand-title">HRMS Suite</span>
+                                    <span className="mobile-brand-sub">ENTERPRISE</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="mobile-header-right">
+                            <div 
+                                className="mobile-avatar-pill" 
+                                onClick={() => setIsSidebarOpen(true)}
+                                title={adminUser?.name || 'Admin'}
+                            >
+                                {adminUser?.name ? adminUser.name.charAt(0).toUpperCase() : 'A'}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Desktop Header Actions */}
+                    <div className="desktop-header-actions" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                         <button 
                             onClick={toggleTheme}
                             style={{
@@ -549,6 +594,53 @@ function App() {
                         {currentView === 'settings-view' && <SettingsView />}
                     </React.Suspense>
                 </div>
+                {/* Persistent Mobile Bottom Navigation */}
+                <nav className="mobile-bottom-nav" aria-label="Mobile Navigation">
+                    <button 
+                        type="button"
+                        className={`mobile-nav-btn ${currentView === 'dashboard-view' ? 'active' : ''}`}
+                        onClick={() => navigateToView('dashboard-view')}
+                    >
+                        <span className="mobile-nav-icon"><i className="fa-solid fa-chart-pie"></i></span>
+                        <span>Dashboard</span>
+                    </button>
+                    <button 
+                        type="button"
+                        className={`mobile-nav-btn ${currentView === 'attendance-view' ? 'active' : ''}`}
+                        onClick={() => navigateToView('attendance-view')}
+                    >
+                        <span className="mobile-nav-icon"><i className="fa-solid fa-calendar-check"></i></span>
+                        <span>Attendance</span>
+                    </button>
+                    <button 
+                        type="button"
+                        className={`mobile-nav-btn ${['leaves-view', 'leave-balances-view', 'leave-balance-detail-view'].includes(currentView) ? 'active' : ''}`}
+                        onClick={() => navigateToView('leaves-view')}
+                    >
+                        <span className="mobile-nav-icon"><i className="fa-solid fa-clipboard-user"></i></span>
+                        {Number(badgeCounts['leaves-view'] || 0) > 0 && (
+                            <span className="mobile-nav-badge">{badgeCounts['leaves-view'] > 99 ? '99+' : badgeCounts['leaves-view']}</span>
+                        )}
+                        <span>Leaves</span>
+                    </button>
+                    <button 
+                        type="button"
+                        className={`mobile-nav-btn ${currentView === 'notifications-view' ? 'active' : ''}`}
+                        onClick={() => navigateToView('notifications-view')}
+                    >
+                        <span className="mobile-nav-icon"><i className="fa-solid fa-bell"></i></span>
+                        <span className="mobile-nav-badge">3</span>
+                        <span>Notifications</span>
+                    </button>
+                    <button 
+                        type="button"
+                        className={`mobile-nav-btn ${currentView === 'settings-view' ? 'active' : ''}`}
+                        onClick={() => navigateToView('settings-view')}
+                    >
+                        <span className="mobile-nav-icon"><i className="fa-solid fa-user"></i></span>
+                        <span>Profile</span>
+                    </button>
+                </nav>
             </main>
         </div>
     );

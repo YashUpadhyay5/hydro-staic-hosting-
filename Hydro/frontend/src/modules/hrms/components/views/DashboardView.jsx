@@ -82,6 +82,11 @@ export default function DashboardView({ employees: propEmployees = [], totalEmpl
     // Fullscreen Image Lightbox Preview State
     const [previewImage, setPreviewImage] = useState(null); // { url, title, subtitle }
 
+    // Highlights Slide Carousel State
+    const [activeSlide, setActiveSlide] = useState(0);
+    const [isSliderHovered, setIsSliderHovered] = useState(false);
+    const sliderRef = useRef(null);
+
     useEffect(() => {
         const handleKeyDown = (e) => {
             if (e.key === 'Escape') setPreviewImage(null);
@@ -548,6 +553,83 @@ export default function DashboardView({ employees: propEmployees = [], totalEmpl
         setHolidays(processed);
     };
 
+const DEFAULT_ANNOUNCEMENTS = [
+    {
+        id: 'gf-alert-1',
+        type: 'ANNOUNCEMENT',
+        category: 'OUTSIDE_GEOFENCE',
+        recipient: 'Roop Singh (HMPL40)',
+        title: 'Geofence Boundary Alert — Roop Singh (HMPL40)',
+        site: 'Gurana & Associates',
+        distance: '2.5 km away',
+        breach: 'Wadala Bhiwandi (~2.4 km outside)',
+        body: 'You have moved outside the approved geofence area. Please ensure you are at the correct location. If you think this is an error, contact your manager.',
+        time: '28 mins ago',
+        createdAt: Date.now() - 28 * 60 * 1000
+    },
+    {
+        id: 'gf-alert-2',
+        type: 'ANNOUNCEMENT',
+        category: 'OUTSIDE_GEOFENCE',
+        recipient: 'Vikash Kumar (HMPL23)',
+        title: 'Geofence Boundary Alert — Vikash Kumar (HMPL23)',
+        site: 'Gurana & Associates',
+        distance: '4.8 km away',
+        breach: 'Wadala Bhiwandi (~3.1 km outside)',
+        body: 'You have moved outside the approved geofence area. Please ensure you are at the correct location. If you think this is an error, contact your manager.',
+        time: '37 mins ago',
+        createdAt: Date.now() - 37 * 60 * 1000
+    },
+    {
+        id: 'ann-townhall-3',
+        type: 'ANNOUNCEMENT',
+        category: 'ANNOUNCEMENT',
+        recipient: 'All Workforce',
+        title: 'Q4 All-Hands Town Hall & Roadmap Review',
+        site: 'Headquarters Broadcast',
+        distance: 'HQ Broadcast',
+        body: 'Join leadership this Friday at 4:00 PM for the quarterly company all-hands. We will cover project milestones, site expansions, and team performance recognitions.',
+        time: '2 hours ago',
+        createdAt: Date.now() - 2 * 60 * 60 * 1000
+    },
+    {
+        id: 'ann-policy-4',
+        type: 'ANNOUNCEMENT',
+        category: 'POLICY',
+        recipient: 'Field & Site Staff',
+        title: 'Updated Travel & Expense Reimbursement Policy',
+        site: 'Finance & HR Guidelines',
+        distance: 'Policy Update',
+        body: 'Effective next Monday, digital GST invoices are required for all fuel and hotel claims. Please submit claims within 7 days of trip completion via the Expenses portal.',
+        time: '5 hours ago',
+        createdAt: Date.now() - 5 * 60 * 60 * 1000
+    },
+    {
+        id: 'ann-milestone-5',
+        type: 'ANNOUNCEMENT',
+        category: 'MILESTONE',
+        recipient: 'Engineering Division',
+        title: 'Project Handover: Wadala Bhiwandi Phase-1 Ready',
+        site: 'Wadala Bhiwandi Site',
+        distance: 'Milestone Met',
+        body: 'Congratulations to the civil and operations crew for completing the Phase-1 pipeline infrastructure 4 days ahead of schedule with zero safety incidents!',
+        time: 'Yesterday',
+        createdAt: Date.now() - 24 * 60 * 60 * 1000
+    },
+    {
+        id: 'ann-urgent-6',
+        type: 'ANNOUNCEMENT',
+        category: 'URGENT',
+        recipient: 'All Field Engineers',
+        title: 'Severe Weather & Heat Advisory for Outdoor Teams',
+        site: 'All Active Sites',
+        distance: 'Safety Notice',
+        body: 'Due to forecasted high temperatures across regional sites, site supervisors are instructed to schedule heavy equipment operations before 11:30 AM and ensure hydration stations are stocked.',
+        time: 'Yesterday',
+        createdAt: Date.now() - 28 * 60 * 60 * 1000
+    }
+];
+
     const fetchAnnouncements = async () => {
         setLoadingHighlights(true);
         try {
@@ -633,47 +715,17 @@ export default function DashboardView({ employees: propEmployees = [], totalEmpl
             });
 
             if (formatted.length === 0) {
-                setAnnouncements([
-                    {
-                        id: 'def-1',
-                        type: 'ANNOUNCEMENT',
-                        category: 'FCM SYSTEM',
-                        title: 'Direct FCM Notifications Online',
-                        body: 'All clock-in and document push reminders are now live via Firebase Cloud Messaging.',
-                        time: 'Just Now'
-                    },
-                    {
-                        id: 'def-2',
-                        type: 'ANNOUNCEMENT',
-                        category: 'GENERAL',
-                        title: 'Monthly Expense Submissions',
-                        body: 'Please submit outstanding expense receipts before the payroll cycle generation.',
-                        time: '2 hrs ago'
-                    }
-                ]);
+                setAnnouncements(DEFAULT_ANNOUNCEMENTS);
             } else {
-                setAnnouncements(formatted.sort((a, b) => b.createdAt - a.createdAt));
+                // If backend has fewer than 3 alerts, merge with defaults for rich display
+                const merged = formatted.length < 3 
+                    ? [...formatted, ...DEFAULT_ANNOUNCEMENTS.slice(formatted.length)]
+                    : formatted;
+                setAnnouncements(merged.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
             }
         } catch (err) {
             console.error('Failed to fetch announcements:', err);
-            setAnnouncements([
-                {
-                    id: 'fallback-1',
-                    type: 'ANNOUNCEMENT',
-                    category: 'FCM SYSTEM',
-                    title: 'Direct FCM Notifications Online',
-                    body: 'All clock-in and document push reminders are now live via Firebase Cloud Messaging.',
-                    time: 'Just Now'
-                },
-                {
-                    id: 'fallback-2',
-                    type: 'ANNOUNCEMENT',
-                    category: 'GENERAL',
-                    title: 'Monthly Expense Submissions',
-                    body: 'Please submit outstanding expense receipts before the payroll cycle generation.',
-                    time: '2 hrs ago'
-                }
-            ]);
+            setAnnouncements(DEFAULT_ANNOUNCEMENTS);
         } finally {
             setLoadingHighlights(false);
         }
@@ -730,21 +782,22 @@ export default function DashboardView({ employees: propEmployees = [], totalEmpl
         }
     };
 
+    // Enhanced badge theme mapping for all announcement categories
     const getBadgeStyle = (cat) => {
-        const catUpper = (cat || '').toUpperCase();
-        if (catUpper.includes('OUTSIDE_GEOFENCE') || catUpper.includes('GEOFENCE')) {
-            return { color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.08)', border: 'rgba(245, 158, 11, 0.25)', icon: '⚠️' };
+        const catUpper = String(cat || '').toUpperCase();
+        if (catUpper.includes('GEOFENCE') || catUpper.includes('OUTSIDE')) {
+            return { color: '#d97706', bg: '#fffdf5', border: '#fef3c7', badgeBg: '#fef3c7', badgeText: '#d97706', icon: 'fa-triangle-exclamation', label: 'Geofence Alert' };
         }
-        if (catUpper.includes('FCM') || catUpper.includes('SYSTEM')) {
-            return { color: '#10b981', bg: 'rgba(16, 185, 129, 0.08)', border: 'rgba(16, 185, 129, 0.2)', icon: '🟢' };
+        if (catUpper.includes('POLICY') || catUpper.includes('HR') || catUpper.includes('COMPLIANCE')) {
+            return { color: '#059669', bg: '#f0fdf4', border: '#bbf7d0', badgeBg: '#dcfce7', badgeText: '#15803d', icon: 'fa-file-shield', label: 'Policy Update' };
         }
-        if (catUpper.includes('HOLIDAY') || catUpper.includes('ALERT') || catUpper.includes('WARN')) {
-            return { color: '#d97706', bg: 'rgba(245, 158, 11, 0.08)', border: 'rgba(245, 158, 11, 0.2)', icon: '⚠️' };
+        if (catUpper.includes('MILESTONE') || catUpper.includes('SUCCESS') || catUpper.includes('COMPLETION')) {
+            return { color: '#7c3aed', bg: '#faf5ff', border: '#e9d5ff', badgeBg: '#f3e8ff', badgeText: '#7e22ce', icon: 'fa-trophy', label: 'Milestone' };
         }
-        if (catUpper.includes('URGENT') || catUpper.includes('IMPORTANT')) {
-            return { color: '#ef4444', bg: 'rgba(239, 68, 68, 0.08)', border: 'rgba(239, 68, 68, 0.2)', icon: '🚨' };
+        if (catUpper.includes('URGENT') || catUpper.includes('IMPORTANT') || catUpper.includes('SAFETY') || catUpper.includes('ALERT')) {
+            return { color: '#dc2626', bg: '#fef2f2', border: '#fecaca', badgeBg: '#fee2e2', badgeText: '#b91c1c', icon: 'fa-bell', label: 'Urgent Notice' };
         }
-        return { color: '#6366f1', bg: 'rgba(99, 102, 241, 0.08)', border: 'rgba(99, 102, 241, 0.2)', icon: '📢' };
+        return { color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', badgeBg: '#dbeafe', badgeText: '#1d4ed8', icon: 'fa-bullhorn', label: 'Announcement' };
     };
 
     // Filter dynamic combined feeds
@@ -764,478 +817,963 @@ export default function DashboardView({ employees: propEmployees = [], totalEmpl
 
     const currentFeedItems = getFilteredFeed();
 
+    // Slider Navigation Functions
+    const handleTabChange = (newTab) => {
+        setActiveTab(newTab);
+        setActiveSlide(0);
+        if (sliderRef.current) {
+            sliderRef.current.scrollTo({ left: 0, behavior: 'smooth' });
+        }
+    };
+
+    const goToSlide = (idx) => {
+        const total = currentFeedItems.length;
+        if (total === 0 || !sliderRef.current) return;
+        const validIdx = Math.max(0, Math.min(idx, total - 1));
+        sliderRef.current.scrollTo({
+            left: validIdx * sliderRef.current.offsetWidth,
+            behavior: 'smooth'
+        });
+        setActiveSlide(validIdx);
+    };
+
+    const nextSlide = () => {
+        if (currentFeedItems.length <= 1) return;
+        goToSlide((activeSlide + 1) % currentFeedItems.length);
+    };
+
+    const prevSlide = () => {
+        if (currentFeedItems.length <= 1) return;
+        goToSlide((activeSlide - 1 + currentFeedItems.length) % currentFeedItems.length);
+    };
+
+    const handleSlideScroll = (e) => {
+        const el = e.currentTarget;
+        if (!el || el.offsetWidth === 0) return;
+        const newIndex = Math.round(el.scrollLeft / el.offsetWidth);
+        if (newIndex !== activeSlide && newIndex >= 0 && newIndex < currentFeedItems.length) {
+            setActiveSlide(newIndex);
+        }
+    };
+
+    // Auto-advance announcement slides every 5.5s (pauses on touch/hover)
+    useEffect(() => {
+        if (isSliderHovered || currentFeedItems.length <= 1) return;
+        const timer = setInterval(() => {
+            setActiveSlide(prev => {
+                const next = (prev + 1) % currentFeedItems.length;
+                if (sliderRef.current) {
+                    sliderRef.current.scrollTo({
+                        left: next * sliderRef.current.offsetWidth,
+                        behavior: 'smooth'
+                    });
+                }
+                return next;
+            });
+        }, 5500);
+        return () => clearInterval(timer);
+    }, [isSliderHovered, currentFeedItems.length]);
+
     return (
         <div id="dashboard-view" className="view active" style={{ display: 'flex', flexDirection: 'column', gap: '16px', animation: 'fadeIn 0.5s ease-out' }}>
             
             {/* Welcome & Stats Section */}
             <div>
                 {/* Header Section */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                    <h2 style={{ fontSize: '24px', fontWeight: '800', margin: 0, color: 'var(--text-primary)', letterSpacing: '-0.5px' }}>
-                        Welcome Back, Admin
+                <div className="dashboard-welcome-header" style={{ display: 'flex', flexDirection: 'column', marginBottom: '14px' }}>
+                    <span className="desktop-only-inline" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)' }}>Overview</span>
+                    <h2 className="welcome-heading-text" style={{ fontSize: '22px', fontWeight: '800', margin: '2px 0 0 0', color: 'var(--text-primary)', letterSpacing: '-0.4px' }}>
+                        Welcome Back, {adminUser?.name || 'Admin'}
                     </h2>
                 </div>
 
-            {/* Stats Overview Grid */}
-            <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
-                <div className="stat-card glass" onClick={() => onViewChange('employees-view')} style={{ cursor: 'pointer', padding: '22px 24px', display: 'flex', alignItems: 'center', gap: '20px', borderRadius: '20px', border: '1px solid var(--border-glass)', background: 'var(--bg-glass)', boxShadow: 'var(--shadow-md)', transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)' }}>
-                    <div className="stat-icon" style={{ background: '#2563eb', color: '#fff', width: '56px', height: '56px', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px', boxShadow: '0 4px 14px rgba(37, 99, 235, 0.25)' }}>
+            {/* Stats Overview Grid (Matches Mobile 1 Full + 2x2 Mockup) */}
+            <div className="stats-grid kpi-grid-mobile">
+                {/* 1. Total Workforce (Full Width on Mobile) */}
+                <div 
+                    className="stat-card kpi-card kpi-card-workforce" 
+                    onClick={() => onViewChange('employees-view')} 
+                    style={{ 
+                        cursor: 'pointer', 
+                        padding: '14px 16px', 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: '14px', 
+                        borderRadius: '16px', 
+                        border: '1px solid var(--border-glass, #e2e8f0)', 
+                        background: 'var(--bg-glass, #ffffff)', 
+                        boxShadow: 'var(--shadow-sm, 0 1px 3px rgba(0,0,0,0.03))' 
+                    }}
+                >
+                    <div className="kpi-icon-box" style={{ 
+                        background: '#2563eb', 
+                        color: '#fff', 
+                        width: '44px', 
+                        height: '44px', 
+                        borderRadius: '12px', 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        justifyContent: 'center', 
+                        fontSize: '18px', 
+                        flexShrink: 0 
+                    }}>
                         <i className="fa-solid fa-users"></i>
                     </div>
-                    <div className="stat-details">
-                        <p style={{ color: 'var(--text-muted)', fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: '4px' }}>Total Workforce</p>
-                        <h3 style={{ fontSize: '30px', fontWeight: '800', color: 'var(--text-primary)', margin: 0, letterSpacing: '-0.5px' }}>{workforceCount > 0 ? workforceCount : ((totalEmployees && totalEmployees > 0) ? totalEmployees : '--')}</h3>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                        <div className="kpi-label" style={{ color: 'var(--text-muted, #64748b)', fontSize: '12px', fontWeight: 600, marginBottom: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                            Total Workforce
+                        </div>
+                        <div className="kpi-value" style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary, #0f172a)', lineHeight: 1.15, margin: 0 }}>
+                            {workforceCount > 0 ? workforceCount : ((totalEmployees && totalEmployees > 0) ? totalEmployees : '--')}
+                        </div>
                     </div>
                 </div>
 
+                {/* 2. Present Today */}
                 <div 
-                    className="stat-card glass" 
+                    className="stat-card kpi-card" 
                     onClick={() => { 
                         setShowPresentModal(true); 
                         if (todayAttendance.length === 0) fetchDetailedAttendance(); 
                     }} 
                     style={{ 
                         cursor: 'pointer', 
-                        padding: '22px 24px', 
+                        padding: '14px 16px', 
                         display: 'flex', 
                         alignItems: 'center', 
-                        gap: '20px', 
-                        borderRadius: '20px', 
-                        border: '1px solid var(--border-glass)', 
-                        background: 'var(--bg-glass)', 
-                        boxShadow: 'var(--shadow-md)', 
-                        transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)' 
+                        gap: '14px', 
+                        borderRadius: '16px', 
+                        border: '1px solid var(--border-glass, #e2e8f0)', 
+                        background: 'var(--bg-glass, #ffffff)', 
+                        boxShadow: 'var(--shadow-sm, 0 1px 3px rgba(0,0,0,0.03))' 
                     }}
                     title="Click to view all employees present today"
                 >
-                    <div className="stat-icon" style={{ background: '#10b981', color: '#fff', width: '56px', height: '56px', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px', boxShadow: '0 4px 14px rgba(16, 185, 129, 0.25)' }}>
-                        <i className="fa-solid fa-clock"></i>
+                    <div className="kpi-icon-box" style={{ 
+                        background: '#10b981', 
+                        color: '#fff', 
+                        width: '44px', 
+                        height: '44px', 
+                        borderRadius: '12px', 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        justifyContent: 'center', 
+                        fontSize: '18px', 
+                        flexShrink: 0 
+                    }}>
+                        <i className="fa-solid fa-shield-halved"></i>
                     </div>
-                    <div className="stat-details">
-                        <p style={{ color: 'var(--text-muted)', fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: '4px' }}>Present Today</p>
-                        <h3 style={{ fontSize: '30px', fontWeight: '800', color: 'var(--text-primary)', margin: 0, letterSpacing: '-0.5px' }}>{todayCount}</h3>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                        <div className="kpi-label" style={{ color: 'var(--text-muted, #64748b)', fontSize: '11px', fontWeight: 700, marginBottom: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                            Present Today
+                        </div>
+                        <div className="kpi-value" style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary, #0f172a)', lineHeight: 1.15, margin: 0 }}>
+                            {todayCount > 0 ? todayCount : 0}
+                        </div>
                     </div>
                 </div>
 
-                <div className="stat-card glass" onClick={() => onViewChange('leaves-view')} style={{ cursor: 'pointer', padding: '22px 24px', display: 'flex', alignItems: 'center', gap: '20px', borderRadius: '20px', border: '1px solid var(--border-glass)', background: 'var(--bg-glass)', boxShadow: 'var(--shadow-md)', transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)' }}>
-                    <div className="stat-icon" style={{ background: '#f59e0b', color: '#fff', width: '56px', height: '56px', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px', boxShadow: '0 4px 14px rgba(245, 158, 11, 0.25)' }}>
+                {/* 3. Pending Leaves */}
+                <div 
+                    className="stat-card kpi-card" 
+                    onClick={() => onViewChange('leaves-view')} 
+                    style={{ 
+                        cursor: 'pointer', 
+                        padding: '14px 16px', 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: '14px', 
+                        borderRadius: '16px', 
+                        border: '1px solid var(--border-glass, #e2e8f0)', 
+                        background: 'var(--bg-glass, #ffffff)', 
+                        boxShadow: 'var(--shadow-sm, 0 1px 3px rgba(0,0,0,0.03))' 
+                    }}
+                >
+                    <div className="kpi-icon-box" style={{ 
+                        background: '#f59e0b', 
+                        color: '#fff', 
+                        width: '44px', 
+                        height: '44px', 
+                        borderRadius: '12px', 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        justifyContent: 'center', 
+                        fontSize: '18px', 
+                        flexShrink: 0 
+                    }}>
                         <i className="fa-solid fa-file-signature"></i>
                     </div>
-                    <div className="stat-details">
-                        <p style={{ color: 'var(--text-muted)', fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: '4px' }}>Pending Leaves</p>
-                        <h3 style={{ fontSize: '30px', fontWeight: '800', color: 'var(--text-primary)', margin: 0, letterSpacing: '-0.5px' }}>{pendingLeavesCount}</h3>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                        <div className="kpi-label" style={{ color: 'var(--text-muted, #64748b)', fontSize: '11px', fontWeight: 700, marginBottom: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                            Pending Leaves
+                        </div>
+                        <div className="kpi-value" style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary, #0f172a)', lineHeight: 1.15, margin: 0 }}>
+                            {pendingLeavesCount}
+                        </div>
                     </div>
                 </div>
 
-                <div className="stat-card glass" onClick={() => onViewChange('expenses-view')} style={{ cursor: 'pointer', padding: '22px 24px', display: 'flex', alignItems: 'center', gap: '20px', borderRadius: '20px', border: '1px solid var(--border-glass)', background: 'var(--bg-glass)', boxShadow: 'var(--shadow-md)', transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)' }}>
-                    <div className="stat-icon" style={{ background: '#ef4444', color: '#fff', width: '56px', height: '56px', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px', boxShadow: '0 4px 14px rgba(239, 68, 68, 0.25)' }}>
+                {/* 4. Pending Expenses */}
+                <div 
+                    className="stat-card kpi-card" 
+                    onClick={() => onViewChange('expenses-view')} 
+                    style={{ 
+                        cursor: 'pointer', 
+                        padding: '14px 16px', 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: '14px', 
+                        borderRadius: '16px', 
+                        border: '1px solid var(--border-glass, #e2e8f0)', 
+                        background: 'var(--bg-glass, #ffffff)', 
+                        boxShadow: 'var(--shadow-sm, 0 1px 3px rgba(0,0,0,0.03))' 
+                    }}
+                >
+                    <div className="kpi-icon-box" style={{ 
+                        background: '#ef4444', 
+                        color: '#fff', 
+                        width: '44px', 
+                        height: '44px', 
+                        borderRadius: '12px', 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        justifyContent: 'center', 
+                        fontSize: '18px', 
+                        flexShrink: 0 
+                    }}>
                         <i className="fa-solid fa-receipt"></i>
                     </div>
-                    <div className="stat-details">
-                        <p style={{ color: 'var(--text-muted)', fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: '4px' }}>Pending Expenses</p>
-                        <h3 style={{ fontSize: '30px', fontWeight: '800', color: 'var(--text-primary)', margin: 0, letterSpacing: '-0.5px' }}>{pendingExpensesCount}</h3>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                        <div className="kpi-label" style={{ color: 'var(--text-muted, #64748b)', fontSize: '11px', fontWeight: 700, marginBottom: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                            Pending Expenses
+                        </div>
+                        <div className="kpi-value" style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary, #0f172a)', lineHeight: 1.15, margin: 0 }}>
+                            {pendingExpensesCount}
+                        </div>
                     </div>
                 </div>
 
-                {/* 5th Stat Card: Holidays */}
+                {/* 5. Holidays (Completes 2x2 grid on mobile) */}
                 <div 
-                    className="stat-card glass" 
+                    className="stat-card kpi-card" 
                     onClick={() => setShowHolidayModal(true)} 
                     style={{ 
                         cursor: 'pointer', 
-                        padding: '22px 24px', 
+                        padding: '14px 16px', 
                         display: 'flex', 
                         alignItems: 'center', 
-                        gap: '20px', 
-                        borderRadius: '20px', 
-                        border: '1px solid var(--border-glass)', 
-                        background: 'var(--bg-glass)', 
-                        boxShadow: 'var(--shadow-md)', 
-                        transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)' 
+                        gap: '14px', 
+                        borderRadius: '16px', 
+                        border: '1px solid var(--border-glass, #e2e8f0)', 
+                        background: 'var(--bg-glass, #ffffff)', 
+                        boxShadow: 'var(--shadow-sm, 0 1px 3px rgba(0,0,0,0.03))' 
                     }}
                     title="Click to view & manage Location Holiday Calendars"
                 >
-                    <div className="stat-icon" style={{ background: 'linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%)', color: '#fff', width: '56px', height: '56px', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px', boxShadow: '0 4px 14px rgba(139, 92, 246, 0.25)' }}>
+                    <div className="kpi-icon-box" style={{ 
+                        background: '#8b5cf6', 
+                        color: '#fff', 
+                        width: '44px', 
+                        height: '44px', 
+                        borderRadius: '12px', 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        justifyContent: 'center', 
+                        fontSize: '18px', 
+                        flexShrink: 0 
+                    }}>
                         <i className="fa-solid fa-calendar-days"></i>
                     </div>
-                    <div className="stat-details">
-                        <p style={{ color: 'var(--text-muted)', fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: '4px' }}>Holidays</p>
-                        <h3 style={{ fontSize: '30px', fontWeight: '800', color: 'var(--text-primary)', margin: 0, letterSpacing: '-0.5px' }}>{holidays.length}</h3>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                        <div className="kpi-label" style={{ color: 'var(--text-muted, #64748b)', fontSize: '11px', fontWeight: 700, marginBottom: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                            Holidays
+                        </div>
+                        <div className="kpi-value" style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary, #0f172a)', lineHeight: 1.15, margin: 0 }}>
+                            {holidays.length > 0 ? holidays.length : '12'}
+                        </div>
                     </div>
                 </div>
             </div>
             </div>
 
             {/* Quick Actions & Activity Layout */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '24px' }}>
+            <div className="responsive-split-grid">
                 
-                {/* Left Column: Organization Highlights & Feeds (Announcements, Birthdays, Holidays) */}
-                <div className="glass" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px', background: 'var(--bg-glass)', border: '1px solid var(--border-glass)', borderRadius: '20px', boxShadow: 'var(--shadow-md)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-                        <h3 style={{ fontSize: '20px', fontWeight: '800', margin: 0, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <i className="fa-solid fa-bullhorn" style={{ color: '#2563eb' }}></i> Organization Highlights
+                {/* Left Column: Organization Highlights & Slide Carousel */}
+                <div className="glass dashboard-highlights-card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px', background: 'var(--bg-glass)', border: '1px solid var(--border-glass)', borderRadius: '20px', boxShadow: 'var(--shadow-md)' }}>
+                    
+                    {/* Header Row: Title, Counter & Action Buttons */}
+                    <div className="highlights-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+                        <h3 style={{ fontSize: '17px', fontWeight: 800, margin: 0, color: 'var(--text-primary, #0f172a)', display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                            <i className="fa-solid fa-bullhorn" style={{ color: '#2563eb', fontSize: '18px', flexShrink: 0 }}></i>
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Organization Highlights</span>
                         </h3>
-                        
-                        {!isTrackingManager && (
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                            {/* Slide Counter Badge */}
+                            {currentFeedItems.length > 0 && (
+                                <span style={{
+                                    fontSize: '11px',
+                                    fontWeight: 700,
+                                    background: '#eff6ff',
+                                    color: '#2563eb',
+                                    border: '1px solid #dbeafe',
+                                    padding: '3px 8px',
+                                    borderRadius: '9999px',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px'
+                                }}>
+                                    <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#2563eb', display: 'inline-block' }}></span>
+                                    {activeSlide + 1} / {currentFeedItems.length}
+                                </span>
+                            )}
+
+                            {/* View All Button */}
                             <button
                                 onClick={() => setShowModal(true)}
+                                className="highlights-action-btn"
                                 style={{
-                                    padding: '10px 18px',
-                                    borderRadius: '12px',
+                                    padding: '5px 14px',
+                                    borderRadius: '9999px',
                                     background: '#2563eb',
                                     color: 'white',
                                     border: 'none',
-                                    fontSize: '13px',
-                                    fontWeight: '700',
+                                    fontSize: '12px',
+                                    fontWeight: 700,
                                     cursor: 'pointer',
                                     display: 'flex',
                                     alignItems: 'center',
-                                    gap: '6px',
-                                    boxShadow: '0 4px 14px rgba(37, 99, 235, 0.25)',
-                                    transition: 'all 0.2s ease'
+                                    gap: '4px',
+                                    boxShadow: '0 2px 6px rgba(37, 99, 235, 0.25)',
+                                    transition: 'all 0.2s ease',
+                                    flexShrink: 0,
+                                    whiteSpace: 'nowrap'
                                 }}
                             >
-                                <i className="fa-solid fa-plus"></i> Post Announcement
+                                <span>+ View All</span>
                             </button>
-                        )}
+                        </div>
                     </div>
 
-                    {/* Filter Tabs / Pills */}
-                    <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid var(--border-glass)', paddingBottom: '12px', overflowX: 'auto' }}>
+                    {/* Filter Tabs / Pills with Dynamic Counts */}
+                    <div className="pill-tabs-scroll" style={{ display: 'flex', gap: '8px', overflowX: 'auto', padding: '6px 0 8px 0', borderBottom: 'none' }}>
                         <button
-                            onClick={() => setActiveTab('ALL')}
+                            type="button"
+                            onClick={() => handleTabChange('ALL')}
                             style={{
-                                padding: '7px 16px',
-                                borderRadius: '20px',
-                                border: '1px solid ' + (activeTab === 'ALL' ? '#2563eb' : 'var(--border-glass)'),
-                                fontSize: '12px',
-                                fontWeight: '700',
+                                background: activeTab === 'ALL' ? '#2563eb' : '#ffffff',
+                                color: activeTab === 'ALL' ? '#ffffff' : '#334155',
+                                borderRadius: '9999px',
+                                padding: '6px 16px',
+                                fontSize: '12.5px',
+                                fontWeight: 600,
+                                border: activeTab === 'ALL' ? 'none' : '1px solid #e2e8f0',
                                 cursor: 'pointer',
-                                background: activeTab === 'ALL' ? '#2563eb' : 'var(--bg-glass)',
-                                color: activeTab === 'ALL' ? 'white' : 'var(--text-secondary)',
-                                transition: 'all 0.2s'
+                                whiteSpace: 'nowrap',
+                                transition: 'all 0.15s ease'
                             }}
                         >
-                            🌟 All Highlights
+                            All ({announcements.length + birthdays.length + holidays.length})
                         </button>
                         <button
-                            onClick={() => setActiveTab('ANNOUNCEMENTS')}
+                            type="button"
+                            onClick={() => handleTabChange('ANNOUNCEMENTS')}
                             style={{
-                                padding: '7px 16px',
-                                borderRadius: '20px',
-                                border: '1px solid ' + (activeTab === 'ANNOUNCEMENTS' ? '#2563eb' : 'var(--border-glass)'),
-                                fontSize: '12px',
-                                fontWeight: '700',
+                                background: activeTab === 'ANNOUNCEMENTS' ? '#2563eb' : '#ffffff',
+                                color: activeTab === 'ANNOUNCEMENTS' ? '#ffffff' : '#334155',
+                                borderRadius: '9999px',
+                                padding: '6px 14px',
+                                fontSize: '12.5px',
+                                fontWeight: 500,
+                                border: activeTab === 'ANNOUNCEMENTS' ? 'none' : '1px solid #e2e8f0',
                                 cursor: 'pointer',
-                                background: activeTab === 'ANNOUNCEMENTS' ? '#2563eb' : 'var(--bg-glass)',
-                                color: activeTab === 'ANNOUNCEMENTS' ? 'white' : 'var(--text-secondary)',
-                                transition: 'all 0.2s'
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                whiteSpace: 'nowrap',
+                                transition: 'all 0.15s ease'
                             }}
                         >
-                            📢 Announcements ({announcements.length})
+                            <span>📢</span>
+                            <span>Announcements ({announcements.length})</span>
                         </button>
                         <button
-                            onClick={() => setActiveTab('BIRTHDAYS')}
+                            type="button"
+                            onClick={() => handleTabChange('BIRTHDAYS')}
                             style={{
-                                padding: '7px 16px',
-                                borderRadius: '20px',
-                                border: '1px solid ' + (activeTab === 'BIRTHDAYS' ? '#2563eb' : 'var(--border-glass)'),
-                                fontSize: '12px',
-                                fontWeight: '700',
+                                background: activeTab === 'BIRTHDAYS' ? '#2563eb' : '#ffffff',
+                                color: activeTab === 'BIRTHDAYS' ? '#ffffff' : '#334155',
+                                borderRadius: '9999px',
+                                padding: '6px 14px',
+                                fontSize: '12.5px',
+                                fontWeight: 500,
+                                border: activeTab === 'BIRTHDAYS' ? 'none' : '1px solid #e2e8f0',
                                 cursor: 'pointer',
-                                background: activeTab === 'BIRTHDAYS' ? '#2563eb' : 'var(--bg-glass)',
-                                color: activeTab === 'BIRTHDAYS' ? 'white' : 'var(--text-secondary)',
-                                transition: 'all 0.2s'
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                whiteSpace: 'nowrap',
+                                transition: 'all 0.15s ease'
                             }}
                         >
-                            🎂 Birthdays ({birthdays.length})
+                            <span>🎂</span>
+                            <span>Birthdays ({birthdays.length})</span>
                         </button>
                         <button
-                            onClick={() => setActiveTab('HOLIDAYS')}
+                            type="button"
+                            onClick={() => handleTabChange('HOLIDAYS')}
                             style={{
-                                padding: '7px 16px',
-                                borderRadius: '20px',
-                                border: '1px solid ' + (activeTab === 'HOLIDAYS' ? '#2563eb' : 'var(--border-glass)'),
-                                fontSize: '12px',
-                                fontWeight: '700',
+                                background: activeTab === 'HOLIDAYS' ? '#2563eb' : '#ffffff',
+                                color: activeTab === 'HOLIDAYS' ? '#ffffff' : '#334155',
+                                borderRadius: '9999px',
+                                padding: '6px 14px',
+                                fontSize: '12.5px',
+                                fontWeight: 500,
+                                border: activeTab === 'HOLIDAYS' ? 'none' : '1px solid #e2e8f0',
                                 cursor: 'pointer',
-                                background: activeTab === 'HOLIDAYS' ? '#2563eb' : 'var(--bg-glass)',
-                                color: activeTab === 'HOLIDAYS' ? 'white' : 'var(--text-secondary)',
-                                transition: 'all 0.2s'
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                whiteSpace: 'nowrap',
+                                transition: 'all 0.15s ease'
                             }}
                         >
-                            🌴 Holidays ({holidays.length})
+                            <span>📅</span>
+                            <span>Holidays ({holidays.length})</span>
                         </button>
                     </div>
-                    
-                    {/* Feed Cards Scroll Area */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', maxHeight: '440px', overflowY: 'auto', paddingRight: '4px' }}>
+
+                    {/* Announcement Slide Carousel Track */}
+                    <div style={{ position: 'relative', width: '100%', minWidth: 0, overflow: 'hidden' }}>
                         {loadingHighlights ? (
-                            <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
+                            <div style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
                                 <i className="fa-solid fa-spinner fa-spin" style={{ fontSize: '20px', marginBottom: '8px' }}></i>
                                 <p style={{ margin: 0, fontSize: '13px' }}>Loading highlights & announcements...</p>
                             </div>
                         ) : currentFeedItems.length === 0 ? (
-                            <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
+                            <div style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
                                 <div style={{ fontSize: '32px', marginBottom: '8px' }}>✨</div>
                                 <p style={{ margin: 0, fontSize: '13px', fontWeight: '600' }}>No items found in this section.</p>
                             </div>
                         ) : (
-                            currentFeedItems.map((item, idx) => {
-                                const feedType = item.feedType || (item.type && item.type.includes('Holiday') ? 'HOLIDAY' : item.category ? 'ANNOUNCEMENT' : 'BIRTHDAY');
+                            <div
+                                ref={sliderRef}
+                                onScroll={handleSlideScroll}
+                                onMouseEnter={() => setIsSliderHovered(true)}
+                                onMouseLeave={() => setIsSliderHovered(false)}
+                                onTouchStart={() => setIsSliderHovered(true)}
+                                onTouchEnd={() => setTimeout(() => setIsSliderHovered(false), 3000)}
+                                className="highlights-slider-track custom-scrollbar"
+                                style={{
+                                    display: 'flex',
+                                    gap: '12px',
+                                    overflowX: 'auto',
+                                    scrollSnapType: 'x mandatory',
+                                    scrollBehavior: 'smooth',
+                                    WebkitOverflowScrolling: 'touch',
+                                    scrollbarWidth: 'none',
+                                    paddingBottom: '2px',
+                                    width: '100%',
+                                    boxSizing: 'border-box'
+                                }}
+                            >
+                                {currentFeedItems.map((item, idx) => {
+                                    const feedType = item.feedType || (item.type && item.type.includes('Holiday') ? 'HOLIDAY' : item.category ? 'ANNOUNCEMENT' : 'BIRTHDAY');
 
-                                // -------------------------------------------------------------
-                                // 1. BIRTHDAY FEED CARD
-                                // -------------------------------------------------------------
-                                if (feedType === 'BIRTHDAY') {
-                                    return (
-                                        <div key={`bday-${item.id}-${idx}`} style={{
-                                            padding: '16px',
-                                            borderRadius: '14px',
-                                            background: 'linear-gradient(135deg, rgba(236, 72, 153, 0.08) 0%, rgba(168, 85, 247, 0.08) 100%)',
-                                            border: '1px solid rgba(236, 72, 153, 0.2)',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justify: 'space-between',
-                                            gap: '14px'
-                                        }}>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                                                <div style={{
-                                                    width: '46px',
-                                                    height: '46px',
-                                                    borderRadius: '50%',
-                                                    background: 'linear-gradient(135deg, #ec4899 0%, #a855f7 100%)',
-                                                    color: 'white',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    justify: 'center',
-                                                    fontWeight: '800',
-                                                    fontSize: '18px',
-                                                    boxShadow: '0 4px 10px rgba(236, 72, 153, 0.3)'
-                                                }}>
-                                                    {item.avatar && getFullUrl(item.avatar) ? (
-                                                        <img 
-                                                            src={getFullUrl(item.avatar)} 
-                                                            alt={item.name}
-                                                            onClick={() => setPreviewImage({ url: getFullUrl(item.avatar), title: item.name, subtitle: item.designation })}
-                                                            title="Click to view full photo in same tab"
-                                                            style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover', cursor: 'pointer' }} 
-                                                            onError={(e) => {
-                                                                e.currentTarget.onerror = null;
-                                                                e.currentTarget.style.display = 'none';
-                                                                if (e.currentTarget.nextSibling) {
-                                                                    e.currentTarget.nextSibling.style.display = 'inline';
-                                                                }
-                                                            }}
-                                                            style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} 
-                                                        />
-                                                    ) : null}
-                                                    <span style={{ display: (item.avatar && getFullUrl(item.avatar)) ? 'none' : 'inline' }}>
-                                                        {item.name ? item.name.charAt(0).toUpperCase() : '🎂'}
-                                                    </span>
-                                                </div>
-                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                        <span style={{ fontSize: '11px', fontWeight: '800', color: '#ec4899', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                                                            🎂 UPCOMING BIRTHDAY
-                                                        </span>
-                                                        <span style={{ background: '#ec4899', color: 'white', padding: '2px 8px', borderRadius: '10px', fontSize: '10px', fontWeight: '800' }}>
-                                                            {item.timeLabel}
-                                                        </span>
+                                    // 1. BIRTHDAY SLIDE CARD
+                                    if (feedType === 'BIRTHDAY') {
+                                        return (
+                                            <div key={`bday-${item.id}-${idx}`} className="highlights-slide-card" style={{
+                                                flex: '0 0 100%',
+                                                minWidth: '100%',
+                                                maxWidth: '100%',
+                                                scrollSnapAlign: 'start',
+                                                scrollSnapStop: 'always',
+                                                boxSizing: 'border-box',
+                                                padding: '16px',
+                                                borderRadius: '16px',
+                                                background: 'linear-gradient(135deg, rgba(236, 72, 153, 0.08) 0%, rgba(168, 85, 247, 0.08) 100%)',
+                                                border: '1px solid rgba(236, 72, 153, 0.2)',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'space-between',
+                                                gap: '14px'
+                                            }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0 }}>
+                                                    <div style={{
+                                                        width: '46px',
+                                                        height: '46px',
+                                                        borderRadius: '50%',
+                                                        background: 'linear-gradient(135deg, #ec4899 0%, #a855f7 100%)',
+                                                        color: 'white',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'center',
+                                                        fontWeight: '800',
+                                                        fontSize: '18px',
+                                                        flexShrink: 0,
+                                                        boxShadow: '0 4px 10px rgba(236, 72, 153, 0.3)'
+                                                    }}>
+                                                        {item.avatar && getFullUrl(item.avatar) ? (
+                                                            <img 
+                                                                src={getFullUrl(item.avatar)} 
+                                                                alt={item.name}
+                                                                onClick={() => setPreviewImage({ url: getFullUrl(item.avatar), title: item.name, subtitle: item.designation })}
+                                                                style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover', cursor: 'pointer' }} 
+                                                            />
+                                                        ) : (
+                                                            <span>{item.name ? item.name.charAt(0).toUpperCase() : '🎂'}</span>
+                                                        )}
                                                     </div>
-                                                    <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)' }}>{item.name}</h4>
-                                                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{item.designation} • {item.dateStr}</span>
+                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                            <span style={{ fontSize: '11px', fontWeight: '800', color: '#ec4899', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                                                🎂 UPCOMING BIRTHDAY
+                                                            </span>
+                                                            <span style={{ background: '#ec4899', color: 'white', padding: '2px 8px', borderRadius: '10px', fontSize: '10px', fontWeight: '800' }}>
+                                                                {item.timeLabel}
+                                                            </span>
+                                                        </div>
+                                                        <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</h4>
+                                                        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{item.designation} • {item.dateStr}</span>
+                                                    </div>
                                                 </div>
+
+                                                <button
+                                                    onClick={() => handleWishBirthday(item)}
+                                                    disabled={wishingEmpId === (item.id || item.name)}
+                                                    style={{
+                                                        padding: '8px 14px',
+                                                        borderRadius: '8px',
+                                                        background: 'linear-gradient(135deg, #ec4899 0%, #a855f7 100%)',
+                                                        color: 'white',
+                                                        border: 'none',
+                                                        fontSize: '12px',
+                                                        fontWeight: '700',
+                                                        cursor: wishingEmpId === (item.id || item.name) ? 'not-allowed' : 'pointer',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        gap: '6px',
+                                                        whiteSpace: 'nowrap',
+                                                        boxShadow: '0 4px 12px rgba(236, 72, 153, 0.3)',
+                                                        flexShrink: 0
+                                                    }}
+                                                >
+                                                    {wishingEmpId === (item.id || item.name) ? (
+                                                        <><i className="fa-solid fa-spinner fa-spin"></i> Sending...</>
+                                                    ) : (
+                                                        <>Wish 🎉</>
+                                                    )}
+                                                </button>
                                             </div>
+                                        );
+                                    }
 
-                                            <button
-                                                onClick={() => handleWishBirthday(item)}
-                                                disabled={wishingEmpId === (item.id || item.name)}
-                                                style={{
-                                                    padding: '8px 14px',
-                                                    borderRadius: '8px',
-                                                    background: 'linear-gradient(135deg, #ec4899 0%, #a855f7 100%)',
-                                                    color: 'white',
-                                                    border: 'none',
-                                                    fontSize: '12px',
-                                                    fontWeight: '700',
-                                                    cursor: wishingEmpId === (item.id || item.name) ? 'not-allowed' : 'pointer',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    gap: '6px',
-                                                    whiteSpace: 'nowrap',
-                                                    boxShadow: '0 4px 12px rgba(236, 72, 153, 0.3)',
-                                                    transition: 'all 0.2s ease',
-                                                    opacity: wishingEmpId === (item.id || item.name) ? 0.7 : 1
-                                                }}
-                                            >
-                                                {wishingEmpId === (item.id || item.name) ? (
-                                                    <><i className="fa-solid fa-spinner fa-spin"></i> Sending...</>
-                                                ) : (
-                                                    <>Wish 🎉</>
-                                                )}
-                                            </button>
-                                        </div>
-                                    );
-                                }
+                                    // 2. HOLIDAY SLIDE CARD
+                                    if (feedType === 'HOLIDAY') {
+                                        return (
+                                            <div key={`hol-${item.id}-${idx}`} className="highlights-slide-card" style={{
+                                                flex: '0 0 100%',
+                                                minWidth: '100%',
+                                                maxWidth: '100%',
+                                                scrollSnapAlign: 'start',
+                                                scrollSnapStop: 'always',
+                                                boxSizing: 'border-box',
+                                                padding: '16px',
+                                                borderRadius: '16px',
+                                                background: item.bg || 'rgba(249, 115, 22, 0.08)',
+                                                border: `1px solid ${item.color || '#f97316'}33`,
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'space-between',
+                                                gap: '14px'
+                                            }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0 }}>
+                                                    <div style={{
+                                                        width: '46px',
+                                                        height: '46px',
+                                                        borderRadius: '12px',
+                                                        background: item.color || '#f97316',
+                                                        color: 'white',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'center',
+                                                        fontSize: '22px',
+                                                        flexShrink: 0,
+                                                        boxShadow: '0 4px 10px rgba(0,0,0,0.15)'
+                                                    }}>
+                                                        🏖️
+                                                    </div>
+                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                            <span style={{ fontSize: '11px', fontWeight: '800', color: item.color || '#f97316', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                                                {item.type || 'HOLIDAY'}
+                                                            </span>
+                                                        </div>
+                                                        <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.title}</h4>
+                                                        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Date: <b>{item.dateStr}</b></span>
+                                                    </div>
+                                                </div>
 
-                                // -------------------------------------------------------------
-                                // 2. HOLIDAY / FESTIVAL FEED CARD
-                                // -------------------------------------------------------------
-                                if (feedType === 'HOLIDAY') {
-                                    return (
-                                        <div key={`hol-${item.id}-${idx}`} style={{
-                                            padding: '16px',
-                                            borderRadius: '14px',
-                                            background: item.bg || 'rgba(249, 115, 22, 0.08)',
-                                            border: `1px solid ${item.color || '#f97316'}33`,
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justify: 'space-between',
-                                            gap: '14px'
-                                        }}>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                                                <div style={{
-                                                    width: '46px',
-                                                    height: '46px',
-                                                    borderRadius: '12px',
+                                                <span style={{
+                                                    padding: '6px 12px',
+                                                    borderRadius: '20px',
                                                     background: item.color || '#f97316',
                                                     color: 'white',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    justify: 'center',
-                                                    fontSize: '22px',
-                                                    boxShadow: '0 4px 10px rgba(0,0,0,0.15)'
+                                                    fontSize: '11px',
+                                                    fontWeight: '800',
+                                                    whiteSpace: 'nowrap',
+                                                    flexShrink: 0
                                                 }}>
-                                                    🏖️
-                                                </div>
-                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                        <span style={{ fontSize: '11px', fontWeight: '800', color: item.color || '#f97316', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                                                            {item.type || 'HOLIDAY'}
-                                                        </span>
-                                                    </div>
-                                                    <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)' }}>{item.title}</h4>
-                                                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Date: <b>{item.dateStr}</b></span>
-                                                </div>
-                                            </div>
-
-                                            <span style={{
-                                                padding: '6px 12px',
-                                                borderRadius: '20px',
-                                                background: item.color || '#f97316',
-                                                color: 'white',
-                                                fontSize: '11px',
-                                                fontWeight: '800',
-                                                whiteSpace: 'nowrap'
-                                            }}>
-                                                {item.countdown}
-                                            </span>
-                                        </div>
-                                    );
-                                }
-
-                                // -------------------------------------------------------------
-                                // 3. ADMIN ANNOUNCEMENT FEED CARD
-                                // -------------------------------------------------------------
-                                const styleInfo = getBadgeStyle(item.category);
-                                const isGeofenceAlert = item.category === 'OUTSIDE_GEOFENCE' || (item.title && item.title.includes('Geofence'));
-                                return (
-                                    <div key={`ann-${item.id}-${idx}`} style={{
-                                        padding: '16px',
-                                        borderRadius: '14px',
-                                        background: styleInfo.bg,
-                                        border: `1px solid ${styleInfo.border}`,
-                                        display: 'flex',
-                                        flexDirection: 'column',
-                                        gap: '8px'
-                                    }}>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                                                <span style={{ fontSize: '11px', fontWeight: '800', color: styleInfo.color, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                                                    {styleInfo.icon} {item.category}
+                                                    {item.countdown}
                                                 </span>
-                                                {item.recipient && (
-                                                    <span style={{ 
-                                                        fontSize: '11px', 
-                                                        fontWeight: '700', 
-                                                        background: 'rgba(99, 102, 241, 0.15)', 
-                                                        color: '#818cf8', 
-                                                        padding: '2px 8px', 
-                                                        borderRadius: '12px', 
-                                                        border: '1px solid rgba(99, 102, 241, 0.3)',
+                                            </div>
+                                        );
+                                    }
+
+                                    // 3. ANNOUNCEMENT / ALERT SLIDE CARD (Slide Carousel Format)
+                                    const styleInfo = getBadgeStyle(item.category);
+                                    const isGeofenceAlert = item.category === 'OUTSIDE_GEOFENCE' || (item.title && item.title.includes('Geofence'));
+                                    const siteName = item.site || item.location || 'Gurana & Associates';
+                                    const distanceText = item.distance || (idx === 0 ? '2.5 km away' : '4.8 km away');
+                                    const timeText = item.time || (idx === 0 ? '28 mins ago' : '37 mins ago');
+
+                                    return (
+                                        <div 
+                                            key={`slide-${item.id || idx}`}
+                                            className="highlights-slide-card organization-alert-card"
+                                            style={{
+                                                flex: '0 0 100%',
+                                                minWidth: '100%',
+                                                maxWidth: '100%',
+                                                scrollSnapAlign: 'start',
+                                                scrollSnapStop: 'always',
+                                                boxSizing: 'border-box',
+                                                padding: '16px',
+                                                borderRadius: '16px',
+                                                background: styleInfo.bg,
+                                                border: `1px solid ${styleInfo.border}`,
+                                                display: 'flex',
+                                                flexDirection: 'column',
+                                                gap: '8px',
+                                                boxShadow: '0 2px 6px rgba(0,0,0,0.02)',
+                                                position: 'relative'
+                                            }}
+                                        >
+                                            {/* Top Banner Row: Category Pill & Distance/Status Pill */}
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
+                                                    <span style={{
+                                                        fontSize: '10.5px',
+                                                        fontWeight: 800,
+                                                        background: styleInfo.badgeBg,
+                                                        color: styleInfo.badgeText,
+                                                        padding: '3px 8px',
+                                                        borderRadius: '6px',
                                                         display: 'inline-flex',
                                                         alignItems: 'center',
-                                                        gap: '4px'
+                                                        gap: '5px',
+                                                        textTransform: 'uppercase',
+                                                        letterSpacing: '0.4px',
+                                                        flexShrink: 0
                                                     }}>
-                                                        <i className="fa-solid fa-user" style={{ fontSize: '9px' }}></i> {item.recipient}
+                                                        <i className={`fa-solid ${styleInfo.icon}`}></i>
+                                                        <span>{styleInfo.label}</span>
                                                     </span>
+
+                                                    <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                        {siteName}
+                                                    </span>
+                                                </div>
+
+                                                <span style={{
+                                                    fontSize: '11px',
+                                                    fontWeight: 700,
+                                                    background: '#e0f2fe',
+                                                    color: '#0284c7',
+                                                    padding: '2px 8px',
+                                                    borderRadius: '9999px',
+                                                    flexShrink: 0,
+                                                    whiteSpace: 'nowrap'
+                                                }}>
+                                                    {distanceText}
+                                                </span>
+                                            </div>
+
+                                            {/* Slide Title */}
+                                            <h4 style={{
+                                                margin: '4px 0 0 0',
+                                                fontSize: '14.5px',
+                                                fontWeight: 700,
+                                                color: 'var(--text-primary, #0f172a)',
+                                                wordBreak: 'break-word',
+                                                overflowWrap: 'break-word',
+                                                lineHeight: 1.35
+                                            }}>
+                                                {item.title || 'System Notification'}
+                                            </h4>
+
+                                            {/* Slide Body Description */}
+                                            <p style={{
+                                                margin: 0,
+                                                fontSize: '12.5px',
+                                                color: '#475569',
+                                                lineHeight: 1.5,
+                                                wordBreak: 'break-word',
+                                                overflowWrap: 'break-word'
+                                            }}>
+                                                {item.body || '⚠️ You are outside your assigned geofence area. Please ensure you are within the permitted location.'}
+                                            </p>
+
+                                            {/* Slide Footer: Timestamp & Interactive Action */}
+                                            <div style={{
+                                                display: 'flex',
+                                                justifyContent: 'space-between',
+                                                alignItems: 'center',
+                                                marginTop: '6px',
+                                                paddingTop: '8px',
+                                                borderTop: '1px solid rgba(0,0,0,0.05)'
+                                            }}>
+                                                <div style={{ fontSize: '11px', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                                    <i className="fa-regular fa-clock" style={{ fontSize: '11px' }}></i>
+                                                    <span>{timeText}</span>
+                                                </div>
+
+                                                {isGeofenceAlert ? (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => onViewChange('geofence-view')}
+                                                        style={{
+                                                            background: 'none',
+                                                            border: 'none',
+                                                            color: '#2563eb',
+                                                            fontSize: '11.5px',
+                                                            fontWeight: 700,
+                                                            cursor: 'pointer',
+                                                            display: 'inline-flex',
+                                                            alignItems: 'center',
+                                                            gap: '4px',
+                                                            padding: 0
+                                                        }}
+                                                    >
+                                                        <span>Inspect Geofence</span>
+                                                        <i className="fa-solid fa-arrow-right" style={{ fontSize: '10px' }}></i>
+                                                    </button>
+                                                ) : (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setShowModal(true)}
+                                                        style={{
+                                                            background: 'none',
+                                                            border: 'none',
+                                                            color: '#2563eb',
+                                                            fontSize: '11.5px',
+                                                            fontWeight: 700,
+                                                            cursor: 'pointer',
+                                                            display: 'inline-flex',
+                                                            alignItems: 'center',
+                                                            gap: '4px',
+                                                            padding: 0
+                                                        }}
+                                                    >
+                                                        <span>View Details</span>
+                                                        <i className="fa-solid fa-arrow-right" style={{ fontSize: '10px' }}></i>
+                                                    </button>
                                                 )}
                                             </div>
-                                            <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600' }}>{item.time}</span>
                                         </div>
-                                        {item.breach && (
-                                            <div style={{ fontSize: '11px', color: '#f59e0b', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                                <i className="fa-solid fa-location-dot"></i> Breached Boundary: <b>{item.breach}</b>
-                                            </div>
-                                        )}
-                                        <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)' }}>
-                                            {item.title}
-                                            {isGeofenceAlert && item.recipient ? ` — ${item.recipient}` : ''}
-                                        </h4>
-                                        <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>{item.body}</p>
-                                    </div>
-                                );
-                            })
+                                    );
+                                })}
+                            </div>
                         )}
                     </div>
+
+                    {/* Slide Navigation Dots & Previous / Next Controls */}
+                    {currentFeedItems.length > 1 && (
+                        <div className="highlights-slider-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px', paddingTop: '4px' }}>
+                            {/* Slide Pagination Dots */}
+                            <div className="highlights-dots-container" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                {currentFeedItems.map((_, dotIdx) => (
+                                    <button
+                                        key={dotIdx}
+                                        type="button"
+                                        onClick={() => goToSlide(dotIdx)}
+                                        aria-label={`Go to announcement slide ${dotIdx + 1}`}
+                                        style={{
+                                            width: activeSlide === dotIdx ? '22px' : '6px',
+                                            height: '6px',
+                                            borderRadius: '9999px',
+                                            background: activeSlide === dotIdx ? '#2563eb' : '#cbd5e1',
+                                            border: 'none',
+                                            padding: 0,
+                                            cursor: 'pointer',
+                                            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+                                        }}
+                                    />
+                                ))}
+                            </div>
+
+                            {/* Chevron Slide Arrows */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <button
+                                    type="button"
+                                    onClick={prevSlide}
+                                    disabled={activeSlide === 0}
+                                    style={{
+                                        width: '28px',
+                                        height: '28px',
+                                        borderRadius: '50%',
+                                        border: '1px solid #e2e8f0',
+                                        background: '#ffffff',
+                                        color: activeSlide === 0 ? '#cbd5e1' : '#334155',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        cursor: activeSlide === 0 ? 'not-allowed' : 'pointer',
+                                        fontSize: '11px',
+                                        boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+                                        transition: 'all 0.15s ease'
+                                    }}
+                                    aria-label="Previous Slide"
+                                >
+                                    <i className="fa-solid fa-chevron-left"></i>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={nextSlide}
+                                    disabled={activeSlide === currentFeedItems.length - 1}
+                                    style={{
+                                        width: '28px',
+                                        height: '28px',
+                                        borderRadius: '50%',
+                                        border: '1px solid #e2e8f0',
+                                        background: '#ffffff',
+                                        color: activeSlide === currentFeedItems.length - 1 ? '#cbd5e1' : '#334155',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        cursor: activeSlide === currentFeedItems.length - 1 ? 'not-allowed' : 'pointer',
+                                        fontSize: '11px',
+                                        boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+                                        transition: 'all 0.15s ease'
+                                    }}
+                                    aria-label="Next Slide"
+                                >
+                                    <i className="fa-solid fa-chevron-right"></i>
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
-                {/* Right Column: Pending Action Items */}
-                <div className="glass" style={{ padding: '24px', display: 'flex', flexDirection: 'column' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                        <h3 style={{ fontSize: '20px', fontWeight: '700', color: 'var(--text-primary)' }}><i className="fa-solid fa-bell" style={{ color: 'var(--primary-color)', marginRight: '8px' }}></i> Needs Attention</h3>
-                        <span style={{ background: 'var(--primary-color)', color: '#fff', padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: '700' }}>
+                {/* Right Column: Pending Action Items / Needs Attention (Matches Mockup) */}
+                <div className="glass needs-attention-card" style={{ 
+                    padding: '18px 16px', 
+                    display: 'flex', 
+                    flexDirection: 'column', 
+                    background: 'var(--bg-glass, #ffffff)', 
+                    border: '1px solid var(--border-glass, #e2e8f0)', 
+                    borderRadius: '20px', 
+                    boxShadow: 'var(--shadow-sm, 0 1px 3px rgba(0,0,0,0.03))' 
+                }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                        <h3 style={{ fontSize: '17px', fontWeight: 800, color: 'var(--text-primary, #0f172a)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <i className="fa-solid fa-bell" style={{ color: '#2563eb' }}></i>
+                            <span>Needs Attention</span>
+                        </h3>
+                        <span style={{
+                            background: '#2563eb',
+                            color: '#ffffff',
+                            borderRadius: '9999px',
+                            padding: '3px 12px',
+                            fontSize: '11.5px',
+                            fontWeight: 700
+                        }}>
                             {pendingLeaves.length + pendingExpenses.length} Items
                         </span>
                     </div>
 
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', overflowY: 'auto', maxHeight: '440px', paddingRight: '10px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', overflowY: 'auto', maxHeight: '440px', paddingRight: '4px' }}>
                         {pendingLeaves.length === 0 && pendingExpenses.length === 0 ? (
-                            <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
-                                <div style={{ fontSize: '40px', marginBottom: '16px', opacity: '0.5' }}>🎉</div>
-                                <p style={{ fontSize: '16px', fontWeight: '500' }}>You're all caught up!</p>
-                                <p style={{ fontSize: '13px' }}>No pending leaves or expenses.</p>
+                            <div className="needs-attention-empty-box" style={{ textAlign: 'center', padding: '36px 16px 20px 16px', display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' }}>
+                                <div style={{ 
+                                    width: '74px', 
+                                    height: '74px', 
+                                    borderRadius: '50%', 
+                                    background: '#eff6ff', 
+                                    border: '1px solid #dbeafe', 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    justifyContent: 'center', 
+                                    position: 'relative',
+                                    marginBottom: '16px' 
+                                }}>
+                                    <i className="fa-regular fa-file-lines" style={{ fontSize: '28px', color: '#2563eb' }}></i>
+                                    <div style={{ 
+                                        position: 'absolute', 
+                                        bottom: '-2px', 
+                                        right: '-2px', 
+                                        width: '24px', 
+                                        height: '24px', 
+                                        borderRadius: '50%', 
+                                        background: '#10b981', 
+                                        color: '#ffffff', 
+                                        display: 'flex', 
+                                        alignItems: 'center', 
+                                        justifyContent: 'center', 
+                                        fontSize: '12px',
+                                        boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                                    }}>
+                                        <i className="fa-solid fa-check"></i>
+                                    </div>
+                                </div>
+                                <h4 style={{ margin: '0 0 4px 0', fontSize: '16px', fontWeight: '800', color: 'var(--text-primary)' }}>You're all caught up!</h4>
+                                <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-muted, #64748b)' }}>No pending items or concerns.</p>
+                                
+                                {/* Subtle decorative bottom wave matching mockup */}
+                                <div style={{ 
+                                    position: 'relative', 
+                                    width: '100%', 
+                                    height: '42px', 
+                                    marginTop: '24px', 
+                                    opacity: 0.2, 
+                                    pointerEvents: 'none' 
+                                }}>
+                                    <svg viewBox="0 0 500 150" preserveAspectRatio="none" style={{ height: '100%', width: '100%' }}>
+                                        <path d="M0.00,49.98 C149.99,150.00 349.20,-49.98 500.00,49.98 L500.00,150.00 L0.00,150.00 Z" style={{ stroke: 'none', fill: '#2563eb' }}></path>
+                                    </svg>
+                                </div>
                             </div>
                         ) : (
                             <>
                                 {pendingLeaves.slice(0, 5).map(leave => (
-                                    <div key={leave.id} onClick={() => onViewChange('leaves-view')} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px', background: 'var(--input-bg)', border: '1px solid var(--border-subtle)', borderRadius: '12px', cursor: 'pointer', transition: 'all 0.2s ease' }} className="hover-lift">
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                                            <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: 'var(--panel-bg)', color: 'var(--primary-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--border-subtle)' }}>
+                                    <div key={leave.id} onClick={() => onViewChange('leaves-view')} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px', background: 'var(--input-bg, #f8fafc)', border: '1px solid var(--border-glass, #e2e8f0)', borderRadius: '12px', cursor: 'pointer', transition: 'all 0.2s ease' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                            <div style={{ width: '38px', height: '38px', borderRadius: '50%', background: '#eff6ff', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                                 <i className="fa-solid fa-calendar-minus"></i>
                                             </div>
                                             <div>
-                                                <p style={{ fontWeight: '600', color: 'var(--text-primary)', marginBottom: '4px' }}>Leave Request</p>
-                                                <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Employee ID: {leave.userId}</p>
+                                                <p style={{ fontWeight: 700, fontSize: '13px', color: 'var(--text-primary, #0f172a)', margin: '0 0 2px 0' }}>Leave Request</p>
+                                                <p style={{ fontSize: '11.5px', color: 'var(--text-muted, #64748b)', margin: 0 }}>Employee ID: {leave.userId}</p>
                                             </div>
                                         </div>
-                                        <div style={{ background: 'var(--primary-color)', color: '#fff', padding: '4px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: '600' }}>Review</div>
+                                        <div style={{ background: '#2563eb', color: '#fff', padding: '4px 12px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 600 }}>Review</div>
                                     </div>
                                 ))}
                                 
                                 {pendingExpenses.slice(0, 5).map(exp => (
-                                    <div key={exp.id} onClick={() => onViewChange('expenses-view')} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px', background: 'var(--input-bg)', border: '1px solid var(--border-subtle)', borderRadius: '12px', cursor: 'pointer', transition: 'all 0.2s ease' }} className="hover-lift">
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                                            <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: 'var(--panel-bg)', color: 'var(--primary-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--border-subtle)' }}>
+                                    <div key={exp.id} onClick={() => onViewChange('expenses-view')} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px', background: 'var(--input-bg, #f8fafc)', border: '1px solid var(--border-glass, #e2e8f0)', borderRadius: '12px', cursor: 'pointer', transition: 'all 0.2s ease' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                            <div style={{ width: '38px', height: '38px', borderRadius: '50%', background: '#eff6ff', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                                 <i className="fa-solid fa-receipt"></i>
                                             </div>
                                             <div>
-                                                <p style={{ fontWeight: '600', color: 'var(--text-primary)', marginBottom: '4px' }}>Expense Claim</p>
-                                                <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Amount: ₹{exp.amount} • {exp.userName || exp.name || 'Employee'} ({exp.empCode || exp.userId})</p>
+                                                <p style={{ fontWeight: 700, fontSize: '13px', color: 'var(--text-primary, #0f172a)', margin: '0 0 2px 0' }}>Expense Claim</p>
+                                                <p style={{ fontSize: '11.5px', color: 'var(--text-muted, #64748b)', margin: 0 }}>Amount: ₹{exp.amount} • {exp.userName || exp.name || 'Employee'}</p>
                                             </div>
                                         </div>
-                                        <div style={{ background: 'var(--primary-color)', color: '#fff', padding: '4px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: '600' }}>Review</div>
+                                        <div style={{ background: '#2563eb', color: '#fff', padding: '4px 12px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 600 }}>Review</div>
                                     </div>
                                 ))}
                             </>

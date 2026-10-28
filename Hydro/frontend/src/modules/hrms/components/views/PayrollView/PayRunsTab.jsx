@@ -289,7 +289,7 @@ export default function PayRunsTab({
               />
 
               {/* 3. Main Grid layout: Steps & Activity Sidebar */}
-              <div style={{ display: 'grid', gridTemplateColumns: '3fr 1fr', gap: '20px', alignItems: 'flex-start' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px', alignItems: 'flex-start' }}>
                 {/* Steps Overview Summary */}
                 <div className="card glass" style={{ padding: '24px', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px', justifyContent: 'center' }}>
@@ -305,7 +305,7 @@ export default function PayRunsTab({
                   {/* Production-grade Step Grid */}
                   <div style={{
                     display: 'grid',
-                    gridTemplateColumns: 'repeat(4, 1fr)',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
                     gap: '12px',
                     margin: '10px 0',
                     textAlign: 'left'

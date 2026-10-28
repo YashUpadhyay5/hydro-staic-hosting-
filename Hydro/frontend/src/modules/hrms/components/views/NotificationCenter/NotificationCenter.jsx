@@ -216,10 +216,10 @@ const NotificationCenter = () => {
   const successRate = totalSent + totalFailed > 0 ? Math.round((totalSent / (totalSent + totalFailed)) * 100) : 100;
 
   return (
-    <div style={{ height: '100%', minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: '16px', overflow: 'hidden', color: 'var(--text-primary)', animation: 'fadeIn 0.5s ease-out' }}>
+    <div style={{ minHeight: '100%', flex: 1, display: 'flex', flexDirection: 'column', gap: '16px', color: 'var(--text-primary)', animation: 'fadeIn 0.5s ease-out' }}>
 
       {/* KPI Cards Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px' }}>
+      <div className="stats-grid kpi-grid-mobile">
         
         <div className="stat-card glass" style={{ padding: '20px', display: 'flex', alignItems: 'center', gap: '15px' }}>
           <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: '#3b82f622', color: '#3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px' }}>
@@ -274,7 +274,7 @@ const NotificationCenter = () => {
       </div>
 
       {/* Chart Block */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
         
         {/* Success Rate SVG Gauge */}
         <div className="glass" style={{ padding: '24px', borderRadius: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '15px' }}>
@@ -459,6 +459,8 @@ const NotificationCenter = () => {
               <i className="fa-solid fa-circle-notch fa-spin" style={{ fontSize: '24px', marginRight: '8px' }}></i> Loading data...
             </div>
           ) : (
+            <>
+            <div className="desktop-table-view">
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
               <thead style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--table-header, #fafafb)' }}>
                 <tr style={{ background: 'rgba(255,255,255,0.02)', borderBottom: '1px solid var(--border-color)' }}>
@@ -601,6 +603,122 @@ const NotificationCenter = () => {
                 )}
               </tbody>
             </table>
+            </div>
+
+            {/* Mobile Touch Cards for Notifications */}
+            <div className="mobile-cards-only" style={{ padding: '12px' }}>
+              {paginatedData.length === 0 ? (
+                <div style={{ padding: '30px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  No records found matching filters.
+                </div>
+              ) : (
+                paginatedData.map((item, idx) => {
+                  if (tabIndex === 0) {
+                    let recLabel = item.recipientName;
+                    if (!recLabel && item.recipient?.name) {
+                      recLabel = `${item.recipient.name} (${item.recipient.empCode || item.recipient.id})`;
+                    }
+                    if (!recLabel && item.targetId) {
+                      const found = (employees || []).find(e => e.id === item.targetId || e.empCode === item.targetId);
+                      if (found) recLabel = `${found.name} (${found.empCode || found.id})`;
+                      else if (item.target === 'ALL') recLabel = 'All Employees';
+                      else recLabel = String(item.targetId);
+                    }
+                    if (!recLabel) recLabel = item.target === 'ALL' ? 'All Employees' : 'System';
+
+                    return (
+                      <div key={idx} className="mobile-record-card">
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                          <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{item.title}</h4>
+                          <span style={{
+                            padding: '3px 8px',
+                            borderRadius: '6px',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            background: item.status === 'SENT' ? '#10b98122' : item.status === 'FAILED' ? '#ef444422' : '#f59e0b22',
+                            color: item.status === 'SENT' ? '#10b981' : item.status === 'FAILED' ? '#ef4444' : '#f59e0b'
+                          }}>
+                            {item.status}
+                          </span>
+                        </div>
+
+                        <div>
+                          <span style={{
+                            background: '#e0f2fe',
+                            color: '#0284c7',
+                            padding: '2px 8px',
+                            borderRadius: '9999px',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}>
+                            <i className="fa-solid fa-user" style={{ fontSize: '9px' }}></i> {recLabel}
+                          </span>
+                        </div>
+
+                        {item.body && (
+                          <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                            {item.body}
+                          </p>
+                        )}
+
+                        {item.breachDetails && (
+                          <div style={{ fontSize: '11.5px', color: '#d97706', fontWeight: 600 }}>
+                            📍 {item.breachDetails.distanceMeters ? `${(item.breachDetails.distanceMeters / 1000).toFixed(1)} km outside ` : 'Outside '}{item.breachDetails.nearestGeofence}
+                          </div>
+                        )}
+
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: 'var(--text-muted)', paddingTop: '6px', borderTop: '1px solid var(--border-glass, #e2e8f0)' }}>
+                          <span>Channel: <b>{item.channel}</b></span>
+                          <span>{item.sentTime ? new Date(item.sentTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        </div>
+                      </div>
+                    );
+                  } else {
+                    const emp = item.employee || (employees || []).find(e => e.id === item.employeeId || e.empCode === item.employeeId);
+                    return (
+                      <div key={idx} className="mobile-record-card">
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                          <div>
+                            <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{emp?.name || item.employeeId || 'System'}</h4>
+                            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{emp?.empCode || item.employeeId}</span>
+                          </div>
+                          <span style={{
+                            padding: '3px 8px',
+                            borderRadius: '6px',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            background: item.status === 'SENT' ? '#10b98122' : '#ef444422',
+                            color: item.status === 'SENT' ? '#10b981' : '#ef4444'
+                          }}>
+                            {item.status}
+                          </span>
+                        </div>
+
+                        {item.firebaseMessageId && (
+                          <div style={{ fontSize: '11px', fontFamily: 'monospace', color: 'var(--text-muted)' }}>
+                            FCM: {item.firebaseMessageId}
+                          </div>
+                        )}
+
+                        {item.error && item.error !== 'None' && (
+                          <div style={{ fontSize: '11.5px', color: '#ef4444' }}>
+                            Error: {item.error}
+                          </div>
+                        )}
+
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', textAlign: 'right' }}>
+                          {new Date(item.createdAt).toLocaleString()}
+                        </div>
+                      </div>
+                    );
+                  }
+                })
+              )}
+            </div>
+            </>
           )}
         </div>
 

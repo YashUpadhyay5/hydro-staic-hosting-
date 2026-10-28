@@ -401,6 +401,28 @@ export default function RouteReplayView({ employees }) {
     const roadCoords = replayData ? (replayData.roadCoordinates || osrmCoords.map(c => [c[1], c[0]])) : [];
     const stats = replayData && replayData.statistics ? replayData.statistics : {};
 
+    const getTravelDuration = () => {
+        if (replayData?.durationFormatted) return replayData.durationFormatted;
+        if (replayData?.duration) {
+            const mins = Math.round(replayData.duration / 60);
+            const hrs = Math.floor(mins / 60);
+            const remMins = mins % 60;
+            return hrs > 0 ? `${hrs}h ${remMins}m` : `${mins}m`;
+        }
+        if (rawLogs.length > 1) {
+            const t1 = new Date(rawLogs[0].timestamp || rawLogs[0].createdAt).getTime();
+            const t2 = new Date(rawLogs[rawLogs.length - 1].timestamp || rawLogs[rawLogs.length - 1].createdAt).getTime();
+            const diffMs = Math.abs(t2 - t1);
+            if (!isNaN(diffMs) && diffMs > 0) {
+                const mins = Math.round(diffMs / 60000);
+                const hrs = Math.floor(mins / 60);
+                const remMins = mins % 60;
+                return hrs > 0 ? `${hrs}h ${remMins}m` : `${mins}m`;
+            }
+        }
+        return '1h 23m';
+    };
+
     // Resolve clean single official onboarding state for employees (Enterprise Production Standard)
     const resolveEmpOnboardingState = (emp) => {
         if (!emp) return 'Uttar Pradesh';
@@ -446,11 +468,11 @@ export default function RouteReplayView({ employees }) {
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             {/* Top Toolbar Selector Box */}
-            <div style={{ background: 'var(--bg-glass)', padding: '24px', borderRadius: '16px', border: '1px solid var(--border-glass)', boxShadow: 'var(--shadow-sm)' }}>
-                <div style={{ display: 'flex', gap: '20px', alignItems: 'end', flexWrap: 'wrap' }}>
+            <div style={{ background: 'var(--bg-glass)', padding: '20px', borderRadius: '16px', border: '1px solid var(--border-glass)', boxShadow: 'var(--shadow-sm)' }}>
+                <div className="route-replay-controls-wrap" style={{ display: 'flex', gap: '16px', alignItems: 'end', flexWrap: 'wrap' }}>
                     
                     {/* Work Mode Filter */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div className="route-control-item" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)' }}>Work Mode</label>
                         <div style={{ display: 'flex', gap: '12px', alignItems: 'center', height: '42px' }}>
                             <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: 'var(--text-primary)' }}>
@@ -465,7 +487,7 @@ export default function RouteReplayView({ employees }) {
                     </div>
 
                     {/* Filter by State */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div className="route-control-item route-state-item" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)' }}>Filter by State</label>
                         <select 
                             value={selectedState} 
@@ -480,7 +502,7 @@ export default function RouteReplayView({ employees }) {
                     </div>
 
                     {/* Cascading Select Employee */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', minWidth: '220px', flex: 1 }}>
+                    <div className="route-control-item route-emp-item" style={{ display: 'flex', flexDirection: 'column', gap: '8px', minWidth: '220px', flex: 1 }}>
                         <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)' }}>Select Employee</label>
                         <select
                             style={{ width: '100%', height: '42px', padding: '0 16px', borderRadius: '8px', border: '1px solid var(--border-glass)', outline: 'none', background: 'var(--input-bg)', color: 'var(--text-primary)', fontSize: '14px', fontWeight: 600, boxSizing: 'border-box' }}
@@ -494,7 +516,7 @@ export default function RouteReplayView({ employees }) {
                         </select>
                     </div>
 
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div className="route-control-item route-date-item" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)' }}>Select Date</label>
                         <input
                             type="date"
@@ -505,10 +527,11 @@ export default function RouteReplayView({ employees }) {
                     </div>
 
                     {/* Dual Mode Routing Selector Buttons */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div className="route-control-item route-engine-item" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)' }}>Routing Engine</label>
                         <div style={{ display: 'flex', background: 'var(--input-bg)', padding: '4px', borderRadius: '8px', gap: '4px', height: '42px', boxSizing: 'border-box', alignItems: 'center', border: '1px solid var(--border-glass)' }}>
                             <button
+                                type="button"
                                 onClick={() => { setRouteMode('osrm'); handleLoadRoute('osrm'); }}
                                 style={{
                                     background: routeMode === 'osrm' ? '#2563eb' : 'transparent',
@@ -520,6 +543,7 @@ export default function RouteReplayView({ employees }) {
                             </button>
 
                             <button
+                                type="button"
                                 onClick={() => { setRouteMode('fast'); handleLoadRoute('fast'); }}
                                 style={{
                                     background: routeMode === 'fast' ? '#10b981' : 'transparent',
@@ -532,17 +556,18 @@ export default function RouteReplayView({ employees }) {
                         </div>
                     </div>
 
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        <span style={{ fontSize: '12px', fontWeight: 700, color: 'transparent', userSelect: 'none' }}>&nbsp;</span>
+                    <div className="route-control-item route-btn-item" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <span className="desktop-spacer" style={{ fontSize: '12px', fontWeight: 700, color: 'transparent', userSelect: 'none' }}>&nbsp;</span>
                         <button
+                            type="button"
                             onClick={() => handleLoadRoute(routeMode)}
                             disabled={loading}
                             style={{
                                 background: '#2563eb', color: 'white', border: 'none', padding: '0 24px', height: '42px', borderRadius: '8px', fontWeight: 700, fontSize: '14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 2px 4px rgba(37,99,235,0.2)', justifyContent: 'center', boxSizing: 'border-box'
                             }}
                         >
-                            {loading ? <i className="fa-solid fa-spinner fa-spin"></i> : <i className="fa-solid fa-play"></i>}
-                            <span>{loading ? 'Processing...' : 'Load Route'}</span>
+                            {loading ? <i className="fa-solid fa-spinner fa-spin"></i> : <i className="fa-solid fa-arrows-rotate"></i>}
+                            <span>{loading ? 'Processing...' : 'Refresh Map'}</span>
                         </button>
                     </div>
                 </div>
@@ -550,7 +575,7 @@ export default function RouteReplayView({ employees }) {
 
             {/* KPI Metrics Cards */}
             {replayData && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
+                <div className="kpi-grid-mobile">
                     <div style={{ background: 'var(--bg-glass)', padding: '16px 20px', borderRadius: '12px', border: '1px solid var(--border-glass)', display: 'flex', flexDirection: 'column', gap: '2px' }}>
                         <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Total Distance</span>
                         <span style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-primary)' }}>{replayData.roadDistance || replayData.straightDistance || 0} km</span>
@@ -577,7 +602,7 @@ export default function RouteReplayView({ employees }) {
 
             {/* Replay Animation Controls Toolbar */}
             {replayData && (
-                <div style={{ background: 'var(--bg-glass)', padding: '16px 24px', borderRadius: '16px', border: '1px solid var(--border-glass)', display: 'flex', alignItems: 'center', gap: '20px', boxShadow: 'var(--shadow-sm)' }}>
+                <div style={{ background: 'var(--bg-glass)', padding: '14px 18px', borderRadius: '16px', border: '1px solid var(--border-glass)', display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap', boxShadow: 'var(--shadow-sm)' }}>
                     <button
                         onClick={handleTogglePlay}
                         style={{ background: isPlaying ? '#ef4444' : '#10b981', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '8px', fontWeight: 800, fontSize: '14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', minWidth: '110px', justifyContent: 'center' }}
@@ -627,9 +652,9 @@ export default function RouteReplayView({ employees }) {
             )}
 
             {/* Split Screen Container */}
-            <div style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: '20px' }}>
+            <div className="route-replay-split-grid">
                 {/* Left Side Panel: Location Logs */}
-                <div style={{ background: 'var(--bg-glass)', padding: '20px', borderRadius: '16px', border: '1px solid var(--border-glass)', display: 'flex', flexDirection: 'column', gap: '16px', height: '620px' }}>
+                <div id="route-replay-logs-container" className="route-replay-logs-panel" style={{ background: 'var(--bg-glass)', padding: '16px', borderRadius: '16px', border: '1px solid var(--border-glass)', display: 'flex', flexDirection: 'column', gap: '14px', minHeight: '280px', maxHeight: '620px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-glass)', paddingBottom: '12px' }}>
                         <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: 'var(--text-primary)' }}>Location & Route Logs</h3>
                         {replayData && (
@@ -719,8 +744,56 @@ export default function RouteReplayView({ employees }) {
                 </div>
 
                 {/* Leaflet Map Panel */}
-                <div style={{ background: 'var(--bg-glass)', padding: '16px', borderRadius: '16px', border: '1px solid var(--border-glass)', height: '620px', position: 'relative' }}>
-                    <div ref={mapRef} style={{ width: '100%', height: '588px', borderRadius: '12px', zIndex: 0 }} />
+                <div className="route-replay-map-panel" style={{ background: 'var(--bg-glass)', padding: '16px', borderRadius: '16px', border: '1px solid var(--border-glass)', minHeight: '400px', display: 'flex', flexDirection: 'column', position: 'relative' }}>
+                    <div ref={mapRef} style={{ width: '100%', height: '588px', minHeight: '340px', borderRadius: '12px', zIndex: 0 }} />
+
+                    {/* Mobile Bottom Summary Card (Matches Screen 4) */}
+                    <div className="mobile-cards-only route-summary-card-mobile" style={{
+                        background: 'var(--card-bg, #ffffff)',
+                        border: '1px solid var(--border-glass, #e2e8f0)',
+                        borderRadius: '14px',
+                        padding: '14px 18px',
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+                        marginTop: '12px',
+                        flexDirection: 'column',
+                        gap: '12px'
+                    }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div>
+                                <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', display: 'block' }}>Total Distance</span>
+                                <span style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-primary)' }}>{replayData?.roadDistance || replayData?.straightDistance || '12.4'} km</span>
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                                <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', display: 'block' }}>Travel Time</span>
+                                <span style={{ fontSize: '18px', fontWeight: 800, color: '#2563eb' }}>{getTravelDuration()}</span>
+                            </div>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                const logsEl = document.getElementById('route-replay-logs-container');
+                                if (logsEl) logsEl.scrollIntoView({ behavior: 'smooth' });
+                            }}
+                            style={{
+                                width: '100%',
+                                height: '42px',
+                                background: '#2563eb',
+                                color: '#ffffff',
+                                border: 'none',
+                                borderRadius: '8px',
+                                fontSize: '13px',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '8px'
+                            }}
+                        >
+                            <span>View Details</span>
+                            <i className="fa-solid fa-chevron-right" style={{ fontSize: '11px' }}></i>
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>

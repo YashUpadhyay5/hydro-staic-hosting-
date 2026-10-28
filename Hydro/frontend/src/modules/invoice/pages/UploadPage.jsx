@@ -529,6 +529,32 @@ export default function UploadPage() {
           <p style={{ fontSize: "12px", color: "var(--text-secondary)", margin: 0 }}>
             Supports PDF, PNG, JPG, JPEG, TIFF (Max 10MB per file) • Paste from Clipboard supported
           </p>
+          <div style={{ marginTop: "10px", display: "flex", justifyContent: "center" }}>
+            <button 
+              type="button" 
+              className="dropzone-browse-btn"
+              style={{ 
+                padding: "8px 20px", 
+                borderRadius: "8px", 
+                fontSize: "12.5px", 
+                fontWeight: 600,
+                display: "inline-flex", 
+                alignItems: "center", 
+                justifyContent: "center",
+                gap: "8px",
+                background: "var(--primary-color, #4f46e5)",
+                color: "#ffffff",
+                border: "none",
+                cursor: "pointer",
+                boxShadow: "0 2px 6px rgba(79, 70, 229, 0.25)"
+              }}
+            >
+              <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+              <span>Tap to Choose Files</span>
+            </button>
+          </div>
         </div>
         <input
           ref={fileInputRef}

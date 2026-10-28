@@ -1414,7 +1414,7 @@ export default function SiteInfoView({ employees }) {
             </div>
 
             {/* Split Analytics View */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.8fr', gap: '20px', flex: 1, minHeight: 0 }}>
+            <div className="site-info-split-grid" style={{ flex: 1, minHeight: 0 }}>
                 
                 {/* Left Side: Summary and Visited Geofences */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', overflowY: 'auto', paddingRight: '4px' }}>

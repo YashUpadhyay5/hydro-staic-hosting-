@@ -40,6 +40,7 @@ export default function Dashboard() {
 
     const [showPrivacyModal, setShowPrivacyModal] = useState(false);
     const [isPrivacyHovered, setIsPrivacyHovered] = useState(false);
+    const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
     if (!user) return null;
 
@@ -62,7 +63,7 @@ export default function Dashboard() {
                         <span style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginTop: '2px' }}>Platform Workspace</span>
                     </div>
                 </div>
-                <div className="header-right">
+                <div className="header-right desktop-header-actions">
                     <div className="user-profile-badge">
                         <span className="user-avatar-initial">{user.name?.charAt(0) || 'A'}</span>
                         <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -78,7 +79,95 @@ export default function Dashboard() {
                     </button>
                     <button className="logout-btn" onClick={handleLogout}>Sign Out</button>
                 </div>
+            
+                {/* Mobile Header Right (Matches Mockup) */}
+                <div className="platform-mobile-header-right">
+                    <div className="platform-mobile-avatar" title={user.name}>
+                        {user.name?.charAt(0) || 'A'}
+                    </div>
+                    <button 
+                        type="button" 
+                        className="platform-mobile-hamburger" 
+                        onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                        aria-label="Toggle menu"
+                    >
+                        <i className={`fa-solid ${mobileMenuOpen ? 'fa-xmark' : 'fa-bars'}`}></i>
+                    </button>
+                </div>
             </header>
+
+            {/* Mobile Dropdown Menu Drawer */}
+            {mobileMenuOpen && (
+                <>
+                    <div className="platform-mobile-overlay" onClick={() => setMobileMenuOpen(false)}></div>
+                    <div className="platform-mobile-menu-drawer glass">
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: '12px', borderBottom: '1px solid var(--border-subtle)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <div className="platform-mobile-avatar">
+                                    {user.name?.charAt(0) || 'A'}
+                                </div>
+                                <div>
+                                    <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', display: 'block' }}>{user.name}</span>
+                                    <span style={{ fontSize: '11px', color: '#10b981', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981', display: 'inline-block' }}></span>
+                                        Active Admin
+                                    </span>
+                                </div>
+                            </div>
+                            <button 
+                                type="button"
+                                onClick={() => setMobileMenuOpen(false)}
+                                style={{ background: 'transparent', border: 'none', fontSize: '18px', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px 8px' }}
+                            >
+                                <i className="fa-solid fa-xmark"></i>
+                            </button>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', paddingTop: '12px' }}>
+                            <button 
+                                type="button"
+                                onClick={() => { setDarkMode(!darkMode); setMobileMenuOpen(false); }}
+                                style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    padding: '10px 14px',
+                                    borderRadius: '10px',
+                                    border: '1px solid var(--border-subtle)',
+                                    background: 'var(--bg-tertiary)',
+                                    color: 'var(--text-primary)',
+                                    fontSize: '13px',
+                                    fontWeight: 600,
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                <span>Theme: {darkMode ? '🌙 Dark Mode' : '☀️ Light Mode'}</span>
+                                <span style={{ fontSize: '11px', color: '#2563eb' }}>{darkMode ? 'Switch to Light ☀️' : 'Switch to Dark 🌙'}</span>
+                            </button>
+                            <button 
+                                type="button"
+                                onClick={handleLogout}
+                                style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '8px',
+                                    padding: '12px',
+                                    borderRadius: '10px',
+                                    border: '1px solid rgba(239, 68, 68, 0.2)',
+                                    background: 'rgba(239, 68, 68, 0.08)',
+                                    color: '#ef4444',
+                                    fontSize: '13px',
+                                    fontWeight: 700,
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                <i className="fa-solid fa-arrow-right-from-bracket"></i>
+                                <span>Sign Out</span>
+                            </button>
+                        </div>
+                    </div>
+                </>
+            )}
 
             <main className="platform-main">
                 <div className="welcome-banner">
@@ -108,7 +197,7 @@ export default function Dashboard() {
                                 <p className="module-card-description">{mod.description}</p>
                                 
                                 {/* Feature Highlights List */}
-                                <div style={{ width: '100%', marginBottom: '28px', display: 'flex', flexDirection: 'column', gap: '10px', flex: 1 }}>
+                                <div className="module-card-features-list" style={{ width: '100%', marginBottom: '28px', display: 'flex', flexDirection: 'column', gap: '10px', flex: 1 }}>
                                     {!isInvoice ? (
                                         <>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13.5px', fontWeight: 600, color: 'var(--text-secondary)' }}>
@@ -159,7 +248,7 @@ export default function Dashboard() {
             </main>
 
             {/* Floating Privacy Policy Trigger at Right Bottom */}
-            <div 
+            <div className="privacy-floating-trigger" 
                 style={{
                     position: 'fixed',
                     bottom: '28px',

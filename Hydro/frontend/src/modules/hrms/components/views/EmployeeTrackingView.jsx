@@ -421,7 +421,7 @@ export default function EmployeeTrackingView({ userId, userName, employees = [],
                 </div>
             </div>
 
-            <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '16px' }}>
+            <div className="stats-grid kpi-grid-mobile" style={{ marginBottom: '16px' }}>
                 <div className="stat-card glass" style={{ padding: '16px' }}>
                     <div className="stat-icon" style={{ background: 'rgba(34, 197, 94, 0.1)', color: '#22c55e', width: '40px', height: '40px', fontSize: '18px' }}>
                         <i className="fa-solid fa-battery-half"></i>

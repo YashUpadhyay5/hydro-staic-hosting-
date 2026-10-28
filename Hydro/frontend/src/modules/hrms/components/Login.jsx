@@ -11,6 +11,28 @@ export default function Login({ onLoginSuccess }) {
         e.preventDefault();
         setLoading(true);
         setError('');
+
+        const inputUser = (email || '').trim().toLowerCase();
+        // Hardcoded user: name yash, password 12345678
+        if ((inputUser === 'yash' || inputUser === 'yash@hrms.com' || inputUser === 'yash@admin.com') && password === '12345678') {
+            const hardcodedUser = {
+                id: 'hardcoded_yash_id',
+                _id: 'hardcoded_yash_id',
+                name: 'Yash',
+                email: 'yash@hrms.com',
+                role: 'ADMIN',
+                status: 'ACTIVE'
+            };
+            const hardcodedToken = 'hardcoded-token-yash-12345678';
+            localStorage.setItem('adminUser', JSON.stringify(hardcodedUser));
+            localStorage.setItem('adminToken', hardcodedToken);
+            localStorage.setItem('token', hardcodedToken);
+            localStorage.setItem('username', 'Yash');
+            onLoginSuccess(hardcodedUser, hardcodedToken);
+            setLoading(false);
+            return;
+        }
+
         try {
             const res = await api.login(email, password);
             const userRole = String(res.user?.role || '').toUpperCase();
@@ -38,12 +60,12 @@ export default function Login({ onLoginSuccess }) {
                 </div>
                 <form id="login-form" onSubmit={handleSubmit} autoComplete="off">
                     <div className="input-group">
-                        <i className="fa-solid fa-envelope"></i>
+                        <i className="fa-solid fa-user"></i>
                         <input 
-                            type="email" 
-                            placeholder="Email Address" 
+                            type="text" 
+                            placeholder="Email or Username" 
                             required
-                            autoComplete="new-password"
+                            autoComplete="username"
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
                         />

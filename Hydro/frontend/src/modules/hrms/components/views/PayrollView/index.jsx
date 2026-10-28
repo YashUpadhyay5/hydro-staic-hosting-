@@ -411,9 +411,9 @@ export default function PayrollView({ employees = [], adminUser }) {
   };
 
   return (
-    <div className="payroll-view-container" style={{ height: '100%', minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div className="payroll-view-container" style={{ minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column' }}>
       {/* Tabs Sidebar/Bar */}
-      <div className="tabs-header glass" style={{ display: 'flex', gap: '8px', padding: '12px', borderRadius: '12px', marginBottom: '16px', overflowX: 'auto', flexShrink: 0 }}>
+      <div className="tabs-header glass pill-tabs-scroll" style={{ display: 'flex', gap: '8px', padding: '10px 12px', borderRadius: '12px', marginBottom: '16px', overflowX: 'auto', flexShrink: 0, WebkitOverflowScrolling: 'touch' }}>
         {[
           { id: 'dashboard', label: 'Dashboard', icon: 'fa-chart-pie' },
           { id: 'runs', label: 'Pay Runs', icon: 'fa-play' },
@@ -429,7 +429,7 @@ export default function PayrollView({ employees = [], adminUser }) {
             key={tab.id}
             onClick={() => { setActiveTab(tab.id); setMessage(''); }}
             className={`btn ${activeTab === tab.id ? 'btn-primary' : 'btn-outline'}`}
-            style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', fontSize: '0.85rem' }}
+            style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 14px', fontSize: '0.85rem', whiteSpace: 'nowrap', flexShrink: 0 }}
           >
             <i className={`fa-solid ${tab.icon}`}></i>
             {tab.label}

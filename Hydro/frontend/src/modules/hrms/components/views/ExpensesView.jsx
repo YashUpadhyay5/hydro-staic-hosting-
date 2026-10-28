@@ -573,7 +573,7 @@ window.URL.revokeObjectURL(downloadUrl);
     const currentHeight = Math.round((baseH * zoomLevel) / 100);
 
     return (
-        <div id="expenses-view" className="view active" style={{ height: '100%', minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: '16px', overflow: 'hidden' }}>
+        <div id="expenses-view" className="view active" style={{ minHeight: '100%', flex: 1, display: 'flex', flexDirection: 'column', gap: '16px' }}>
             {selectedExpense ? (
                 /* ============================================================ */
                 /* SPLIT-SCREEN VERIFICATION & EDIT PAGE (50% Image / 50% Edit) */
@@ -637,10 +637,10 @@ window.URL.revokeObjectURL(downloadUrl);
                     </div>
 
                     {/* Main Split Screen Container */}
-                    <div style={{ display: 'flex', gap: '16px', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+                    <div className="expense-split-container">
                         
                         {/* LEFT 50%: Document / Receipt Image Viewer */}
-                        <div className="glass" style={{ flex: '0 0 calc(50% - 8px)', display: 'flex', flexDirection: 'column', borderRadius: '14px', overflow: 'hidden', border: '1px solid var(--border-glass)', background: 'var(--bg-glass)' }}>
+                        <div className="glass expense-split-col" style={{ display: 'flex', flexDirection: 'column', borderRadius: '14px', overflow: 'hidden', border: '1px solid var(--border-glass)', background: 'var(--bg-glass)' }}>
                             {/* Viewer Toolbar */}
                             <div style={{ padding: '10px 16px', background: 'var(--table-header)', borderBottom: '1px solid var(--border-glass)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                 <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -806,7 +806,7 @@ window.URL.revokeObjectURL(downloadUrl);
                         </div>
 
                         {/* RIGHT 50%: Editable Form */}
-                        <div className="glass" style={{ flex: '0 0 calc(50% - 8px)', display: 'flex', flexDirection: 'column', borderRadius: '14px', overflow: 'hidden', border: '1px solid var(--border-glass)', background: 'var(--bg-glass)' }}>
+                        <div className="glass expense-split-col" style={{ display: 'flex', flexDirection: 'column', borderRadius: '14px', overflow: 'hidden', border: '1px solid var(--border-glass)', background: 'var(--bg-glass)' }}>
                             <div style={{ padding: '10px 16px', background: 'var(--table-header)', borderBottom: '1px solid var(--border-glass)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                 <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                                     <i className="fa-solid fa-pen-to-square" style={{ color: '#60a5fa' }}></i> Edit Expense Details
@@ -1012,9 +1012,9 @@ window.URL.revokeObjectURL(downloadUrl);
                 /* ============================================================ */
                 <>
                     {/* Top Toolbar: Tabs, Date Selectors & Search (Clean Designer UI/UX) */}
-                    <div className="glass" style={{ padding: '6px 12px', display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, borderRadius: '10px', background: 'var(--bg-glass)', border: '1px solid var(--border-glass)', boxShadow: 'var(--shadow-sm)', margin: '0 0 10px 0' }}>
+                    <div className="glass expenses-toolbar-wrap" style={{ padding: '6px 12px', display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, borderRadius: '10px', background: 'var(--bg-glass)', border: '1px solid var(--border-glass)', boxShadow: 'var(--shadow-sm)', margin: '0 0 10px 0' }}>
                         {/* Left: Unified Status Tab Group */}
-                        <div className="tab-btn-group" style={{ margin: 0, display: 'inline-flex', gap: '3px', background: 'var(--input-bg)', padding: '3px', borderRadius: '8px', border: '1px solid var(--border-glass)' }}>
+                        <div className="tab-btn-group expenses-tab-group pill-tabs-scroll" style={{ margin: 0, display: 'inline-flex', gap: '3px', background: 'var(--input-bg)', padding: '3px', borderRadius: '8px', border: '1px solid var(--border-glass)' }}>
                             <button 
                                 type="button" 
                                 className={`tab-btn ${tab === 'all' ? 'active' : ''}`} 
@@ -1110,7 +1110,7 @@ window.URL.revokeObjectURL(downloadUrl);
                         </div>
 
                         {/* Right: Unified Action Controls & Filters Bar */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <div className="expenses-controls-right" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                             {/* Date Range Picker */}
                             <div style={{ display: 'inline-flex', alignItems: 'center', height: '34px', background: 'var(--input-bg)', border: '1px solid var(--border-glass)', borderRadius: '6px', padding: '0 8px', gap: '6px' }}>
                                 <i className="fa-regular fa-calendar" style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}></i>
@@ -1216,6 +1216,7 @@ window.URL.revokeObjectURL(downloadUrl);
                     </div>
 
                     <div className="table-container glass custom-scrollbar" style={{ padding: 0, flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'auto', borderRadius: '10px' }}>
+                        <div className="desktop-table-view">
                         <table id="expenses-table">
                             <thead>
                                 <tr>
@@ -1308,6 +1309,110 @@ window.URL.revokeObjectURL(downloadUrl);
                                 )}
                             </tbody>
                         </table>
+                        </div>
+
+                        {/* Mobile Expenses Cards */}
+                        <div className="mobile-cards-only" style={{ padding: '8px 12px' }}>
+                            {loading ? (
+                                <LoadingSpinner message="Loading Expense Claims & Invoices..." minHeight="180px" />
+                            ) : error ? (
+                                <div className="glass" style={{ textAlign: 'center', padding: '32px 18px', borderRadius: '16px', border: '1px solid var(--border-glass)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', background: 'var(--bg-glass)' }}>
+                                    <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: '#fee2e2', color: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px' }}>
+                                        <i className="fa-solid fa-receipt"></i>
+                                    </div>
+                                    <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>Unable to Load Expenses</div>
+                                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '280px', lineHeight: 1.4 }}>
+                                        Could not connect to the expense service. Please check your connection or tap below to retry.
+                                    </div>
+                                    <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
+                                        <button type="button" className="btn btn-primary" onClick={fetchExpenses} style={{ height: '36px', padding: '0 18px', fontSize: '12px', borderRadius: '8px' }}>
+                                            <i className="fa-solid fa-rotate-right"></i>
+                                            <span>Retry</span>
+                                        </button>
+                                        <button type="button" className="btn" onClick={() => setShowAddExpenseModal(true)} style={{ height: '36px', padding: '0 16px', fontSize: '12px', borderRadius: '8px', background: '#eff6ff', color: '#2563eb' }}>
+                                            <i className="fa-solid fa-plus"></i>
+                                            <span>Add Expense</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : paginatedExpenses.length === 0 ? (
+                                <div className="glass" style={{ textAlign: 'center', padding: '36px 18px', borderRadius: '16px', border: '1px solid var(--border-glass)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', background: 'var(--bg-glass)' }}>
+                                    <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: '#eff6ff', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px' }}>
+                                        <i className="fa-solid fa-receipt"></i>
+                                    </div>
+                                    <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>No Expenses Recorded</div>
+                                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>There are no expense claims matching this filter.</div>
+                                    <button type="button" className="btn btn-primary" onClick={() => setShowAddExpenseModal(true)} style={{ height: '36px', padding: '0 18px', fontSize: '12px', borderRadius: '8px', marginTop: '6px' }}>
+                                        <i className="fa-solid fa-plus"></i>
+                                        <span>Create First Claim</span>
+                                    </button>
+                                </div>
+                            ) : (
+                                paginatedExpenses.map(exp => {
+                                    const { empCode, empName } = getEmployeeDisplayInfo(exp);
+                                    const isPending = String(exp.status || '').toLowerCase() === 'pending';
+                                    return (
+                                        <div key={exp.id} className="mobile-record-card" onClick={() => handleOpenVerification(exp)} style={{ cursor: 'pointer' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                                <div>
+                                                    <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{empName}</h4>
+                                                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{empCode} • {formatDate(exp.createdAt)}</span>
+                                                </div>
+                                                <span className={`badge-status badge-${String(exp.status || '').toLowerCase()}`}>
+                                                    {String(exp.status || '').toUpperCase()}
+                                                </span>
+                                            </div>
+
+                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--input-bg, #f8fafc)', padding: '8px 12px', borderRadius: '8px' }}>
+                                                <span style={{ fontSize: '12px', fontWeight: 600, color: '#2563eb', background: 'rgba(37, 99, 235, 0.1)', padding: '2px 8px', borderRadius: '4px' }}>
+                                                    {exp.category}
+                                                </span>
+                                                <span style={{ fontSize: '16px', fontWeight: 800, color: 'var(--text-primary)' }}>
+                                                    ₹{Number(exp.amount || 0).toFixed(2)}
+                                                </span>
+                                            </div>
+
+                                            {exp.description && (
+                                                <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                                                    {exp.description}
+                                                </div>
+                                            )}
+
+                                            <div style={{ display: 'flex', gap: '8px', paddingTop: '6px', borderTop: '1px solid var(--border-glass, #e2e8f0)' }} onClick={(e) => e.stopPropagation()}>
+                                                <button 
+                                                    type="button"
+                                                    className="btn btn-secondary" 
+                                                    onClick={() => handleOpenVerification(exp)}
+                                                    style={{ flex: 1, minHeight: '38px', borderRadius: '8px', fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                                                >
+                                                    <i className="fa-solid fa-pen-to-square"></i> Verify & Edit
+                                                </button>
+                                                {isPending && (
+                                                    <>
+                                                        <button 
+                                                            type="button"
+                                                            className="btn btn-success" 
+                                                            onClick={() => handleUpdateStatus(exp.id, 'approved')}
+                                                            style={{ padding: '0 12px', minHeight: '38px', borderRadius: '8px', fontSize: '12px', fontWeight: 700 }}
+                                                        >
+                                                            Approve
+                                                        </button>
+                                                        <button 
+                                                            type="button"
+                                                            className="btn btn-danger" 
+                                                            onClick={() => handleUpdateStatus(exp.id, 'rejected')}
+                                                            style={{ padding: '0 12px', minHeight: '38px', borderRadius: '8px', fontSize: '12px', fontWeight: 700 }}
+                                                        >
+                                                            Reject
+                                                        </button>
+                                                    </>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })
+                            )}
+                        </div>
                     </div>
 
                     {/* Pagination Controls */}

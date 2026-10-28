@@ -433,10 +433,10 @@ export default function LiveTrackingView({ employees }) {
     });
 
     return (
-        <div id="live-tracking-view" className="view active" style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '12px', minHeight: 0, overflow: 'hidden' }}>
+        <div id="live-tracking-view" className="view active" style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '12px', minHeight: 0 }}>
             {/* Input Selection Header (Fixed) */}
             <div className="glass" style={{ padding: '14px 20px', flexShrink: 0 }}>
-                <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-end', justifyContent: 'flex-start', flexWrap: 'wrap' }}>
+                <div className="live-tracking-controls-wrap" style={{ display: 'flex', gap: '20px', alignItems: 'flex-end', justifyContent: 'flex-start', flexWrap: 'wrap' }}>
                     
                     {/* Work Mode Filter */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -520,9 +520,9 @@ export default function LiveTrackingView({ employees }) {
             </div>
 
             {/* Split Screen Container (Flex 1) */}
-            <div className="view-content" style={{ flex: 1, display: 'flex', gap: '16px', minHeight: 0, overflow: 'hidden' }}>
+            <div className="view-content tracking-split-container" style={{ flex: 1, minHeight: 0 }}>
                 {/* Left Side Panel: Active Employees & Details (Only this list scrolls!) */}
-                <div className="glass panel-left" style={{ flex: 1, minWidth: '280px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', height: '100%', overflow: 'hidden' }}>
+                <div className="glass panel-left" style={{ minWidth: '260px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', height: '100%', minHeight: '320px', overflow: 'hidden' }}>
                     <div style={{ borderBottom: '1px solid #e5e7eb', paddingBottom: '8px', flexShrink: 0 }}>
                         <h3 style={{ margin: 0, marginBottom: '8px' }}>Active Employees</h3>
                         <input 

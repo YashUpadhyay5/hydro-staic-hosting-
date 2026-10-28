@@ -151,12 +151,12 @@ export default function PayRunSummaryCards({ selectedRun, employees = [], employ
   return (
     <div style={{
       display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
       gap: '16px',
       marginBottom: '20px'
     }}>
       {/* Left Block: Cycle Details */}
-      <div className="card glass" style={{ padding: '16px 20px', borderRadius: '12px', display: 'flex', gap: '20px' }}>
+      <div className="card glass" style={{ padding: '16px 20px', borderRadius: '12px', display: 'flex', flexWrap: 'wrap', gap: '14px' }}>
         <div style={{ flex: 1, borderRight: '1px solid var(--border-glass)', paddingRight: '10px' }}>
           <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600 }}>TOTAL EMPLOYEES</span>
           <h4 style={{ fontSize: '1.5rem', fontWeight: 700, margin: '6px 0 0 0' }}>{totalEmployees}</h4>

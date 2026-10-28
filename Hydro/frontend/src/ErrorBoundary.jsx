@@ -76,6 +76,7 @@ export default class ErrorBoundary extends React.Component {
                         boxShadow: '0 10px 25px -5px rgba(0,0,0,0.06)'
                     }}>
                         <div style={{ fontSize: '42px', marginBottom: '16px' }}>🔄</div>
+
                         <h2 style={{ margin: '0 0 8px 0', fontSize: '1.25rem', color: '#0f172a', fontWeight: 700 }}>
                             Fresh Application Update Ready
                         </h2>
