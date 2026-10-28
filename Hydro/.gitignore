@@ -1,0 +1,58 @@
+# Dependencies
+node_modules/
+*/node_modules/
+package-lock.json.bak
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Secrets & Credentials (Protected by GitHub Secret Scanner)
+*firebase-service-account*.json
+*service-account*.json
+*.pem
+*.key
+.env
+.env.*
+!.env.example
+
+# Large Zip Archives & Backups (Exceeds GitHub 100MB limit)
+*.zip
+* (2).zip
+storage/
+*/storage/
+*.sqlite
+*.sqlite*
+*.db
+backups/
+storage/database_viewer.html
+
+# User Uploads
+uploads/
+*/uploads/
+
+# Python
+__pycache__/
+*/__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+ENV/
+
+# Build outputs
+dist/
+*/dist/
+build/
+*.local
+
+# Logs
+logs/
+*.log
+
+# OS & Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+scratch/
