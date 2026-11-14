@@ -358,8 +358,18 @@ export default function LiveTrackingView({ employees }) {
             }
         }, 300);
 
+        const handleResize = () => {
+            if (mapInstance.current) {
+                mapInstance.current.invalidateSize();
+            }
+        };
+        window.addEventListener('resize', handleResize);
+        window.addEventListener('orientationchange', handleResize);
+
         return () => {
             clearTimeout(timer);
+            window.removeEventListener('resize', handleResize);
+            window.removeEventListener('orientationchange', handleResize);
         };
     }, [selectedEmp, workMode, selectedState, employees]);
 
@@ -435,11 +445,11 @@ export default function LiveTrackingView({ employees }) {
     return (
         <div id="live-tracking-view" className="view active" style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '12px', minHeight: 0, overflow: 'hidden' }}>
             {/* Input Selection Header (Fixed) */}
-            <div className="glass" style={{ padding: '14px 20px', flexShrink: 0 }}>
-                <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-end', justifyContent: 'flex-start', flexWrap: 'wrap' }}>
+            <div className="glass live-tracking-header-card" style={{ padding: '14px 20px', flexShrink: 0 }}>
+                <div className="live-tracking-controls-wrap" style={{ display: 'flex', gap: '16px', alignItems: 'flex-end', justifyContent: 'flex-start', flexWrap: 'wrap' }}>
                     
                     {/* Work Mode Filter */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <div className="live-control-item" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                         <label style={{ fontWeight: 600, fontSize: '0.85rem' }}>Work Mode</label>
                         <div style={{ display: 'flex', gap: '12px', alignItems: 'center', height: '39px' }}>
                             <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' }}>
@@ -458,7 +468,7 @@ export default function LiveTrackingView({ employees }) {
                     </div>
 
                     {/* Filter by State */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <div className="live-control-item live-state-item" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                         <label style={{ fontWeight: 600, fontSize: '0.85rem' }}>Filter by State</label>
                         <select 
                             value={selectedState} 
@@ -473,7 +483,7 @@ export default function LiveTrackingView({ employees }) {
                     </div>
 
                     {/* Cascading Select Employee */}
-                    <div style={{ flex: '0 1 320px', margin: 0 }}>
+                    <div className="live-control-item live-emp-item" style={{ flex: '0 1 320px', margin: 0 }}>
                         <label style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: '6px', display: 'block' }}>Select Employee</label>
                         <select 
                             id="live-emp-select"
@@ -493,7 +503,7 @@ export default function LiveTrackingView({ employees }) {
                     </div>
 
                     {/* Refresh Map Button */}
-                    <div style={{ flex: '0 0 auto', margin: 0 }}>
+                    <div className="live-control-item live-btn-item" style={{ flex: '0 0 auto', margin: 0 }}>
                         <button 
                             className="btn btn-primary" 
                             id="btn-refresh-live" 
@@ -520,7 +530,7 @@ export default function LiveTrackingView({ employees }) {
             </div>
 
             {/* Split Screen Container (Flex 1) */}
-            <div className="view-content" style={{ flex: 1, display: 'flex', gap: '16px', minHeight: 0, overflow: 'hidden' }}>
+            <div className="view-content tracking-split-container" style={{ flex: 1, display: 'flex', gap: '16px', minHeight: 0, overflow: 'hidden' }}>
                 {/* Left Side Panel: Active Employees & Details (Only this list scrolls!) */}
                 <div className="glass panel-left" style={{ flex: 1, minWidth: '280px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', height: '100%', overflow: 'hidden' }}>
                     <div style={{ borderBottom: '1px solid #e5e7eb', paddingBottom: '8px', flexShrink: 0 }}>
