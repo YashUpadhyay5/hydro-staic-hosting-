@@ -868,10 +868,10 @@ export default function DashboardView({ employees: propEmployees = [], totalEmpl
             </div>
 
             {/* Quick Actions & Activity Layout */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '24px' }}>
+            <div className="responsive-split-grid dashboard-split-container">
                 
                 {/* Left Column: Organization Highlights & Feeds (Announcements, Birthdays, Holidays) */}
-                <div className="glass" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px', background: 'var(--bg-glass)', border: '1px solid var(--border-glass)', borderRadius: '20px', boxShadow: 'var(--shadow-md)' }}>
+                <div className="glass dashboard-highlights-card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px', background: 'var(--bg-glass)', border: '1px solid var(--border-glass)', borderRadius: '20px', boxShadow: 'var(--shadow-md)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
                         <h3 style={{ fontSize: '20px', fontWeight: '800', margin: 0, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <i className="fa-solid fa-bullhorn" style={{ color: '#2563eb' }}></i> Organization Highlights
@@ -1193,7 +1193,9 @@ export default function DashboardView({ employees: propEmployees = [], totalEmpl
                 </div>
 
                 {/* Right Column: attendance regularization requests */}
-                <RegularizationPanel />
+                <div className="dashboard-regularization-wrapper">
+                    <RegularizationPanel />
+                </div>
 
             </div>
 
