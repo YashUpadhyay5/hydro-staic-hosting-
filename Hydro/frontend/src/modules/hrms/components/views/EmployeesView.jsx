@@ -1581,7 +1581,7 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                     </div>
                     
                     {/* Step Indicators */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '24px', position: 'relative' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '24px', position: 'relative', overflowX: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: '6px' }}>
                         <div style={{ position: 'absolute', top: '15px', left: '10%', right: '10%', height: '2px', backgroundColor: '#e2e8f0', zIndex: 1 }}></div>
                         {[1, 2, 3, 4, 5, 6].map((step) => {
                             const labels = ['Personal', 'Job Details', 'Employment Terms', 'Work Details', 'Bank Details', 'Expense & Comp'];
@@ -5021,7 +5021,7 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
 
                 {/* Right: Search + Role Filter */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, justifyContent: 'flex-end' }}>
-                    <div style={{ position: 'relative', width: '230px' }}>
+                    <div style={{ position: 'relative', flex: '1 1 180px', minWidth: '150px' }}>
                         <i className="fa fa-search" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', fontSize: '0.75rem' }}></i>
                         <input 
                             type="text"
@@ -5065,7 +5065,8 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
 
             {/* Table Panel */}
             <div className="table-container glass" style={{ marginTop: 0 }}>
-                <table id="employees-table">
+                <div className="desktop-table-view">
+                    <table id="employees-table">
                     <thead>
                         {activeStatusTab === 'PAST' ? (
                             <tr>
@@ -5241,6 +5242,118 @@ export default function EmployeesView({ employees, onSelectEmployee, refreshEmpl
                         )}
                     </tbody>
                 </table>
+
+                </div>
+
+                {/* Mobile Cards View */}
+                <div className="mobile-cards-only">
+                    {filteredEmployees.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', background: 'var(--card-bg)', borderRadius: '12px' }}>
+                            No employees matched the search filter criteria.
+                        </div>
+                    ) : (
+                        filteredEmployees.map(emp => (
+                            <div 
+                                key={emp.id} 
+                                className="mobile-record-card"
+                                onClick={() => {
+                                    if (activeStatusTab === 'PAST') handleEditClick(emp);
+                                }}
+                            >
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                        {(emp.profilePhotoUrl || emp.avatar) && getFullUrl(emp.profilePhotoUrl || emp.avatar) ? (
+                                            <img 
+                                                src={getFullUrl(emp.profilePhotoUrl || emp.avatar)} 
+                                                alt={emp.name} 
+                                                style={{ width: '36px', height: '36px', borderRadius: '50%', objectFit: 'cover' }}
+                                                onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                            />
+                                        ) : (
+                                            <div style={{ width: '36px', height: '36px', borderRadius: '50%', backgroundColor: '#6366f1', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, fontSize: '0.9rem' }}>
+                                                {emp.name ? emp.name.charAt(0).toUpperCase() : '?'}
+                                            </div>
+                                        )}
+                                        <div>
+                                            <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{emp.name}</h4>
+                                            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{emp.empCode || emp.id}</span>
+                                        </div>
+                                    </div>
+
+                                    <span style={{
+                                        padding: '3px 8px',
+                                        borderRadius: '6px',
+                                        fontSize: '11px',
+                                        fontWeight: 600,
+                                        backgroundColor: (emp.status || 'ACTIVE') === 'ACTIVE' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                                        color: (emp.status || 'ACTIVE') === 'ACTIVE' ? '#10b981' : '#ef4444'
+                                    }}>
+                                        {(emp.status || 'ACTIVE')}
+                                    </span>
+                                </div>
+
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', fontSize: '12px' }}>
+                                    <span style={{
+                                        padding: '2px 7px',
+                                        borderRadius: '4px',
+                                        fontSize: '11px',
+                                        fontWeight: 600,
+                                        backgroundColor: emp.designation === 'FIELD' ? 'rgba(37, 99, 235, 0.15)' : 'rgba(255, 255, 255, 0.08)',
+                                        color: emp.designation === 'FIELD' ? '#3b82f6' : 'var(--text-secondary)'
+                                    }}>
+                                        {emp.designation === 'FIELD' ? 'Field Officer' : 'Office Officer'}
+                                    </span>
+                                    {emp.role === 'ADMIN' && <span style={{ padding: '2px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 700, background: 'rgba(147, 51, 234, 0.15)', color: '#c084fc' }}>👑 Admin</span>}
+                                    {emp.role === 'TRACKING_MANAGER' && <span style={{ padding: '2px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 700, background: 'rgba(6, 182, 212, 0.15)', color: '#22d3ee' }}>📍 Tracking Mgr</span>}
+                                    {emp.department && <span style={{ color: 'var(--text-muted)' }}>• {emp.department}</span>}
+                                </div>
+
+                                {activeStatusTab === 'PAST' ? (
+                                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                                        Exit: {emp.exitDate || '-'} ({emp.exitReason || 'Resigned'})
+                                    </div>
+                                ) : (
+                                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', wordBreak: 'break-all' }}>
+                                        {emp.email}
+                                    </div>
+                                )}
+
+                                <div style={{ display: 'flex', gap: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-glass, #e2e8f0)' }}>
+                                    <button 
+                                        type="button"
+                                        className="btn btn-secondary"
+                                        onClick={() => handleEditClick(emp)}
+                                        style={{ flex: 1, minHeight: '38px', borderRadius: '8px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                    >
+                                        View Profile
+                                    </button>
+                                    {activeStatusTab !== 'PAST' && (
+                                        <button 
+                                            type="button"
+                                            className="btn btn-secondary"
+                                            onClick={() => handleToggleStatus(emp.id, emp.status || 'ACTIVE')}
+                                            style={{
+                                                flex: 1,
+                                                minHeight: '38px',
+                                                borderRadius: '8px',
+                                                fontSize: '12px',
+                                                fontWeight: 600,
+                                                cursor: 'pointer',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                backgroundColor: (emp.status || 'ACTIVE') === 'ACTIVE' ? 'rgba(245, 158, 11, 0.12)' : 'rgba(16, 185, 129, 0.12)',
+                                                color: (emp.status || 'ACTIVE') === 'ACTIVE' ? '#d97706' : '#10b981'
+                                            }}
+                                        >
+                                            {(emp.status || 'ACTIVE') === 'ACTIVE' ? 'Deactivate' : 'Activate'}
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
             </div>
             </>
             )}

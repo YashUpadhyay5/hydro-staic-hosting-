@@ -533,7 +533,7 @@ export default function GeofenceView() {
     });
 
     return (
-        <div id="geofence-view" className="view active" style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '20px', height: 'calc(100vh - 120px)' }}>
+        <div id="geofence-view" className="view active geofence-split-grid">
             
             {/* Hidden File Input for Excel Import */}
             <input 
@@ -613,7 +613,8 @@ export default function GeofenceView() {
                         <i className="fa-solid fa-magnifying-glass" style={{ position: 'absolute', left: '12px', top: '10px', color: '#64748b', fontSize: '12px' }}></i>
                     </div>
                     
-                    <div style={{ maxHeight: '200px', overflowY: 'auto', borderRadius: '8px', border: '1px solid var(--border-glass)' }}>
+                    {/* Desktop Table View */}
+                    <div className="desktop-table-view" style={{ maxHeight: '200px', overflowY: 'auto', borderRadius: '8px', border: '1px solid var(--border-glass)' }}>
                         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem', textAlign: 'left' }}>
                             <thead style={{ background: 'rgba(255,255,255,0.05)', position: 'sticky', top: 0, zIndex: 10 }}>
                                 <tr>
@@ -682,19 +683,134 @@ export default function GeofenceView() {
                             </tbody>
                         </table>
                     </div>
+
+                    {/* Mobile Cards View */}
+                    <div className="mobile-cards-only" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        {filteredGeofences.length === 0 ? (
+                            <div style={{ padding: '20px', textAlign: 'center', color: '#64748b' }}>
+                                No matching geofences found.
+                            </div>
+                        ) : (
+                            filteredGeofences.map(gf => {
+                                const isSelected = selectedGeofenceId === gf.id;
+                                return (
+                                    <div 
+                                        key={gf.id}
+                                        onClick={() => handleFocusOnMap(gf)}
+                                        style={{
+                                            background: '#ffffff',
+                                            border: isSelected ? '1.5px solid #2563eb' : '1px solid #e2e8f0',
+                                            borderRadius: '14px',
+                                            padding: '14px 16px',
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            gap: '10px',
+                                            boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+                                            cursor: 'pointer'
+                                        }}
+                                    >
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                            <div>
+                                                <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                    <i className="fa-solid fa-location-dot" style={{ color: '#2563eb', fontSize: '12px' }}></i>
+                                                    {gf.name}
+                                                </h4>
+                                                <span style={{ fontSize: '11px', color: '#64748b', marginTop: '2px', display: 'block' }}>
+                                                    {parseFloat(gf.latitude).toFixed(5)}, {parseFloat(gf.longitude).toFixed(5)}
+                                                </span>
+                                            </div>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                <div style={{ textAlign: 'right' }}>
+                                                    <span style={{ fontSize: '10px', color: '#94a3b8', display: 'block' }}>Radius</span>
+                                                    <span style={{ fontSize: '12px', fontWeight: 700, color: '#0f172a' }}>{gf.radius}m</span>
+                                                </div>
+                                                <i className="fa-solid fa-chevron-right" style={{ fontSize: '12px', color: '#94a3b8' }}></i>
+                                            </div>
+                                        </div>
+
+                                        <div style={{ display: 'flex', gap: '8px', paddingTop: '6px', borderTop: '1px solid #f1f5f9' }} onClick={e => e.stopPropagation()}>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleFocusOnMap(gf)}
+                                                style={{
+                                                    flex: 1,
+                                                    height: '34px',
+                                                    background: '#2563eb',
+                                                    color: '#ffffff',
+                                                    border: 'none',
+                                                    borderRadius: '8px',
+                                                    fontSize: '12px',
+                                                    fontWeight: 600,
+                                                    cursor: 'pointer',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    gap: '6px'
+                                                }}
+                                            >
+                                                <i className="fa-solid fa-eye" style={{ fontSize: '11px' }}></i> View Map
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleEdit(gf)}
+                                                style={{
+                                                    flex: 1,
+                                                    height: '34px',
+                                                    background: '#ffffff',
+                                                    color: '#334155',
+                                                    border: '1px solid #cbd5e1',
+                                                    borderRadius: '8px',
+                                                    fontSize: '12px',
+                                                    fontWeight: 600,
+                                                    cursor: 'pointer',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    gap: '6px'
+                                                }}
+                                            >
+                                                <i className="fa-solid fa-pen" style={{ fontSize: '11px' }}></i> Edit
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleDelete(gf.id)}
+                                                style={{
+                                                    height: '34px',
+                                                    padding: '0 12px',
+                                                    background: '#fee2e2',
+                                                    color: '#ef4444',
+                                                    border: '1px solid #fca5a5',
+                                                    borderRadius: '8px',
+                                                    fontSize: '12px',
+                                                    fontWeight: 600,
+                                                    cursor: 'pointer',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    gap: '4px'
+                                                }}
+                                            >
+                                                <i className="fa-solid fa-trash" style={{ fontSize: '11px' }}></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                );
+                            })
+                        )}
+                    </div>
                 </div>
 
                 {/* Leaflet Map Card */}
                 <div className="glass" style={{ flex: 1, minHeight: '300px', display: 'flex', flexDirection: 'column', position: 'relative' }}>
-                    <div ref={mapRef} style={{ width: '100%', height: '100%', borderRadius: '12px', zIndex: 1 }} />
+                    <div ref={mapRef} style={{ width: '100%', height: '100%', minHeight: '300px', borderRadius: '12px', zIndex: 1 }} />
                     <div style={{
                         position: 'absolute',
                         bottom: '10px',
                         left: '10px',
                         zIndex: 1000,
-                        background: 'var(--bg-glass)',
+                        background: 'var(--bg-glass, #ffffff)',
                         color: 'var(--text-primary)',
-                        border: '1px solid var(--border-glass)',
+                        border: '1px solid var(--border-glass, #e2e8f0)',
                         padding: '6px 12px',
                         borderRadius: '6px',
                         fontSize: '0.75rem',
@@ -705,6 +821,56 @@ export default function GeofenceView() {
                         <i className="fa-solid fa-location-dot" style={{ marginRight: '6px', color: '#2563eb' }}></i> 
                         Click any site row in table to fly map directly onto location pin.
                     </div>
+                </div>
+
+                {/* Map Legend & Active Site Info (Matches Mobile Screen 6) */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '0 4px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#2563eb' }}></span>
+                            Office Geofence
+                        </span>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981' }}></span>
+                            Employee Location
+                        </span>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ef4444' }}></span>
+                            Outside Geofence
+                        </span>
+                    </div>
+
+                    {(() => {
+                        const activeSite = geofences.find(g => g.id === selectedGeofenceId) || (geofences.length > 0 ? geofences[0] : null);
+                        if (!activeSite) return null;
+                        return (
+                            <div 
+                                onClick={() => handleFocusOnMap(activeSite)}
+                                style={{ 
+                                    display: 'flex', 
+                                    justifyContent: 'space-between', 
+                                    alignItems: 'center', 
+                                    padding: '12px 14px', 
+                                    background: 'var(--bg-glass, #ffffff)', 
+                                    border: '1px solid var(--border-glass, #e2e8f0)', 
+                                    borderRadius: '12px',
+                                    boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                    <div style={{ width: '34px', height: '34px', borderRadius: '50%', background: '#eff6ff', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                        <i className="fa-solid fa-building" style={{ fontSize: '14px' }}></i>
+                                    </div>
+                                    <div>
+                                        <h5 style={{ margin: 0, fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{activeSite.name}</h5>
+                                        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Radius: {activeSite.radius || 300} m</span>
+                                    </div>
+                                </div>
+                                <i className="fa-solid fa-chevron-right" style={{ fontSize: '12px', color: '#94a3b8' }}></i>
+                            </div>
+                        );
+                    })()}
                 </div>
             </div>
 

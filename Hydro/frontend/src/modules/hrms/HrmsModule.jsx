@@ -15,6 +15,7 @@ import DashboardView from './components/views/DashboardView';
 // Code-Split Operational Views (Loaded on demand & idle preloaded to keep initial bundle tiny <65KB)
 const EmployeesView = React.lazy(() => import('./components/views/EmployeesView'));
 const AttendanceView = React.lazy(() => import('./components/views/AttendanceView'));
+const WeekendShiftsView = React.lazy(() => import('./components/views/WeekendShiftsView'));
 const LeavesView = React.lazy(() => import('./components/views/LeavesView'));
 const LeaveBalancesView = React.lazy(() => import('./components/views/LeaveBalancesView'));
 const EmployeeLeaveLedgerView = React.lazy(() => import('./components/views/EmployeeLeaveLedgerView'));
@@ -34,7 +35,8 @@ const WhatsAppNotificationSettingsView = React.lazy(() => import('./components/v
 // Immediately kick off parallel download of the active route's chunk on cold/hard load
 if (typeof window !== 'undefined') {
     const curPath = window.location.pathname;
-    if (curPath.includes('/attendance')) import('./components/views/AttendanceView');
+    if (curPath.includes('/attendance/weekend-shifts')) import('./components/views/WeekendShiftsView');
+    else if (curPath.includes('/attendance')) import('./components/views/AttendanceView');
     else if (curPath.includes('/employees')) import('./components/views/EmployeesView');
     else if (curPath.includes('/live-tracking')) import('./components/views/LiveTrackingView');
     else if (curPath.includes('/route-replay')) import('./components/views/RouteReplayView');
@@ -58,6 +60,7 @@ const getInitialView = () => {
     const path = window.location.pathname;
     if (path === '/hrms/employees/addemp' || path === '/employees/addemp') return 'add-employee-view';
     if (path === '/hrms/employees' || path === '/employees') return 'employees-view';
+    if (path === '/hrms/attendance/weekend-shifts' || path === '/attendance/weekend-shifts') return 'weekend-shifts-view';
     if (path === '/hrms/attendance' || path === '/hrms/attendence' || path === '/attendance' || path === '/attendence') return 'attendance-view';
     if (path === '/hrms/leaves/balances/detail') return 'leave-balance-detail-view';
     if (path === '/hrms/leaves/balances') return 'leave-balances-view';
@@ -83,6 +86,7 @@ const getInitialView = () => {
 const getPathForView = (view, employeeId, employeeName = '', origin = null, date = null) => {
     if (view === 'add-employee-view') return '/hrms/employees/addemp';
     if (view === 'employees-view') return '/hrms/employees';
+    if (view === 'weekend-shifts-view') return '/hrms/attendance/weekend-shifts';
     if (view === 'attendance-view') return '/hrms/attendance';
     if (view === 'leaves-view') return '/hrms/leaves';
     if (view === 'leave-balances-view') return '/hrms/leaves/balances';
@@ -135,6 +139,7 @@ function App() {
         const params = new URLSearchParams(window.location.search);
         return params.get('name') || sessionStorage.getItem('trackingName') || '';
     });
+    const [weekendShiftsSearch, setWeekendShiftsSearch] = useState('');
     const [trackingOrigin, setTrackingOrigin] = useState(() => {
         const params = new URLSearchParams(window.location.search);
         const fromQuery = params.get('origin');
@@ -151,6 +156,15 @@ function App() {
         'expenses-view': 0,
         'notifications-view': 0
     });
+
+    const userInitials = React.useMemo(() => {
+        const name = (adminUser?.name || 'Admin').trim();
+        const parts = name.split(/\s+/);
+        if (parts.length >= 2) {
+            return (parts[0][0] + parts[1][0]).toUpperCase();
+        }
+        return name.substring(0, 2).toUpperCase() || 'AD';
+    }, [adminUser?.name]);
 
     useEffect(() => {
         if (theme === 'dark') {
@@ -356,7 +370,7 @@ function App() {
         const titleMap = {
             'dashboard-view': 'Overview',
             'employees-view': 'Employees',
-            'attendance-view': 'Attendance Logs',
+            'weekend-shifts-view': 'Attendance Logs',
             'leaves-view': 'Leave Management',
             'leave-balances-view': 'Leave Management',
             'leave-balance-detail-view': 'Leave Management',
@@ -427,13 +441,49 @@ function App() {
                         return next;
                     });
                 }}
+                onClose={() => setIsSidebarOpen(false)}
             />
-            <main className="main-content" style={{ overflow: 'hidden', height: '100vh', display: 'flex', flexDirection: 'column' }}>
+            <main className="main-content" style={{ display: 'flex', flexDirection: 'column' }}>
                 <header className="top-header glass" style={{ flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', top: 0, zIndex: 100, background: 'var(--panel-bg)', boxShadow: '0 1px 4px rgba(0,0,0,0.03)', margin: '0 0 10px 0', borderRadius: '10px', padding: '6px 14px', minHeight: '46px' }}>
-                    <div className="header-left">
+                    {/* Desktop Header Left */}
+                    <div className="header-left desktop-header-title">
                         <h1 id="current-view-title" style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-primary)' }}>{getViewTitle()}</h1>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+
+                    {/* Mobile Header Bar (Matches Mobile Mockup) */}
+                    <div className="mobile-header-bar">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <button 
+                                type="button"
+                                className="mobile-hamburger-btn"
+                                onClick={() => setIsSidebarOpen(true)}
+                                aria-label="Open Navigation Menu"
+                            >
+                                <i className="fa-solid fa-bars"></i>
+                            </button>
+                            <div className="mobile-brand-pill" onClick={() => navigateToView('dashboard-view')} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <div className="mobile-brand-icon">
+                                    <i className="fa-solid fa-building-user"></i>
+                                </div>
+                                <div className="mobile-brand-text">
+                                    <span className="mobile-brand-title">HRMS Suite</span>
+                                    <span className="mobile-brand-sub">ENTERPRISE</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="mobile-header-right">
+                            <div 
+                                className="mobile-avatar-pill" 
+                                onClick={() => setIsSidebarOpen(true)}
+                                title={adminUser?.name || 'Admin'}
+                            >
+                                {adminUser?.name ? adminUser.name.charAt(0).toUpperCase() : 'A'}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Desktop Header Actions */}
+                    <div className="desktop-header-actions" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                         <button 
                             onClick={toggleTheme}
                             style={{
@@ -498,7 +548,17 @@ function App() {
                                 navigateToView={navigateToView}
                             />
                         )}
-                        {currentView === 'attendance-view' && <AttendanceView employees={employees} activeEmployees={activeEmployees} onSelectEmployee={handleSelectEmployee} />}
+                        {currentView === 'attendance-view' && (
+                            <AttendanceView
+                                employees={employees}
+                                activeEmployees={activeEmployees}
+                                onSelectEmployee={handleSelectEmployee}
+                                onOpenWeekendShifts={(search = '') => { setWeekendShiftsSearch(search); navigateToView('weekend-shifts-view'); }}
+                            />
+                        )}
+                        {currentView === 'weekend-shifts-view' && (
+                            <WeekendShiftsView key={weekendShiftsSearch} initialSearch={weekendShiftsSearch} onBack={() => navigateToView('attendance-view')} />
+                        )}
                         {currentView === 'leaves-view' && <LeavesView employees={employees} activeEmployees={activeEmployees} onOpenBalances={() => navigateToView('leave-balances-view')} />}
                         {currentView === 'leave-balances-view' && (
                             <LeaveBalancesView
@@ -549,6 +609,53 @@ function App() {
                         {currentView === 'settings-view' && <SettingsView />}
                     </React.Suspense>
                 </div>
+                {/* Persistent Mobile Bottom Navigation */}
+                <nav className="mobile-bottom-nav" aria-label="Mobile Navigation">
+                    <button 
+                        type="button"
+                        className={`mobile-nav-btn ${currentView === 'dashboard-view' ? 'active' : ''}`}
+                        onClick={() => navigateToView('dashboard-view')}
+                    >
+                        <span className="mobile-nav-icon"><i className="fa-solid fa-chart-pie"></i></span>
+                        <span>Dashboard</span>
+                    </button>
+                    <button 
+                        type="button"
+                        className={`mobile-nav-btn ${currentView === 'attendance-view' ? 'active' : ''}`}
+                        onClick={() => navigateToView('attendance-view')}
+                    >
+                        <span className="mobile-nav-icon"><i className="fa-solid fa-calendar-check"></i></span>
+                        <span>Attendance</span>
+                    </button>
+                    <button 
+                        type="button"
+                        className={`mobile-nav-btn ${['leaves-view', 'leave-balances-view', 'leave-balance-detail-view'].includes(currentView) ? 'active' : ''}`}
+                        onClick={() => navigateToView('leaves-view')}
+                    >
+                        <span className="mobile-nav-icon"><i className="fa-solid fa-clipboard-user"></i></span>
+                        {Number(badgeCounts['leaves-view'] || 0) > 0 && (
+                            <span className="mobile-nav-badge">{badgeCounts['leaves-view'] > 99 ? '99+' : badgeCounts['leaves-view']}</span>
+                        )}
+                        <span>Leaves</span>
+                    </button>
+                    <button 
+                        type="button"
+                        className={`mobile-nav-btn ${currentView === 'notifications-view' ? 'active' : ''}`}
+                        onClick={() => navigateToView('notifications-view')}
+                    >
+                        <span className="mobile-nav-icon"><i className="fa-solid fa-bell"></i></span>
+                        <span className="mobile-nav-badge">3</span>
+                        <span>Notifications</span>
+                    </button>
+                    <button 
+                        type="button"
+                        className={`mobile-nav-btn ${currentView === 'settings-view' ? 'active' : ''}`}
+                        onClick={() => navigateToView('settings-view')}
+                    >
+                        <span className="mobile-nav-icon"><i className="fa-solid fa-user"></i></span>
+                        <span>Profile</span>
+                    </button>
+                </nav>
             </main>
         </div>
     );

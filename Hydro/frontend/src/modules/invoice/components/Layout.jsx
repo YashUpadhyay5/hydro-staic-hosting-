@@ -10,6 +10,7 @@ export default function Layout() {
   const [isDragActive, setIsDragActive] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [isSidebarHovered, setIsSidebarHovered] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -339,10 +340,165 @@ export default function Layout() {
  
        {/* Main Content Area */}
        <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
+         {/* Top Mobile Header */}
+         <header className="invoice-mobile-header">
+           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+             <button
+               type="button"
+               className="invoice-mobile-menu-btn"
+               onClick={() => setIsMobileMenuOpen(true)}
+               aria-label="Open menu"
+             >
+               <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                 <line x1="3" y1="12" x2="21" y2="12"></line>
+                 <line x1="3" y1="6" x2="21" y2="6"></line>
+                 <line x1="3" y1="18" x2="21" y2="18"></line>
+               </svg>
+             </button>
+             <div style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }} onClick={() => navigate("/invoice/uploads")} role="button" tabIndex={0}>
+               <div style={{ width: "32px", height: "32px", borderRadius: "10px", background: "var(--primary-color, #4f46e5)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff" }}>
+                 <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                   <polyline points="14 2 14 8 20 8"/>
+                 </svg>
+               </div>
+               <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.15 }}>
+                 <span style={{ fontSize: "14.5px", fontWeight: 800, color: "var(--text-primary)" }}>OCR Portal</span>
+                 <span style={{ fontSize: "9px", fontWeight: 700, color: "var(--primary-color, #4f46e5)", letterSpacing: "0.8px" }}>INTELLIGENCE</span>
+               </div>
+             </div>
+           </div>
+           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+             <button 
+               type="button" 
+               onClick={toggleTheme} 
+               className="invoice-theme-toggle-btn"
+               title="Toggle Theme"
+             >
+               {theme === "light" ? "🌙" : "☀️"}
+             </button>
+           </div>
+         </header>
+
          <main className="main-content" style={{ flex: 1, overflowY: "auto" }}>
            <Outlet context={{ documents, loadDocuments, showToast, stats }} />
          </main>
        </div>
+
+      {/* Mobile Drawer Backdrop & Drawer */}
+      {isMobileMenuOpen && (
+        <div 
+          className="invoice-mobile-overlay" 
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
+      )}
+      <aside className={`invoice-mobile-drawer ${isMobileMenuOpen ? "open" : ""}`}>
+        <div className="invoice-mobile-drawer-header">
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <div style={{ width: "32px", height: "32px", borderRadius: "10px", background: "var(--primary-color, #4f46e5)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff" }}>
+              <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+              </svg>
+            </div>
+            <div>
+              <div style={{ fontSize: "14.5px", fontWeight: 700, color: "var(--text-primary)" }}>OCR Portal</div>
+              <div style={{ fontSize: "9px", fontWeight: 700, color: "var(--primary-color, #4f46e5)", letterSpacing: "0.8px" }}>INTELLIGENCE</div>
+            </div>
+          </div>
+          <button 
+            type="button" 
+            className="invoice-mobile-drawer-close"
+            onClick={() => setIsMobileMenuOpen(false)}
+            aria-label="Close menu"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="invoice-mobile-drawer-stats">
+          <div className="sidebar-stat">
+            <span className="stat-dot processing" />
+            <span className="stat-label">Processing</span>
+            <span className="stat-val">{stats.processing}</span>
+          </div>
+          <div className="sidebar-stat">
+            <span className="stat-dot pending" />
+            <span className="stat-label">Pending</span>
+            <span className="stat-val">{stats.pending}</span>
+          </div>
+          <div className="sidebar-stat">
+            <span className="stat-dot failed" />
+            <span className="stat-label">Failed</span>
+            <span className="stat-val">{stats.failed}</span>
+          </div>
+        </div>
+
+        <nav className="invoice-mobile-drawer-nav">
+          {navItems.map(item => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              onClick={() => setIsMobileMenuOpen(false)}
+            >
+              <span className="nav-icon">{item.icon}</span>
+              <span className="nav-label">{item.label}</span>
+              {item.badge && (
+                <span className="nav-badge" style={{ background: item.badgeColor, marginLeft: "auto" }}>
+                  {item.badge}
+                </span>
+              )}
+            </NavLink>
+          ))}
+
+          <div style={{ marginTop: "16px", paddingTop: "12px", borderTop: "1px solid var(--border-color)" }}>
+            <NavLink 
+              to="/hrms" 
+              className="nav-item" 
+              onClick={() => setIsMobileMenuOpen(false)}
+              style={{ color: "#2563eb", fontWeight: 600 }}
+            >
+              <span className="nav-icon"><i className="fa-solid fa-building-user"></i></span>
+              <span className="nav-label">Switch to HRMS Suite</span>
+            </NavLink>
+            <NavLink 
+              to="/" 
+              className="nav-item" 
+              onClick={() => setIsMobileMenuOpen(false)}
+              style={{ color: "var(--text-secondary)", fontWeight: 500 }}
+            >
+              <span className="nav-icon"><i className="fa-solid fa-house"></i></span>
+              <span className="nav-label">Platform Workspace</span>
+            </NavLink>
+          </div>
+        </nav>
+
+        <div style={{ padding: "12px 14px", borderTop: "1px solid var(--border-color)", marginTop: "auto" }}>
+          <button
+            type="button"
+            onClick={toggleTheme}
+            style={{
+              width: "100%",
+              height: "40px",
+              background: "var(--bg-card-highlight, #f8fafc)",
+              border: "1px solid var(--border-color, #e2e8f0)",
+              color: "var(--text-primary)",
+              borderRadius: "8px",
+              cursor: "pointer",
+              fontSize: "0.85rem",
+              fontWeight: 600,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "8px",
+            }}
+          >
+            <span>{theme === "light" ? "🌙" : "☀️"}</span>
+            <span>Switch to {theme === "light" ? "Dark" : "Light"}</span>
+          </button>
+        </div>
+      </aside>
 
       {/* Drag & Drop Fullscreen Overlay */}
       {isDragActive && (

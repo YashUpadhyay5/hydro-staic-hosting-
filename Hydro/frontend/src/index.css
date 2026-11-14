@@ -930,3 +930,255 @@ body.dark-theme .skeleton {
   position: relative !important;
   margin: 0 !important;
 }
+
+/* Strict Desktop vs Mobile Visibility Guard */
+@media (min-width: 769px) {
+  .mobile-header-bar,
+  .mobile-bottom-nav,
+  .mobile-cards-only,
+  .route-summary-card-mobile,
+  .sidebar-mobile-close-btn,
+  .platform-mobile-header-right,
+  .platform-mobile-menu-drawer,
+  .platform-mobile-overlay {
+    display: none !important;
+    visibility: hidden !important;
+    width: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
+    pointer-events: none !important;
+  }
+  .desktop-header-title {
+    display: block !important;
+    visibility: visible !important;
+  }
+  .desktop-header-actions {
+    display: flex !important;
+    visibility: visible !important;
+  }
+  .desktop-table-view {
+    display: block !important;
+  }
+}
+
+@media (max-width: 768px) {
+  /* Ensure root document has smooth native touch scroll on iOS Safari & Android */
+  html, body {
+    height: auto !important;
+    min-height: 100% !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    overscroll-behavior-y: auto !important;
+  }
+
+  #root {
+    min-height: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  .mobile-header-bar {
+    display: flex !important;
+    visibility: visible !important;
+    width: 100% !important;
+  }
+  .desktop-header-title,
+  .desktop-header-actions {
+    display: none !important;
+    visibility: hidden !important;
+    width: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
+  }
+
+  /* ========================================================================== */
+  /* HYDRO HUB (PLATFORM WORKSPACE) MOBILE FIRST RESPONSIVE SYSTEM (MOCKUP)     */
+  /* ========================================================================== */
+  .platform-dashboard-container {
+    height: auto !important;
+    min-height: 100vh !important;
+    min-height: 100dvh !important;
+    max-height: none !important;
+    overflow-x: hidden !important;
+    overflow-y: visible !important;
+    -webkit-overflow-scrolling: touch !important;
+    padding-bottom: 60px !important;
+  }
+
+  .platform-header {
+    margin: 12px 14px 0 14px !important;
+    padding: 10px 14px !important;
+    border-radius: 16px !important;
+  }
+
+  .platform-header .desktop-header-actions {
+    display: none !important;
+  }
+
+  .platform-mobile-header-right {
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px !important;
+  }
+
+  .platform-mobile-avatar {
+    width: 34px !important;
+    height: 34px !important;
+    border-radius: 50% !important;
+    background: #2563eb !important;
+    color: #ffffff !important;
+    font-weight: 700 !important;
+    font-size: 13.5px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25) !important;
+  }
+
+  .platform-mobile-hamburger {
+    width: 36px !important;
+    height: 36px !important;
+    background: transparent !important;
+    border: none !important;
+    color: var(--text-primary) !important;
+    font-size: 20px !important;
+    cursor: pointer !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 0 !important;
+    border-radius: 8px !important;
+  }
+
+  .platform-mobile-overlay {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    background: rgba(15, 23, 42, 0.5) !important;
+    backdrop-filter: blur(4px) !important;
+    z-index: 1040 !important;
+  }
+
+  .platform-mobile-menu-drawer {
+    position: fixed !important;
+    top: 68px !important;
+    right: 14px !important;
+    width: calc(100% - 28px) !important;
+    max-width: 340px !important;
+    padding: 16px !important;
+    border-radius: 18px !important;
+    background: var(--card-bg, #ffffff) !important;
+    border: 1px solid var(--border-glass, #e2e8f0) !important;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15) !important;
+    z-index: 1050 !important;
+    animation: slideDownMobile 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  }
+
+  @keyframes slideDownMobile {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .platform-main {
+    padding: 24px 14px 0 14px !important;
+    max-width: 100% !important;
+  }
+
+  .welcome-banner {
+    margin-bottom: 24px !important;
+  }
+
+  .banner-small-tag {
+    font-size: 10.5px !important;
+    padding: 5px 14px !important;
+    margin-bottom: 12px !important;
+    letter-spacing: 1px !important;
+  }
+
+  .welcome-heading {
+    font-size: 26px !important;
+    margin-bottom: 8px !important;
+    letter-spacing: -0.5px !important;
+    line-height: 1.2 !important;
+  }
+
+  .welcome-sub {
+    font-size: 13.5px !important;
+    max-width: 320px !important;
+    line-height: 1.5 !important;
+  }
+
+  .modules-grid {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 16px !important;
+    margin-top: 10px !important;
+    max-width: 100% !important;
+  }
+
+  .module-card {
+    flex: none !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    min-height: unset !important;
+    padding: 20px 18px !important;
+    border-radius: 18px !important;
+  }
+
+  .module-card-header {
+    margin-bottom: 14px !important;
+  }
+
+  .module-card-icon-wrapper {
+    width: 46px !important;
+    height: 46px !important;
+    border-radius: 14px !important;
+    font-size: 20px !important;
+  }
+
+  .module-status-badge {
+    font-size: 10.5px !important;
+    padding: 4px 10px !important;
+    font-weight: 700 !important;
+  }
+
+  .module-card-name {
+    font-size: 20px !important;
+    margin-bottom: 6px !important;
+  }
+
+  .module-card-description {
+    font-size: 13px !important;
+    line-height: 1.45 !important;
+    margin-bottom: 16px !important;
+    min-height: unset !important;
+  }
+
+  .module-card-features-list {
+    margin-bottom: 20px !important;
+    gap: 9px !important;
+  }
+
+  .module-card-features-list > div {
+    font-size: 13px !important;
+    gap: 8px !important;
+  }
+
+  .module-card-btn {
+    padding: 12px 18px !important;
+    font-size: 13.5px !important;
+    border-radius: 12px !important;
+    height: 44px !important;
+  }
+
+  .privacy-floating-trigger {
+    position: static !important;
+    margin: 24px auto 10px auto !important;
+    justify-content: center !important;
+    display: flex !important;
+  }
+
+}

@@ -224,3 +224,28 @@ body.dark-theme .lb-register-flag { color: #fbbf24; }
 .lbx-sheet .lb-month-cards { gap: 0; }
 @media (max-width: 900px) { .lbx-kpis { grid-template-columns: repeat(2, 1fr); } .lbx-kpi:nth-child(3) { border-left: none; } .lbx-kpi:nth-child(n + 3) { border-top: 1px solid var(--border-glass); } .lbx-carry { align-items: flex-start; margin-left: 0; text-align: left; } }
 @media (max-width: 760px) { .lbx-table-wrap { display: none; } }
+
+@media (max-width: 640px) {
+  .lb-cards {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 8px !important;
+  }
+  .lb-card {
+    padding: 10px 12px !important;
+    gap: 8px !important;
+  }
+  .lb-card-icon {
+    width: 32px !important;
+    height: 32px !important;
+    font-size: 0.85rem !important;
+  }
+  .lb-card-value {
+    font-size: 1.1rem !important;
+  }
+  .desktop-table-view {
+    display: none !important;
+  }
+  .mobile-cards-only {
+    display: flex !important;
+  }
+}

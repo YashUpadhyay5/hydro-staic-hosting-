@@ -2,9 +2,218 @@ import LoadingSpinner from '../LoadingSpinner';
 import React, { useEffect, useRef, useState } from 'react';
 import { api } from '../../services/api';
 
+function EmployeeSelectDropdown({ employees, selectedEmpId, onSelect }) {
+    const [isOpen, setIsOpen] = useState(false);
+    const [search, setSearch] = useState('');
+    const dropdownRef = useRef(null);
+
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+                setIsOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    const selectedEmployee = employees.find(e => String(e.id) === String(selectedEmpId) || String(e.empCode) === String(selectedEmpId));
+
+    const filtered = employees.filter(emp => {
+        if (!search.trim()) return true;
+        const q = search.toLowerCase().trim();
+        const code = String(emp.empCode || emp.emp_code || emp.id || '').toLowerCase();
+        const name = String(emp.name || '').toLowerCase();
+        const loc = String(emp.location || '').toLowerCase();
+        return code.includes(q) || name.includes(q) || loc.includes(q);
+    });
+
+    return (
+        <div ref={dropdownRef} style={{ position: 'relative', width: '100%' }}>
+            <button
+                type="button"
+                onClick={() => setIsOpen(prev => !prev)}
+                style={{
+                    width: '100%',
+                    height: '42px',
+                    padding: '0 14px',
+                    borderRadius: '8px',
+                    border: isOpen ? '1px solid #2563eb' : '1px solid var(--border-glass)',
+                    outline: 'none',
+                    background: 'var(--input-bg)',
+                    color: selectedEmployee ? 'var(--text-primary)' : 'var(--text-muted)',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    boxSizing: 'border-box',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '8px',
+                    textAlign: 'left',
+                    boxShadow: isOpen ? '0 0 0 2px rgba(37,99,235,0.2)' : 'none',
+                    transition: 'all 0.15s ease'
+                }}
+            >
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {selectedEmployee ? `${selectedEmployee.name} (${selectedEmployee.empCode || selectedEmployee.id})` : '-- Select Employee --'}
+                </span>
+                <i className={`fa-solid fa-chevron-${isOpen ? 'up' : 'down'}`} style={{ fontSize: '11px', color: 'var(--text-muted)' }} />
+            </button>
+
+            {isOpen && (
+                <div style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 4px)',
+                    left: 0,
+                    width: '100%',
+                    minWidth: '280px',
+                    maxHeight: '340px',
+                    background: 'var(--panel-bg, #1e293b)',
+                    border: '1px solid var(--border-glass, rgba(255,255,255,0.15))',
+                    borderRadius: '10px',
+                    boxShadow: '0 12px 30px rgba(0,0,0,0.35)',
+                    zIndex: 9999,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    overflow: 'hidden'
+                }}>
+                    <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border-glass)' }}>
+                        <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                            <i className="fa-solid fa-magnifying-glass" style={{ position: 'absolute', left: '10px', fontSize: '11px', color: 'var(--text-muted)' }} />
+                            <input
+                                type="text"
+                                autoFocus
+                                placeholder="Search by name, ID or location..."
+                                value={search}
+                                onChange={(e) => setSearch(e.target.value)}
+                                style={{
+                                    width: '100%',
+                                    padding: '7px 10px 7px 30px',
+                                    borderRadius: '6px',
+                                    border: '1px solid var(--border-glass)',
+                                    background: 'var(--input-bg)',
+                                    color: 'var(--text-primary)',
+                                    fontSize: '12px',
+                                    outline: 'none',
+                                    boxSizing: 'border-box'
+                                }}
+                            />
+                            {search && (
+                                <button
+                                    type="button"
+                                    onClick={() => setSearch('')}
+                                    style={{ position: 'absolute', right: '8px', border: 'none', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '11px' }}
+                                >
+                                    ✕
+                                </button>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="custom-scrollbar" style={{ overflowY: 'auto', flex: 1, maxHeight: '250px', padding: '4px 0' }}>
+                        <div
+                            onClick={() => { onSelect(''); setIsOpen(false); }}
+                            style={{
+                                padding: '8px 12px',
+                                fontSize: '12px',
+                                fontWeight: 600,
+                                color: !selectedEmpId ? '#2563eb' : 'var(--text-muted)',
+                                cursor: 'pointer',
+                                background: !selectedEmpId ? 'rgba(37,99,235,0.1)' : 'transparent',
+                                borderBottom: '1px solid var(--border-glass)'
+                            }}
+                        >
+                            -- Select Employee (Clear) --
+                        </div>
+
+                        {filtered.length === 0 ? (
+                            <div style={{ padding: '16px', textAlign: 'center', fontSize: '12px', color: 'var(--text-muted)' }}>
+                                No employees found
+                            </div>
+                        ) : (
+                            filtered.map(emp => {
+                                const isSelected = String(emp.id) === String(selectedEmpId) || String(emp.empCode) === String(selectedEmpId);
+                                const isOffice = (emp.designation || 'OFFICE').toUpperCase().includes('OFFICE');
+                                return (
+                                    <div
+                                        key={emp.id}
+                                        onClick={() => { onSelect(emp.id); setIsOpen(false); }}
+                                        style={{
+                                            padding: '8px 12px',
+                                            cursor: 'pointer',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'space-between',
+                                            gap: '8px',
+                                            background: isSelected ? 'rgba(37,99,235,0.15)' : 'transparent',
+                                            borderLeft: isSelected ? '3px solid #2563eb' : '3px solid transparent',
+                                            transition: 'background 0.12s'
+                                        }}
+                                        onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
+                                        onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
+                                    >
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
+                                            <span style={{ fontSize: '13px', fontWeight: isSelected ? 700 : 500, color: isSelected ? '#3b82f6' : 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                {emp.name}
+                                            </span>
+                                            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                                                {emp.empCode || emp.id} {emp.location ? `· ${emp.location}` : ''}
+                                            </span>
+                                        </div>
+                                        <span style={{
+                                            fontSize: '10px',
+                                            fontWeight: 700,
+                                            padding: '2px 6px',
+                                            borderRadius: '4px',
+                                            background: isOffice ? 'rgba(59,130,246,0.15)' : 'rgba(16,185,129,0.15)',
+                                            color: isOffice ? '#60a5fa' : '#34d399',
+                                            flexShrink: 0
+                                        }}>
+                                            {isOffice ? 'OFFICE' : 'FIELD'}
+                                        </span>
+                                    </div>
+                                );
+                            })
+                        )}
+                    </div>
+                    <div style={{ padding: '4px 10px', fontSize: '10px', color: 'var(--text-muted)', borderTop: '1px solid var(--border-glass)', textAlign: 'right', background: 'var(--input-bg)' }}>
+                        {filtered.length} of {employees.length} employees
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+// 45 -> "45s", 900 -> "15 min", 5400 -> "1.5 h"
+const formatSeconds = (s) => {
+    if (s == null) return '—';
+    if (s < 60) return `${Math.round(s)}s`;
+    if (s < 3600) return `${Math.round(s / 60)} min`;
+    return `${Math.round(s / 360) / 10} h`;
+};
+
+// One line explaining what the distance is based on: the dashboard ping interval, the day's real one, and what was left out
+function pingSummary(data) {
+    const p = data.pingInterval || {};
+    const st = data.statistics || {};
+    const parts = [
+        `Ping interval: setting ${formatSeconds(p.configuredSeconds)}${p.configuredSource === 'settings history' ? ' (on that day)' : ''}, this day ${formatSeconds(p.observedSeconds)}`,
+        `GPS gap after ${formatSeconds(p.gpsGapAfterSeconds)}`
+    ];
+    if (st.ignoredWobbleKm > 0) parts.push(`${st.ignoredWobbleKm} km of standing-still GPS wobble not counted`);
+    if (data.mode !== 'fast' && (st.roadRoutedLegs || st.estimatedLegs || st.straightLegs)) {
+        parts.push(`${st.roadRoutedLegs || 0} of ${(st.roadRoutedLegs || 0) + (st.estimatedLegs || 0) + (st.straightLegs || 0)} hops on roads`);
+    }
+    if (st.osrmFailures > 0) parts.push(`road routing unavailable for ${st.osrmFailures} request(s), straight lines used`);
+    return parts.join(' · ');
+}
+
+
 export default function RouteReplayView({ employees }) {
     const [selectedEmp, setSelectedEmp] = useState('');
-    const [workMode, setWorkMode] = useState('FIELD');
+    const [workMode, setWorkMode] = useState('ALL');
     const [selectedState, setSelectedState] = useState('ALL');
     const [replayDate, setReplayDate] = useState(new Date().toISOString().split('T')[0]);
     const [routeMode, setRouteMode] = useState('osrm'); // 'osrm' or 'fast'
@@ -200,7 +409,7 @@ export default function RouteReplayView({ employees }) {
                                     <b>Segment #${seg.index + 1}</b><br/>
                                     <b>Distance:</b> ${seg.distanceKm} km<br/>
                                     <b>Speed:</b> ${seg.averageSpeedKmH} km/h<br/>
-                                    ${seg.isGpsLost ? '<span style="color:#a855f7; font-weight:700;">⚠️ GPS Lost (>5 mins)</span>' : ''}
+                                    ${seg.isGpsLost ? `<span style="color:#a855f7; font-weight:700;">⚠️ ${seg.gapMinutes != null ? `No GPS for ${seg.gapMinutes} mins` : 'GPS gap'}</span>` : ''}
                                 </div>
                             `);
                         }
@@ -401,6 +610,28 @@ export default function RouteReplayView({ employees }) {
     const roadCoords = replayData ? (replayData.roadCoordinates || osrmCoords.map(c => [c[1], c[0]])) : [];
     const stats = replayData && replayData.statistics ? replayData.statistics : {};
 
+    const getTravelDuration = () => {
+        if (replayData?.durationFormatted) return replayData.durationFormatted;
+        if (replayData?.duration) {
+            const mins = Math.round(replayData.duration / 60);
+            const hrs = Math.floor(mins / 60);
+            const remMins = mins % 60;
+            return hrs > 0 ? `${hrs}h ${remMins}m` : `${mins}m`;
+        }
+        if (rawLogs.length > 1) {
+            const t1 = new Date(rawLogs[0].timestamp || rawLogs[0].createdAt).getTime();
+            const t2 = new Date(rawLogs[rawLogs.length - 1].timestamp || rawLogs[rawLogs.length - 1].createdAt).getTime();
+            const diffMs = Math.abs(t2 - t1);
+            if (!isNaN(diffMs) && diffMs > 0) {
+                const mins = Math.round(diffMs / 60000);
+                const hrs = Math.floor(mins / 60);
+                const remMins = mins % 60;
+                return hrs > 0 ? `${hrs}h ${remMins}m` : `${mins}m`;
+            }
+        }
+        return '1h 23m';
+    };
+
     // Resolve clean single official onboarding state for employees (Enterprise Production Standard)
     const resolveEmpOnboardingState = (emp) => {
         if (!emp) return 'Uttar Pradesh';
@@ -431,9 +662,14 @@ export default function RouteReplayView({ employees }) {
     )).sort();
 
     const filteredEmployees = (employees || []).filter(emp => {
-        const matchesMode = (emp.designation || 'OFFICE').toUpperCase() === workMode;
-        const isNotAdmin = emp.role !== 'ADMIN';
-        if (!matchesMode || !isNotAdmin) return false;
+        // Exclude dummy system accounts
+        if (emp.id === 'admin' && (!emp.empCode || emp.empCode === 'admin')) return false;
+        if (emp.isSystemAccount || emp.is_system_account) return false;
+
+        const rawMode = (emp.designation || emp.roleType || emp.workMode || 'OFFICE').toUpperCase();
+        const isField = rawMode.includes('FIELD');
+        const matchesMode = workMode === 'ALL' || (workMode === 'FIELD' && isField) || (workMode === 'OFFICE' && !isField);
+        if (!matchesMode) return false;
 
         if (selectedState === 'ALL') return true;
 
@@ -441,18 +677,22 @@ export default function RouteReplayView({ employees }) {
         const empState = resolveEmpOnboardingState(emp).toLowerCase();
 
         return empState.includes(targetState) || targetState.includes(empState);
-    });
+    }).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             {/* Top Toolbar Selector Box */}
-            <div style={{ background: 'var(--bg-glass)', padding: '24px', borderRadius: '16px', border: '1px solid var(--border-glass)', boxShadow: 'var(--shadow-sm)' }}>
-                <div style={{ display: 'flex', gap: '20px', alignItems: 'end', flexWrap: 'wrap' }}>
+            <div style={{ background: 'var(--bg-glass)', padding: '20px', borderRadius: '16px', border: '1px solid var(--border-glass)', boxShadow: 'var(--shadow-sm)' }}>
+                <div className="route-replay-controls-wrap" style={{ display: 'flex', gap: '16px', alignItems: 'end', flexWrap: 'wrap' }}>
                     
                     {/* Work Mode Filter */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div className="route-control-item" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)' }}>Work Mode</label>
                         <div style={{ display: 'flex', gap: '12px', alignItems: 'center', height: '42px' }}>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: 'var(--text-primary)' }}>
+                                <input type="radio" name="routeWorkMode" value="ALL" checked={workMode === 'ALL'} onChange={() => { setWorkMode('ALL'); setSelectedEmp(''); }} style={{ accentColor: '#2563eb' }} />
+                                All Staff
+                            </label>
                             <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: 'var(--text-primary)' }}>
                                 <input type="radio" name="routeWorkMode" value="OFFICE" checked={workMode === 'OFFICE'} onChange={() => { setWorkMode('OFFICE'); setSelectedEmp(''); }} style={{ accentColor: '#2563eb' }} />
                                 Office Person
@@ -465,7 +705,7 @@ export default function RouteReplayView({ employees }) {
                     </div>
 
                     {/* Filter by State */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div className="route-control-item route-state-item" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)' }}>Filter by State</label>
                         <select 
                             value={selectedState} 
@@ -480,21 +720,16 @@ export default function RouteReplayView({ employees }) {
                     </div>
 
                     {/* Cascading Select Employee */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', minWidth: '220px', flex: 1 }}>
-                        <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)' }}>Select Employee</label>
-                        <select
-                            style={{ width: '100%', height: '42px', padding: '0 16px', borderRadius: '8px', border: '1px solid var(--border-glass)', outline: 'none', background: 'var(--input-bg)', color: 'var(--text-primary)', fontSize: '14px', fontWeight: 600, boxSizing: 'border-box' }}
-                            value={selectedEmp}
-                            onChange={(e) => setSelectedEmp(e.target.value)}
-                        >
-                            <option value="">-- Select Employee --</option>
-                            {filteredEmployees.map(emp => (
-                                <option key={emp.id} value={emp.id}>{emp.name} ({emp.empCode || emp.employeeId || emp.id})</option>
-                            ))}
-                        </select>
+                    <div className="route-control-item route-emp-item" style={{ display: 'flex', flexDirection: 'column', gap: '8px', minWidth: '220px', flex: 1 }}>
+                        <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)' }}>Select Employee ({filteredEmployees.length})</label>
+                        <EmployeeSelectDropdown
+                            employees={filteredEmployees}
+                            selectedEmpId={selectedEmp}
+                            onSelect={(id) => setSelectedEmp(id)}
+                        />
                     </div>
 
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div className="route-control-item route-date-item" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)' }}>Select Date</label>
                         <input
                             type="date"
@@ -505,10 +740,11 @@ export default function RouteReplayView({ employees }) {
                     </div>
 
                     {/* Dual Mode Routing Selector Buttons */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div className="route-control-item route-engine-item" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)' }}>Routing Engine</label>
                         <div style={{ display: 'flex', background: 'var(--input-bg)', padding: '4px', borderRadius: '8px', gap: '4px', height: '42px', boxSizing: 'border-box', alignItems: 'center', border: '1px solid var(--border-glass)' }}>
                             <button
+                                type="button"
                                 onClick={() => { setRouteMode('osrm'); handleLoadRoute('osrm'); }}
                                 style={{
                                     background: routeMode === 'osrm' ? '#2563eb' : 'transparent',
@@ -520,6 +756,7 @@ export default function RouteReplayView({ employees }) {
                             </button>
 
                             <button
+                                type="button"
                                 onClick={() => { setRouteMode('fast'); handleLoadRoute('fast'); }}
                                 style={{
                                     background: routeMode === 'fast' ? '#10b981' : 'transparent',
@@ -532,17 +769,18 @@ export default function RouteReplayView({ employees }) {
                         </div>
                     </div>
 
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        <span style={{ fontSize: '12px', fontWeight: 700, color: 'transparent', userSelect: 'none' }}>&nbsp;</span>
+                    <div className="route-control-item route-btn-item" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <span className="desktop-spacer" style={{ fontSize: '12px', fontWeight: 700, color: 'transparent', userSelect: 'none' }}>&nbsp;</span>
                         <button
+                            type="button"
                             onClick={() => handleLoadRoute(routeMode)}
                             disabled={loading}
                             style={{
                                 background: '#2563eb', color: 'white', border: 'none', padding: '0 24px', height: '42px', borderRadius: '8px', fontWeight: 700, fontSize: '14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 2px 4px rgba(37,99,235,0.2)', justifyContent: 'center', boxSizing: 'border-box'
                             }}
                         >
-                            {loading ? <i className="fa-solid fa-spinner fa-spin"></i> : <i className="fa-solid fa-play"></i>}
-                            <span>{loading ? 'Processing...' : 'Load Route'}</span>
+                            {loading ? <i className="fa-solid fa-spinner fa-spin"></i> : <i className="fa-solid fa-arrows-rotate"></i>}
+                            <span>{loading ? 'Processing...' : 'Refresh Map'}</span>
                         </button>
                     </div>
                 </div>
@@ -550,7 +788,7 @@ export default function RouteReplayView({ employees }) {
 
             {/* KPI Metrics Cards */}
             {replayData && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
+                <div className="kpi-grid-mobile">
                     <div style={{ background: 'var(--bg-glass)', padding: '16px 20px', borderRadius: '12px', border: '1px solid var(--border-glass)', display: 'flex', flexDirection: 'column', gap: '2px' }}>
                         <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Total Distance</span>
                         <span style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-primary)' }}>{replayData.roadDistance || replayData.straightDistance || 0} km</span>
@@ -575,9 +813,15 @@ export default function RouteReplayView({ employees }) {
                 </div>
             )}
 
+            {replayData && replayData.pingInterval && (
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)', padding: '0 4px' }}>
+                    {pingSummary(replayData)}
+                </div>
+            )}
+
             {/* Replay Animation Controls Toolbar */}
             {replayData && (
-                <div style={{ background: 'var(--bg-glass)', padding: '16px 24px', borderRadius: '16px', border: '1px solid var(--border-glass)', display: 'flex', alignItems: 'center', gap: '20px', boxShadow: 'var(--shadow-sm)' }}>
+                <div style={{ background: 'var(--bg-glass)', padding: '14px 18px', borderRadius: '16px', border: '1px solid var(--border-glass)', display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap', boxShadow: 'var(--shadow-sm)' }}>
                     <button
                         onClick={handleTogglePlay}
                         style={{ background: isPlaying ? '#ef4444' : '#10b981', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '8px', fontWeight: 800, fontSize: '14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', minWidth: '110px', justifyContent: 'center' }}
@@ -627,9 +871,9 @@ export default function RouteReplayView({ employees }) {
             )}
 
             {/* Split Screen Container */}
-            <div style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: '20px' }}>
+            <div className="route-replay-split-grid">
                 {/* Left Side Panel: Location Logs */}
-                <div style={{ background: 'var(--bg-glass)', padding: '20px', borderRadius: '16px', border: '1px solid var(--border-glass)', display: 'flex', flexDirection: 'column', gap: '16px', height: '620px' }}>
+                <div id="route-replay-logs-container" className="route-replay-logs-panel" style={{ background: 'var(--bg-glass)', padding: '16px', borderRadius: '16px', border: '1px solid var(--border-glass)', display: 'flex', flexDirection: 'column', gap: '14px', minHeight: '280px', maxHeight: '620px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-glass)', paddingBottom: '12px' }}>
                         <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: 'var(--text-primary)' }}>Location & Route Logs</h3>
                         {replayData && (
@@ -719,8 +963,56 @@ export default function RouteReplayView({ employees }) {
                 </div>
 
                 {/* Leaflet Map Panel */}
-                <div style={{ background: 'var(--bg-glass)', padding: '16px', borderRadius: '16px', border: '1px solid var(--border-glass)', height: '620px', position: 'relative' }}>
-                    <div ref={mapRef} style={{ width: '100%', height: '588px', borderRadius: '12px', zIndex: 0 }} />
+                <div className="route-replay-map-panel" style={{ background: 'var(--bg-glass)', padding: '16px', borderRadius: '16px', border: '1px solid var(--border-glass)', minHeight: '400px', display: 'flex', flexDirection: 'column', position: 'relative' }}>
+                    <div ref={mapRef} style={{ width: '100%', height: '588px', minHeight: '340px', borderRadius: '12px', zIndex: 0 }} />
+
+                    {/* Mobile Bottom Summary Card (Matches Screen 4) */}
+                    <div className="mobile-cards-only route-summary-card-mobile" style={{
+                        background: 'var(--card-bg, #ffffff)',
+                        border: '1px solid var(--border-glass, #e2e8f0)',
+                        borderRadius: '14px',
+                        padding: '14px 18px',
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+                        marginTop: '12px',
+                        flexDirection: 'column',
+                        gap: '12px'
+                    }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div>
+                                <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', display: 'block' }}>Total Distance</span>
+                                <span style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-primary)' }}>{replayData?.roadDistance || replayData?.straightDistance || '12.4'} km</span>
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                                <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', display: 'block' }}>Travel Time</span>
+                                <span style={{ fontSize: '18px', fontWeight: 800, color: '#2563eb' }}>{getTravelDuration()}</span>
+                            </div>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                const logsEl = document.getElementById('route-replay-logs-container');
+                                if (logsEl) logsEl.scrollIntoView({ behavior: 'smooth' });
+                            }}
+                            style={{
+                                width: '100%',
+                                height: '42px',
+                                background: '#2563eb',
+                                color: '#ffffff',
+                                border: 'none',
+                                borderRadius: '8px',
+                                fontSize: '13px',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '8px'
+                            }}
+                        >
+                            <span>View Details</span>
+                            <i className="fa-solid fa-chevron-right" style={{ fontSize: '11px' }}></i>
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>

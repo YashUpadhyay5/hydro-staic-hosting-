@@ -170,7 +170,7 @@ export default function DocumentsView({ employees, adminUser }) {
     const paginatedDocs = filtered.slice(startIndex, endIndex);
 
     return (
-        <div id="documents-view" className="view active" style={{ height: '100%', minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: '16px', overflow: 'hidden' }}>
+        <div id="documents-view" className="view active" style={{ minHeight: '100%', flex: 1, display: 'flex', flexDirection: 'column', gap: '16px' }}>
             
             {/* Header with Share Document + Toggle */}
             <div className="glass" style={{ padding: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
@@ -357,6 +357,7 @@ export default function DocumentsView({ employees, adminUser }) {
             </div>
 
             <div className="table-container glass custom-scrollbar" style={{ padding: 0, flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'auto', borderRadius: '16px' }}>
+                <div className="desktop-table-view">
                 <table id="documents-table">
                     <thead>
                         <tr>
@@ -408,6 +409,61 @@ export default function DocumentsView({ employees, adminUser }) {
                         )}
                     </tbody>
                 </table>
+                </div>
+
+                {/* Mobile Document Cards */}
+                <div className="mobile-cards-only" style={{ padding: '8px 12px' }}>
+                    {loading ? (
+                        <LoadingSpinner message="Accessing Document Vault..." minHeight="180px" />
+                    ) : error ? (
+                        <div className="error-text" style={{ textAlign: 'center', padding: '30px' }}>Failed to load documents</div>
+                    ) : paginatedDocs.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af' }}>No documents found.</div>
+                    ) : (
+                        paginatedDocs.map(doc => (
+                            <div key={doc.id} className="mobile-record-card">
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: 'rgba(37, 99, 235, 0.1)', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px' }}>
+                                            <i className="fa-solid fa-file-lines"></i>
+                                        </div>
+                                        <div>
+                                            <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{doc.title}</h4>
+                                            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Uploaded by {doc.uploaderName}</span>
+                                        </div>
+                                    </div>
+                                    <span style={{ fontSize: '10px', fontWeight: 700, background: 'var(--input-bg)', padding: '2px 8px', borderRadius: '4px', border: '1px solid var(--border-glass)', textTransform: 'uppercase' }}>
+                                        {doc.fileType || 'DOC'}
+                                    </span>
+                                </div>
+
+                                <div style={{ fontSize: '11.5px', color: 'var(--text-secondary)' }}>
+                                    Shared with: <b>{doc.targetType === 'ALL' ? 'All Employees' : doc.targetUserName || '-'}</b> • {formatDate(doc.uploadedAt, true)}
+                                </div>
+
+                                <div style={{ display: 'flex', gap: '8px', paddingTop: '6px', borderTop: '1px solid var(--border-glass, #e2e8f0)' }}>
+                                    <button 
+                                        type="button"
+                                        onClick={() => setModalDoc(doc)} 
+                                        className="btn btn-primary" 
+                                        style={{ flex: 1, minHeight: '38px', borderRadius: '8px', fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                                    >
+                                        <i className="fa-solid fa-eye"></i> Open Document
+                                    </button>
+                                    <button 
+                                        type="button"
+                                        onClick={() => forceDownload(doc.cloudinaryUrl || getFullUrl(doc.filePath), `document_${doc.id}`)} 
+                                        className="btn btn-outline" 
+                                        style={{ padding: '0 16px', minHeight: '38px', borderRadius: '8px', fontSize: '13px' }}
+                                        title="Download"
+                                    >
+                                        <i className="fa-solid fa-download"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
 
                 {/* Gmail-style Pagination Footer */}
                 {totalItems > 0 && (
