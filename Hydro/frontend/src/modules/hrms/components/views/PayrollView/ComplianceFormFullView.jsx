@@ -8,6 +8,7 @@ import {
   getCurrentMonthYYYYMM
 } from '../../../data/complianceFormsData';
 import { resolvePayrollRunItems, resolveOverrideValue } from '../../../services/payrollItemResolver';
+import { DataMapper } from '../../../services/excelEngine/DataMapper';
 
 export default function ComplianceFormFullView({
   formConfig,
@@ -44,7 +45,29 @@ export default function ComplianceFormFullView({
     }
   }, [employees, internalEmployees.length]);
 
-  const effectiveEmployees = employees && employees.length > 0 ? employees : internalEmployees;
+  const effectiveEmployees = useMemo(() => {
+    if (employees && employees.length > 0) return employees;
+    return internalEmployees.filter(emp => {
+      if (selectedLocation && selectedLocation !== 'ALL') {
+        const empLoc = String(emp.location || emp.site || '').trim().toLowerCase();
+        if (empLoc !== selectedLocation.trim().toLowerCase()) return false;
+      }
+      if (selectedStatus === 'ACTIVE') {
+        return String(emp.status || '').trim().toUpperCase() === 'ACTIVE';
+      }
+      if (selectedStatus === 'NOT_ACTIVE') {
+        return String(emp.status || '').trim().toUpperCase() !== 'ACTIVE';
+      }
+      return true;
+    });
+  }, [employees, internalEmployees, selectedLocation, selectedStatus]);
+
+  useEffect(() => {
+    const dirSource = (employees && employees.length > 0) ? employees : internalEmployees;
+    if (dirSource.length > 0 && DataMapper.directory.length === 0) {
+      DataMapper.setDirectory(dirSource);
+    }
+  }, [employees, internalEmployees]);
 
   const [internalSettings, setInternalSettings] = useState({});
   useEffect(() => {
@@ -114,18 +137,25 @@ export default function ComplianceFormFullView({
     return () => { isCancelled = true; };
   }, [selectedMonth]);
 
-  const effectiveRunItems = hasRunForMonth 
-    ? ((internalRunItems && internalRunItems.length > 0) ? internalRunItems : (runItems || []))
-    : [];
+  const effectiveRunItems = useMemo(() => {
+    if (!hasRunForMonth) return [];
+    if (internalRunItems && internalRunItems.length > 0) return internalRunItems;
+    return runItems || [];
+  }, [hasRunForMonth, internalRunItems, runItems]);
   const isWageForm = formConfig.sheetName === 'Form W' || formConfig.id === 'form-w' || formConfig.sheetName === 'Form T' || formConfig.id === 'form-t';
   const isFormW = isWageForm;
   const isPayrollRun = Boolean(hasRunForMonth && effectiveRunItems.length > 0);
   const isStillLoading = (loadingPayRun || internalLoadingPayRun) && effectiveRunItems.length === 0;
 
+  const reportOptions = useMemo(() => ({
+    ...effectiveSettings,
+    includeInactive: selectedStatus === 'NOT_ACTIVE'
+  }), [effectiveSettings, selectedStatus]);
+
   // Compute dynamic form data strictly from DB state & selected month & filtered employees
   const { meta, headers, body, payrollNotRun } = useMemo(() => {
-    return getDynamicFormData(formConfig.sheetName, selectedMonth, effectiveEmployees, attendance, leaves, effectiveRunItems, effectiveSettings);
-  }, [formConfig, selectedMonth, effectiveEmployees, attendance, leaves, effectiveRunItems, effectiveSettings]);
+    return getDynamicFormData(formConfig.sheetName, selectedMonth, effectiveEmployees, attendance, leaves, effectiveRunItems, reportOptions);
+  }, [formConfig, selectedMonth, effectiveEmployees, attendance, leaves, effectiveRunItems, reportOptions]);
 
   // Filter rows by search query
   const filteredBody = useMemo(() => {
@@ -141,7 +171,7 @@ export default function ComplianceFormFullView({
       setShowErrorModal(true);
       return;
     }
-    exportFormToExcel(formConfig.sheetName, selectedMonth, effectiveEmployees, attendance, leaves, effectiveRunItems, effectiveSettings);
+    exportFormToExcel(formConfig.sheetName, selectedMonth, effectiveEmployees, attendance, leaves, effectiveRunItems, reportOptions);
   };
 
   const handleDownloadPdf = async () => {

@@ -41,6 +41,13 @@ const PayrollRun = sequelize.define('PayrollRun', {
     field: 'error_message',
     allowNull: true,
   },
+  // Where Step 1's automatic LOP comes from: 'REGISTER' (monthly attendance register) for runs created since
+  // the register exists; NULL for older runs, which keep LOP from approved leave so their figures never change.
+  lopSource: {
+    type: DataTypes.STRING(20),
+    field: 'lop_source',
+    allowNull: true,
+  },
   attendanceLocked: {
     type: DataTypes.BOOLEAN,
     field: 'attendance_locked',

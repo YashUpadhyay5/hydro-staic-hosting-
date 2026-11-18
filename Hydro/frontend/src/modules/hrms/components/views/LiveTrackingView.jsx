@@ -19,6 +19,7 @@ export default function LiveTrackingView({ employees }) {
     const cachedFootprints = api.getCached('/footprints/latest-all');
     const [liveLogs, setLiveLogs] = useState(() => Array.isArray(cachedFootprints) ? cachedFootprints : []);
     const [searchQuery, setSearchQuery] = useState('');
+    const [mobileTab, setMobileTab] = useState('both'); // 'both', 'map', 'list'
     
     const mapRef = useRef(null);
     const mapInstance = useRef(null);
@@ -319,10 +320,11 @@ export default function LiveTrackingView({ employees }) {
                     `;
                     
                     const markerIcon = getLiveMarkerIcon(f);
+                    const isMobileScreen = typeof window !== 'undefined' && window.innerWidth <= 768;
                     const marker = window.L.marker([f.latJittered, f.lngJittered], { icon: markerIcon })
                         .addTo(layerGroupRef.current)
                         .bindTooltip(tooltipContent, {
-                            permanent: true,
+                            permanent: !isMobileScreen,
                             direction: 'top',
                             offset: [0, -10],
                             opacity: 0.95
@@ -374,12 +376,23 @@ export default function LiveTrackingView({ employees }) {
     }, [selectedEmp, workMode, selectedState, employees]);
 
     const handleLogClick = (userId, lat, lng) => {
-        if (!mapInstance.current || !lat || !lng) return;
-        mapInstance.current.setView([lat, lng], 16);
-        const marker = markersRef.current[userId];
-        if (marker) {
-            marker.openPopup();
+        if (mobileTab === 'list') {
+            setMobileTab('map');
         }
+        setTimeout(() => {
+            if (!mapInstance.current || !lat || !lng) return;
+            mapInstance.current.setView([lat, lng], 16);
+            const marker = markersRef.current[userId];
+            if (marker) {
+                marker.openPopup();
+            }
+            if (typeof window !== 'undefined' && window.innerWidth <= 768) {
+                const mapEl = document.getElementById('live-map');
+                if (mapEl) {
+                    mapEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }
+        }, 80);
     };
 
     // Resolve clean single official onboarding state for employees (Enterprise Production Standard)
@@ -443,27 +456,36 @@ export default function LiveTrackingView({ employees }) {
     });
 
     return (
-        <div id="live-tracking-view" className="view active" style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '12px', minHeight: 0, overflow: 'hidden' }}>
+        <div id="live-tracking-view" className="view active">
             {/* Input Selection Header (Fixed) */}
             <div className="glass live-tracking-header-card" style={{ padding: '14px 20px', flexShrink: 0 }}>
                 <div className="live-tracking-controls-wrap" style={{ display: 'flex', gap: '16px', alignItems: 'flex-end', justifyContent: 'flex-start', flexWrap: 'wrap' }}>
                     
-                    {/* Work Mode Filter */}
-                    <div className="live-control-item" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {/* Work Mode Filter (Premium Segmented Pills - Zero Overlapping Circles) */}
+                    <div className="live-control-item live-workmode-item" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                         <label style={{ fontWeight: 600, fontSize: '0.85rem' }}>Work Mode</label>
-                        <div style={{ display: 'flex', gap: '12px', alignItems: 'center', height: '39px' }}>
-                            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' }}>
-                                <input type="radio" name="liveWorkMode" value="ALL" checked={workMode === 'ALL'} onChange={() => { setWorkMode('ALL'); setSelectedEmp('all'); }} style={{ accentColor: '#2563eb' }} />
+                        <div className="live-workmode-pills" style={{ display: 'flex', gap: '4px', alignItems: 'center', height: '39px' }}>
+                            <button 
+                                type="button"
+                                className={`live-pill-btn ${workMode === 'ALL' ? 'active' : ''}`}
+                                onClick={() => { setWorkMode('ALL'); setSelectedEmp('all'); }}
+                            >
                                 All Staff
-                            </label>
-                            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' }}>
-                                <input type="radio" name="liveWorkMode" value="OFFICE" checked={workMode === 'OFFICE'} onChange={() => { setWorkMode('OFFICE'); setSelectedEmp('all'); }} style={{ accentColor: '#2563eb' }} />
+                            </button>
+                            <button 
+                                type="button"
+                                className={`live-pill-btn ${workMode === 'OFFICE' ? 'active' : ''}`}
+                                onClick={() => { setWorkMode('OFFICE'); setSelectedEmp('all'); }}
+                            >
                                 Office Staff
-                            </label>
-                            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' }}>
-                                <input type="radio" name="liveWorkMode" value="FIELD" checked={workMode === 'FIELD'} onChange={() => { setWorkMode('FIELD'); setSelectedEmp('all'); }} style={{ accentColor: '#2563eb' }} />
+                            </button>
+                            <button 
+                                type="button"
+                                className={`live-pill-btn ${workMode === 'FIELD' ? 'active' : ''}`}
+                                onClick={() => { setWorkMode('FIELD'); setSelectedEmp('all'); }}
+                            >
                                 Field Staff
-                            </label>
+                            </button>
                         </div>
                     </div>
 
@@ -529,10 +551,44 @@ export default function LiveTrackingView({ employees }) {
                 </div>
             </div>
 
+            {/* Mobile View Switcher (Only visible on mobile <= 768px) */}
+            <div className="live-mobile-nav-tabs">
+                <button 
+                    type="button" 
+                    className={`live-mobile-tab-btn ${mobileTab === 'both' ? 'active' : ''}`}
+                    onClick={() => {
+                        setMobileTab('both');
+                        setTimeout(() => { if (mapInstance.current) mapInstance.current.invalidateSize(); }, 120);
+                    }}
+                >
+                    <i className="fa-solid fa-layer-group"></i>
+                    <span>Both</span>
+                </button>
+                <button 
+                    type="button" 
+                    className={`live-mobile-tab-btn ${mobileTab === 'map' ? 'active' : ''}`}
+                    onClick={() => {
+                        setMobileTab('map');
+                        setTimeout(() => { if (mapInstance.current) mapInstance.current.invalidateSize(); }, 120);
+                    }}
+                >
+                    <i className="fa-solid fa-map-location-dot"></i>
+                    <span>Map View</span>
+                </button>
+                <button 
+                    type="button" 
+                    className={`live-mobile-tab-btn ${mobileTab === 'list' ? 'active' : ''}`}
+                    onClick={() => setMobileTab('list')}
+                >
+                    <i className="fa-solid fa-users"></i>
+                    <span>Active ({filteredLogs.length})</span>
+                </button>
+            </div>
+
             {/* Split Screen Container (Flex 1) */}
-            <div className="view-content tracking-split-container" style={{ flex: 1, display: 'flex', gap: '16px', minHeight: 0, overflow: 'hidden' }}>
+            <div className={`view-content tracking-split-container mobile-tab-${mobileTab}`}>
                 {/* Left Side Panel: Active Employees & Details (Only this list scrolls!) */}
-                <div className="glass panel-left" style={{ flex: 1, minWidth: '280px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', height: '100%', overflow: 'hidden' }}>
+                <div className={`glass panel-left ${mobileTab === 'map' ? 'hidden-mobile' : ''}`}>
                     <div style={{ borderBottom: '1px solid #e5e7eb', paddingBottom: '8px', flexShrink: 0 }}>
                         <h3 style={{ margin: 0, marginBottom: '8px' }}>Active Employees</h3>
                         <input 
@@ -645,7 +701,7 @@ export default function LiveTrackingView({ employees }) {
                 </div>
 
                 {/* Right Side Panel: Leaflet Map (Fills remaining height) */}
-                <div className="glass panel-map" style={{ flex: 2, minWidth: '280px', padding: '10px', height: '100%', display: 'flex', flexDirection: 'column' }}>
+                <div className={`glass panel-map ${mobileTab === 'list' ? 'hidden-mobile' : ''}`}>
                     <div ref={mapRef} id="live-map" style={{ width: '100%', height: '100%', borderRadius: '8px', zIndex: 1 }}></div>
                 </div>
             </div>

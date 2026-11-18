@@ -321,6 +321,42 @@ class ApiService {
         });
     }
 
+    // Sunday / holiday shift verification. Reads are not cached unless a caller asks (ttl); any decision
+    // (POST under /attendance) clears the cached lists, so a decision shows straight away.
+    specialShiftsPath(params = {}) {
+        const query = new URLSearchParams();
+        Object.entries(params).forEach(([k, v]) => {
+            if (v !== undefined && v !== null && v !== '') query.append(k, v);
+        });
+        return `/attendance/special-shifts?${query.toString()}`;
+    }
+
+    getSpecialShifts(params = {}, options = {}) {
+        return this.request(this.specialShiftsPath(params), { ttl: 0, ...options });
+    }
+
+    getPendingSpecialShifts(params = {}) {
+        const query = new URLSearchParams();
+        Object.entries(params).forEach(([k, v]) => {
+            if (v !== undefined && v !== null && v !== '') query.append(k, v);
+        });
+        return this.request(`/attendance/special-shifts/pending?${query.toString()}`, { ttl: 0 });
+    }
+
+    verifySpecialShift(payload) {
+        return this.request('/attendance/special-shifts/verify', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+    }
+
+    batchVerifySpecialShifts(payload) {
+        return this.request('/attendance/special-shifts/batch-verify', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+    }
+
     // ==========================================
     // 4. GEOFENCING PROTOCOLS
     // ==========================================
@@ -365,6 +401,33 @@ class ApiService {
         if (date) params.push(`date=${date}`);
         if (params.length) url += `?${params.join('&')}`;
         return this.request(url, { ttl: 30000, ...options });
+    }
+
+    // Day activities logged from the employee's phone (no cache: "running over" must be live)
+    getEmployeeActivities(employeeId, date) {
+        return this.request(`/activities?employeeId=${encodeURIComponent(employeeId)}&date=${encodeURIComponent(date)}`, { ttl: 0 });
+    }
+
+    // Attendance regularization: requests to be marked present on a day the employee forgot to clock in (no cache: a decision must show at once)
+    getRegularizations(status = 'PENDING') {
+        return this.request(`/regularizations?status=${encodeURIComponent(status)}`, { ttl: 0 });
+    }
+
+    approveRegularization(id, note = '') {
+        return this.request(`/regularizations/${encodeURIComponent(id)}/approve`, { method: 'POST', body: JSON.stringify({ note }) });
+    }
+
+    rejectRegularization(id, note) {
+        return this.request(`/regularizations/${encodeURIComponent(id)}/reject`, { method: 'POST', body: JSON.stringify({ note }) });
+    }
+
+    // Monthly attendance register (P / EL / A per day) and its admin edits (no cache: edits must show at once)
+    getAttendanceRegister(month) {
+        return this.request(`/attendance-register?month=${encodeURIComponent(month)}`, { ttl: 0 });
+    }
+
+    saveAttendanceRegisterEdits(changes, note = '') {
+        return this.request('/attendance-register/edits', { method: 'POST', body: JSON.stringify({ changes, note }) });
     }
 
     getRouteReplay(userId, date, mode = 'osrm', options = {}) {
@@ -427,6 +490,11 @@ class ApiService {
 
     getEmployeeLedger(employeeId) {
         return this.request(`/ledger/employee/${employeeId}`);
+    }
+
+    getEmployeeLedgerExtras(employeeId, petrolDates = []) {
+        const qs = petrolDates.length ? `?petrolDates=${encodeURIComponent(petrolDates.join(','))}` : '';
+        return this.request(`/ledger/employee/${encodeURIComponent(employeeId)}/ledger-extras${qs}`);
     }
 
     unlinkLedgerEntry(ledgerId) {

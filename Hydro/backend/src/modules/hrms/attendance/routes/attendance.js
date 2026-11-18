@@ -833,16 +833,20 @@ router.post('/heartbeat', async (req, res) => {
   }
 });
 
+// Records Sunday/holiday shifts of a month as PENDING credits (no balance change until verified).
 router.post('/sync-special-credits', async (req, res) => {
   try {
     const { month } = req.body;
-    const result = await SpecialEarnedCreditService.syncCreditsForMonth(month);
+    const result = await SpecialEarnedCreditService.syncCreditsForMonth(month, { force: true });
     return res.status(200).json(result);
   } catch (error) {
     console.error('Error syncing special credits:', error);
     return res.status(500).json({ error: error.message });
   }
 });
+
+// Sunday/holiday shift verification; mounted before the '/:sessionId' routes so the path is not taken as an id.
+router.use('/special-shifts', require('./specialShifts'));
 
 router.get('/analytics', async (req, res) => {
   try {

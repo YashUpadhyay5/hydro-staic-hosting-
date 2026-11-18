@@ -437,7 +437,7 @@ export default function ProfessionalTaxTab({ adminUser }) {
   const exemptStatesCount = states.filter(s => s.maxAnnualPt === 0 || s.maxAnnualPt === null).length;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', paddingBottom: '40px' }}>
+    <div className="pt-tab-container" style={{ display: 'flex', flexDirection: 'column', gap: '20px', paddingBottom: '16px' }}>
       
       {/* Toast Notification Alert */}
       {notification.message && (
@@ -459,7 +459,7 @@ export default function ProfessionalTaxTab({ adminUser }) {
       )}
 
       {/* Top Banner & Title Bar */}
-      <div className="card glass" style={{ padding: '24px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+      <div className="card glass pt-title-bar" style={{ padding: '20px 24px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <div style={{ background: 'linear-gradient(135deg, #4f46e5, #3b82f6)', color: '#fff', width: '40px', height: '40px', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem' }}>
@@ -491,7 +491,7 @@ export default function ProfessionalTaxTab({ adminUser }) {
       </div>
 
       {/* Metrics Cards Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
+      <div className="pt-metrics-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
         <div className="card glass" style={{ padding: '18px 20px', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '16px' }}>
           <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: 'rgba(79, 70, 229, 0.15)', color: '#4f46e5', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.3rem' }}>
             <i className="fa-solid fa-map"></i>
@@ -565,7 +565,8 @@ export default function ProfessionalTaxTab({ adminUser }) {
 
       {/* Main States Table */}
       <div className="card glass" style={{ padding: '0', borderRadius: '12px', overflow: 'hidden' }}>
-        <table className="table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+        <div className="payroll-table-wrap">
+          <table className="table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
           <thead>
             <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid var(--border-glass)' }}>
               <th style={{ padding: '14px 18px', fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: '700' }}>STATE / REGION</th>
@@ -707,6 +708,7 @@ export default function ProfessionalTaxTab({ adminUser }) {
             )}
           </tbody>
         </table>
+        </div>
       </div>
 
       {/* ========================================================================= */}

@@ -237,7 +237,12 @@ test('excel import and connected balances', async (t) => {
 
   await t.test('approving a leave updates the ledger, the requests list and the employee profile', async () => {
     const before = (await call('GET', `/api/leaves/balances/E1?year=${Y}`)).body;
-    const applied = await call('POST', '/api/leaves', { body: { userId: 'HMPL01', userName: 'Anshup', startDate: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`, endDate: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-02`, reason: 'family' } });
+    // Two consecutive days of this month that are not Sundays (leave only counts working days)
+    const isSunday = (d) => new Date(Date.UTC(now.getFullYear(), now.getMonth(), d)).getUTCDay() === 0;
+    let d1 = 1;
+    while (isSunday(d1) || isSunday(d1 + 1)) d1++;
+    const ymd = (d) => `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const applied = await call('POST', '/api/leaves', { body: { userId: 'HMPL01', userName: 'Anshup', startDate: ymd(d1), endDate: ymd(d1 + 1), reason: 'family' } });
     assert.equal(applied.status, 201);
     assert.equal(applied.body.elDays, 2);
     // pending: nothing deducted yet

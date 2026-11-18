@@ -440,6 +440,77 @@ const runMigrations = async (sequelize) => {
   } catch (e) {
     console.warn('location_geofence_settings sequence migration warning:', e.message);
   }
+
+  // Migration: Ensure clusters.id has an auto-increment default in PostgreSQL. Without it, a photo taken at a
+  // new place failed with: null value in column "id" of relation "clusters" violates not-null constraint
+  try {
+    if (isPostgres) {
+      await sequelize.query(`
+        CREATE SEQUENCE IF NOT EXISTS clusters_id_seq;
+        SELECT setval('clusters_id_seq', COALESCE((SELECT MAX(id) FROM clusters), 0) + 1, false);
+        ALTER TABLE clusters ALTER COLUMN id SET DEFAULT nextval('clusters_id_seq');
+        ALTER SEQUENCE clusters_id_seq OWNED BY clusters.id;
+      `);
+      console.log('Ensured clusters_id_seq auto-increment sequence exists.');
+    }
+  } catch (e) {
+    console.warn('clusters sequence migration warning:', e.message);
+  }
+
+  // Migration: special leave (Marriage / Paternity / Maternity). The location_leave_categories table is
+  // created by sequelize.sync() from shared/models/LeaveCategory.js; this adds the request column and seeds it.
+  try {
+    if (isPostgres) {
+      await sequelize.query('ALTER TABLE location_leaves ADD COLUMN IF NOT EXISTS leave_category VARCHAR(255);');
+    } else {
+      await sequelize.query('ALTER TABLE location_leaves ADD COLUMN leave_category VARCHAR(255);');
+    }
+    console.log('Migrated location_leaves: added leave_category.');
+  } catch (err) {
+    if (!err.message.includes('duplicate column') && !err.message.includes('already exists')) {
+      console.warn('location_leaves leave_category migration warning:', err.message);
+    }
+  }
+  try {
+    await sequelize.query(`
+      INSERT INTO location_leave_categories (id, code, name, duration_value, duration_unit, is_active, sort_order, created_at, updated_at) VALUES
+        ('6dd1a3a4-6158-4405-90b4-1dfccfde3529', 'marriage',  'Marriage Leave',  7, 'days',   true, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+        ('6b1abe7b-e89d-4aca-a1a7-8bece1b9abd1', 'paternity', 'Paternity Leave', 7, 'days',   true, 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+        ('1a67affc-a9a1-4cc0-87b8-a66f7aab33d4', 'maternity', 'Maternity Leave', 6, 'months', true, 3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ON CONFLICT (code) DO NOTHING;
+    `);
+    console.log('Ensured default special leave categories exist.');
+  } catch (err) {
+    console.warn('location_leave_categories seed warning:', err.message);
+  }
+
+  // Migration: leave counts working days only; each new request stores its working dates (JSON array).
+  try {
+    if (isPostgres) {
+      await sequelize.query('ALTER TABLE location_leaves ADD COLUMN IF NOT EXISTS working_dates TEXT;');
+    } else {
+      await sequelize.query('ALTER TABLE location_leaves ADD COLUMN working_dates TEXT;');
+    }
+    console.log('Migrated location_leaves: added working_dates.');
+  } catch (err) {
+    if (!err.message.includes('duplicate column') && !err.message.includes('already exists')) {
+      console.warn('location_leaves working_dates migration warning:', err.message);
+    }
+  }
+
+  // Migration: a pay run records where its automatic LOP comes from. Existing runs stay NULL (leave LOP, unchanged).
+  try {
+    if (isPostgres) {
+      await sequelize.query('ALTER TABLE payroll_runs ADD COLUMN IF NOT EXISTS lop_source VARCHAR(20);');
+    } else {
+      await sequelize.query('ALTER TABLE payroll_runs ADD COLUMN lop_source VARCHAR(20);');
+    }
+    console.log('Migrated payroll_runs: added lop_source.');
+  } catch (err) {
+    if (!err.message.includes('duplicate column') && !err.message.includes('already exists')) {
+      console.warn('payroll_runs lop_source migration warning:', err.message);
+    }
+  }
 };
 
 module.exports = { runMigrations };

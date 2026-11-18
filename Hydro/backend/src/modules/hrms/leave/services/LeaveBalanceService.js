@@ -42,6 +42,9 @@ function parseDateParts(input) {
 
 const toISO = (p) => `${p.year}-${pad2(p.month)}-${pad2(p.day)}`;
 
+// A Sunday/holiday credit counts in the balance only once approved (ACTIVE; rows from before statuses had none).
+const isCountedCredit = (a) => !a.status || a.status === 'ACTIVE';
+
 function parseLedgerStart() {
   const [y, m] = policy.LEDGER_START_MONTH.split('-').map(Number);
   return { year: y, month: m, index: monthIndex(y, m), isoDate: `${y}-${pad2(m)}-01` };
@@ -51,16 +54,36 @@ function todayParts(now = new Date()) {
   return { year: now.getFullYear(), month: now.getMonth() + 1, day: now.getDate() };
 }
 
+// A request's stored working dates (Sundays/holidays skipped), or null for older requests saved without them.
+function storedWorkingDates(leave) {
+  let dates = leave.workingDates;
+  if (typeof dates === 'string') { try { dates = JSON.parse(dates); } catch { dates = null; } }
+  if (!Array.isArray(dates)) return null;
+  const parts = dates.map(parseDateParts);
+  return parts.length && parts.every(Boolean) ? parts : null;
+}
+
 /**
  * Splits an approved leave's EL days across calendar months: EL is assigned to the leave's
- * earliest calendar days (the remainder of a long leave is LOP), so a leave spanning two months
- * is charged to the month(s) its EL days actually fall in.
+ * earliest working days (the remainder of a long leave is LOP), so a leave spanning two months
+ * is charged to the month(s) its EL days actually fall in. Requests saved before working days were
+ * stored keep their earliest calendar days, as they were counted.
  */
 function elDaysByDate(leave) {
   const start = parseDateParts(leave.startDate);
   let remaining = Number(leave.elDays || 0);
   const out = [];
   if (!start || !(remaining > 0)) return out;
+  const working = storedWorkingDates(leave);
+  if (working && working.length >= Math.ceil(remaining)) {
+    for (const p of working) {
+      if (!(remaining > 0)) break;
+      const share = Math.min(1, remaining);
+      out.push({ date: toISO(p), idx: monthIndex(p.year, p.month), days: share });
+      remaining = round2(remaining - share);
+    }
+    return out;
+  }
   const cursor = new Date(Date.UTC(start.year, start.month - 1, start.day));
   while (remaining > 0) {
     const share = Math.min(1, remaining);
@@ -216,7 +239,7 @@ function adjustmentVersion(adjustments) {
  *  - The ledger starts at LEDGER_START_MONTH with the migrated opening balance as carry-in.
  *  - Earned leave: EARNED_LEAVE_PER_MONTH for each month from max(ledger start, joining month)
  *    through the current month, unless an EARNED_LEAVE_OVERRIDE exists (latest override wins).
- *  - Special earned: sum of ACTIVE SPECIAL_EARNED_CREDIT rows dated in the month.
+ *  - Special earned: sum of ACTIVE SPECIAL_EARNED_CREDIT rows dated in the month (PENDING/REJECTED excluded).
  *  - Consumed: EL days of approved requests falling in the month + signed CONSUMED_LEAVE_CORRECTIONs.
  *  - remaining(month) = opening + Σ(earned + special - consumed) up to and including that month.
  */
@@ -232,7 +255,7 @@ function computeLedger(employee, adjustments, leaves, year, options = {}) {
   const migrationStart = parseMonthSetting(policy.MIGRATION_START_MONTH);
   let migration = migrationState(adjustments);
   // Dated Sunday/holiday credits inside the migration period are migration history too.
-  const migrationCredits = adjustments.filter((a) => a.adjustmentType === 'SPECIAL_EARNED_CREDIT' && a.year && a.month
+  const migrationCredits = adjustments.filter((a) => a.adjustmentType === 'SPECIAL_EARNED_CREDIT' && isCountedCredit(a) && a.year && a.month
     && monthIndex(a.year, a.month) >= migrationStart.index && monthIndex(a.year, a.month) < ledgerStart.index);
   if (migrationCredits.length) {
     const creditTime = Math.min(...migrationCredits.map((a) => new Date(a.createdAt).getTime()));
@@ -261,7 +284,9 @@ function computeLedger(employee, adjustments, leaves, year, options = {}) {
     if (!a.year || !a.month) continue;
     const idx = monthIndex(a.year, a.month);
     if (a.adjustmentType === 'EARNED_LEAVE_OVERRIDE') push(overridesByMonth, idx, a);
-    else if (a.adjustmentType === 'SPECIAL_EARNED_CREDIT') push(a.status === 'REVERSED' ? reversedByMonth : specialByMonth, idx, a);
+    // Only approved (ACTIVE) Sunday/holiday credits count; PENDING and REJECTED ones never do.
+    else if (a.adjustmentType === 'SPECIAL_EARNED_CREDIT' && isCountedCredit(a)) push(specialByMonth, idx, a);
+    else if (a.adjustmentType === 'SPECIAL_EARNED_CREDIT' && a.status === 'REVERSED') push(reversedByMonth, idx, a);
     else if (a.adjustmentType === 'CONSUMED_LEAVE_CORRECTION') push(correctionsByMonth, idx, a);
   }
 
@@ -510,7 +535,8 @@ async function loadSources(employees, { transaction } = {}) {
   const ids = employees.map((e) => e.id);
   const [adjustments, leaves, allEmployees] = await Promise.all([
     LeaveAdjustment.findAll({ where: { employeeId: { [Op.in]: ids } }, order: [['createdAt', 'ASC'], ['id', 'ASC']], transaction }),
-    Leave.findAll({ where: { status: 'approved' }, transaction }),
+    // Special leave (leave_category set) has its own allowance and never consumes EL, so it is not part of the ledger.
+    Leave.findAll({ where: { status: 'approved', leaveCategory: null }, transaction }),
     Employee.findAll({ attributes: ['id', 'empCode', 'name'], transaction })
   ]);
 
@@ -569,17 +595,21 @@ async function getSpecialEarnedDateOptions(employee, year, month, { transaction 
   const today = toISO({ year: now.getFullYear(), month: now.getMonth() + 1, day: now.getDate() });
   const joining = parseDateParts(employee.joiningDate);
   const joiningISO = joining ? toISO(joining) : null;
-  const credited = new Set((await LeaveAdjustment.findAll({
-    attributes: ['workDate'],
-    where: { employeeId: employee.id, adjustmentType: 'SPECIAL_EARNED_CREDIT', status: 'ACTIVE' },
+  const credits = await LeaveAdjustment.findAll({
+    attributes: ['workDate', 'status'],
+    where: { employeeId: employee.id, adjustmentType: 'SPECIAL_EARNED_CREDIT', status: { [Op.in]: ['ACTIVE', 'PENDING'] } },
     transaction
-  })).map((a) => a.workDate));
+  });
+  const credited = new Set(credits.filter((a) => a.status === 'ACTIVE').map((a) => a.workDate));
+  const pending = new Set(credits.filter((a) => a.status === 'PENDING').map((a) => a.workDate));
   const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
   const option = (iso, extra) => ({
     date: iso,
     ...extra,
     alreadyCredited: credited.has(iso),
-    disabledReason: iso > today ? 'Future date' : (joiningISO && iso < joiningISO ? 'Before joining' : (credited.has(iso) ? 'Already credited' : null))
+    pendingVerification: pending.has(iso),
+    disabledReason: iso > today ? 'Future date' : (joiningISO && iso < joiningISO ? 'Before joining' : (credited.has(iso) ? 'Already credited'
+      : (pending.has(iso) ? 'Awaiting verification in Attendance' : null)))
   });
   const sundays = [];
   for (let d = 1; d <= daysInMonth; d++) {
@@ -677,6 +707,7 @@ module.exports = {
   parseDateParts,
   parseLedgerStart,
   allocateElDaysByMonth,
+  elDaysByDate,
   monthIndex,
   toISO,
   OPENING_TYPES,

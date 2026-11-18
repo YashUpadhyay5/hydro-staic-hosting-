@@ -229,6 +229,7 @@ export default function ValidationPage() {
 
   // Guided step-by-step verification workflow states
   const [activeStep, setActiveStep] = useState(1);
+  const [mobileTab, setMobileTab] = useState("both");
   const [fieldsList, setFieldsList] = useState([]);
   const [verifiedFields, setVerifiedFields] = useState({});
   const [diffPopupState, setDiffPopupState] = useState({
@@ -1152,7 +1153,7 @@ export default function ValidationPage() {
   };
 
   return (
-    <div className="page-validation" style={{ padding: "20px 24px", height: "100%", overflowY: "auto", boxSizing: "border-box", display: "flex", flexDirection: "column", gap: "16px" }}>
+    <div className="page-validation">
       {/* Page Header */}
       <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
         <div className="page-header-left" style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: "16px" }}>
@@ -1208,6 +1209,45 @@ export default function ValidationPage() {
           onJumpToField={handleJumpToField}
           onAutoFix={applyAutoFix}
         />
+      )}
+
+      {/* Mobile Tab Switcher (Visible only on mobile <= 900px) */}
+      {activeDocument && (
+        <div className="validation-mobile-tab-bar">
+          <button 
+            type="button"
+            className={`validation-mobile-tab ${mobileTab === 'document' ? 'active' : ''}`}
+            onClick={() => setMobileTab('document')}
+          >
+            <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+            </svg>
+            <span>Invoice Bill</span>
+          </button>
+          <button 
+            type="button"
+            className={`validation-mobile-tab ${mobileTab === 'editor' ? 'active' : ''}`}
+            onClick={() => setMobileTab('editor')}
+          >
+            <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+            </svg>
+            <span>Data Form ({fieldsList.length || 0})</span>
+          </button>
+          <button 
+            type="button"
+            className={`validation-mobile-tab ${mobileTab === 'both' ? 'active' : ''}`}
+            onClick={() => setMobileTab('both')}
+          >
+            <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <rect x="3" y="3" width="18" height="7" rx="1"></rect>
+              <rect x="3" y="14" width="18" height="7" rx="1"></rect>
+            </svg>
+            <span>Split View</span>
+          </button>
+        </div>
       )}
 
       {/* Main Screen Layout */}
@@ -1363,7 +1403,7 @@ export default function ValidationPage() {
           );
         })() : (
         /* Main Layout */
-        <div className="main-layout" style={{ display: "flex", gap: "20px", flex: 1, minHeight: 0, overflow: "hidden" }}>
+        <div className={`main-layout validation-main-layout mobile-tab-${mobileTab}`}>
           {/* Left: Document Preview */}
           <DocumentPreview
             document={activeDocument}
@@ -1376,7 +1416,7 @@ export default function ValidationPage() {
           />
 
           {/* Right: Editor + Actions */}
-          <div className="content-area" style={{ width: "60%", display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", position: "relative" }}>
+          <div className="content-area validation-content-area">
             {isProcessing ? (
               <div className="editor-panel" style={{ width: "100%", padding: "0", display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", position: "relative" }}>
                 {/* Floating Processing Alert Overlay */}

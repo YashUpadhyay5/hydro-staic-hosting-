@@ -82,7 +82,7 @@ const LeaveAdjustment = sequelize.define('LeaveAdjustment', {
     type: DataTypes.STRING,
     field: 'status',
     allowNull: false,
-    defaultValue: 'ACTIVE', // 'ACTIVE' | 'REVERSED'
+    defaultValue: 'ACTIVE', // 'ACTIVE' | 'REVERSED'; SPECIAL_EARNED_CREDIT also 'PENDING' (awaiting verification) | 'REJECTED'
   }
 }, {
   tableName: 'location_leave_adjustments',

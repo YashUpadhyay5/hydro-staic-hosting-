@@ -2,6 +2,12 @@ import LoadingSpinner from '../LoadingSpinner';
 import React, { useEffect, useState, useRef } from 'react';
 import { api } from '../../services/api';
 import { formatDate, isActiveEmployee, formatTo12HourTime, isEmpActiveForPeriod, isEmpActiveOnDate } from '../../utils/helpers';
+import {
+    isoOfItem, buildSpecialShiftIndex, findSpecialShift, specialShiftDisplay,
+    SPECIAL_SUMMARY_HEADERS, emptySpecialCounts, addSpecialCount, specialCountsRow
+} from './specialShiftStatus';
+import { parseIsoDate, rangeDateItems, monthsBetween } from './reportDates';
+import MonthlyAttendanceRegister from './MonthlyAttendanceRegister';
 
 const getDaysInMonth = (year, month) => {
     return new Date(year, month + 1, 0).getDate();
@@ -624,7 +630,7 @@ const exportToCSV = (filename, headers, rows) => {
     document.body.removeChild(link);
 };
 
-export default function AttendanceView({ employees = [], activeEmployees, onSelectEmployee }) {
+export default function AttendanceView({ employees = [], activeEmployees, onSelectEmployee, onOpenWeekendShifts }) {
     const currentStaff = activeEmployees || employees.filter(isActiveEmployee);
     const cachedAttendance = api.getCached('/attendance?limit=10000');
     const [attendance, setAttendance] = useState(() => Array.isArray(cachedAttendance) ? cachedAttendance : (cachedAttendance?.data || []));
@@ -1324,25 +1330,20 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
         const fetchData = async () => {
             try {
                 // Targeted date/month query to fetch current period instead of unbounded 10,000 records
-                const now = new Date();
-                const curMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-                let attendanceQuery = {};
-
-                if (fromDate) {
-                    attendanceQuery.date = fromDate;
-                } else if (reportPeriod === 'last-month') {
-                    const lm = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-                    attendanceQuery.month = `${lm.getFullYear()}-${String(lm.getMonth() + 1).padStart(2, '0')}`;
-                } else if (reportPeriod === 'custom' && customMonth) {
-                    attendanceQuery.month = customMonth;
+                const rangeActive = Boolean(rangeDateItems(fromDate, toDate));
+                let attendanceQueries;
+                if (activeSubView === 'logs' && fromDate && !rangeActive) {
+                    // Logs with only a From date: that single day
+                    attendanceQueries = [{ date: fromDate }];
                 } else {
-                    // Default to current active month (40KB vs 900KB unbounded payload)
-                    attendanceQuery.month = curMonthStr;
+                    // Every month the shown period touches (report month, or the whole From–To range)
+                    const { startDate, endDate } = getReportDates();
+                    attendanceQueries = monthsBetween(startDate, endDate).map(month => ({ month }));
                 }
 
-                const fullAttendanceRes = await api.getAttendance(attendanceQuery, { signal: abortController.signal });
+                const responses = await Promise.all(attendanceQueries.map(q => api.getAttendance(q, { signal: abortController.signal })));
                 if (!isMounted) return;
-                const fullData = Array.isArray(fullAttendanceRes) ? fullAttendanceRes : (fullAttendanceRes?.data || []);
+                const fullData = responses.flatMap(res => (Array.isArray(res) ? res : (res?.data || [])));
                 setAttendance(fullData);
                 setLoading(false);
 
@@ -1383,7 +1384,7 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
             isMounted = false;
             abortController.abort();
         };
-    }, [fromDate, reportPeriod, customMonth, activeSubView]);
+    }, [fromDate, toDate, reportPeriod, customMonth, activeSubView]);
 
     useEffect(() => {
         if (!employees.length) return;
@@ -1872,39 +1873,52 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
         };
     }, [currentPage, filteredData.length, employees]);
 
+    // ---- Sunday / holiday shift verification (Attendance Record grid badges, review dialogs, Excel export) ----
+    const [specialShifts, setSpecialShifts] = useState({ items: [], canVerify: false, available: false, policy: null, from: null, to: null });
+    useEffect(() => {
+        let from = null;
+        let to = null;
+        let params;
+        if (activeSubView === 'attendance-record') {
+            const { dateItems } = getReportDates();
+            if (!dateItems.length) return undefined;
+            from = isoOfItem(dateItems[0]);
+            to = isoOfItem(dateItems[dateItems.length - 1]);
+            params = { from, to };
+        } else if (activeSubView === 'logs') {
+            // Main Attendance screen: every shift still waiting, any month. Same request (and 30 s cache) as the
+            // Weekend / Holiday Shifts page, so that page opens with its data already loaded.
+            params = { all: 1, register: 1 };
+        } else {
+            return undefined;
+        }
+        let cancelled = false;
+        api.getSpecialShifts(params, activeSubView === 'logs' ? { ttl: 30000 } : {})
+            .then((res) => {
+                if (!cancelled && res) setSpecialShifts({ items: res.data || [], canVerify: !!res.canVerify, available: true, policy: res.policy || null, from, to });
+            })
+            // Without access (or for a period the API does not cover) the grid shows plain WOS/WOH as before.
+            .catch(() => { if (!cancelled) setSpecialShifts({ items: [], canVerify: false, available: false, policy: null, from, to }); });
+        return () => { cancelled = true; };
+    }, [activeSubView, reportPeriod, customMonth, fromDate, toDate]);
+    // The Weekend / Holiday Shifts page is its own view; fetch its code in the background so it opens at once.
+    useEffect(() => {
+        const t = setTimeout(() => { import('./WeekendShiftsView').catch(() => {}); }, 1500);
+        return () => clearTimeout(t);
+    }, []);
+    const openShiftsPage = (search = '') => { if (onOpenWeekendShifts) onOpenWeekendShifts(search); };
 
     const getReportDates = () => {
         // 1. If fromDate and toDate range is active
         if (fromDate && toDate) {
-            const start = new Date(fromDate);
-            start.setHours(0, 0, 0, 0);
-            const end = new Date(toDate);
-            end.setHours(0, 0, 0, 0);
-
-            if (!isNaN(start.getTime()) && !isNaN(end.getTime()) && start <= end) {
-                const dateItems = [];
-                const cur = new Date(start);
-                const isSameMonth = start.getFullYear() === end.getFullYear() && start.getMonth() === end.getMonth();
-                while (cur <= end) {
-                    const y = cur.getFullYear();
-                    const m = cur.getMonth();
-                    const d = cur.getDate();
-                    const dStr = cur.toISOString().split('T')[0];
-                    dateItems.push({
-                        day: d,
-                        month: m,
-                        year: y,
-                        dateStr: dStr,
-                        label: isSameMonth ? `${d}` : `${d}/${m + 1}`
-                    });
-                    cur.setDate(cur.getDate() + 1);
-                }
-                const startDate = new Date(start);
-                const endDate = new Date(end);
+            const dateItems = rangeDateItems(fromDate, toDate);
+            if (dateItems) {
+                const startDate = parseIsoDate(fromDate);
+                const endDate = parseIsoDate(toDate);
                 endDate.setHours(23, 59, 59, 999);
                 return {
-                    year: start.getFullYear(),
-                    month: start.getMonth(),
+                    year: startDate.getFullYear(),
+                    month: startDate.getMonth(),
                     days: dateItems.map(item => item.day),
                     dateItems,
                     isCustomRange: true,
@@ -1959,6 +1973,11 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
             endDate
         };
     };
+
+
+    if (activeSubView === 'monthly-register') {
+        return <MonthlyAttendanceRegister onBack={() => setActiveSubView('logs')} />;
+    }
 
     if (activeSubView === 'attendance-summary') {
         const { year, month, days, startDate, endDate } = getReportDates();
@@ -2537,6 +2556,15 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
             };
         });
 
+        // Verification status of Sunday/holiday shifts in this period (one per employee and date).
+        const specialIndex = buildSpecialShiftIndex(specialShifts.items);
+        const shiftFor = (emp, item) => (specialShifts.available ? findSpecialShift(specialIndex, emp, isoOfItem(item)) : null);
+        const shownEmpKeys = new Set(filteredReportEmployees.flatMap((e) => [e.id, e.empCode, e.emp_code].filter(Boolean).map((k) => String(k).toLowerCase())));
+        const periodFrom = dateItems.length ? isoOfItem(dateItems[0]) : '';
+        const periodTo = dateItems.length ? isoOfItem(dateItems[dateItems.length - 1]) : '';
+        const pendingShiftCount = specialShifts.items.filter((s) => s.status === 'PENDING' && s.workDate >= periodFrom && s.workDate <= periodTo
+            && (shownEmpKeys.has(String(s.employeeId).toLowerCase()) || shownEmpKeys.has(String(s.empCode || '').toLowerCase()))).length;
+
         const handleExportRecordExcel = async () => {
             try {
                 const { default: ExcelJS } = await import('exceljs');
@@ -2591,7 +2619,7 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                 // 3. Legend Row
                 ws1.mergeCells(3, 1, 3, totalCols1);
                 const legCell1 = ws1.getCell(3, 1);
-                legCell1.value = 'Legend:  🟢 Top: Clock-In (12-hr)    🔴 Bottom: Clock-Out (12-hr)    📅 Sunday: Weekly Off';
+                legCell1.value = 'Legend:  🟢 Top: Clock-In (12-hr)    🔴 Bottom: Clock-Out (12-hr)    📅 Sunday: Weekly Off    🟠 WOS/WOH (Pending): awaiting admin verification    ✅ WOS/WOH ✓: verified & credited    ⚪ No Credit Approved: rejected';
                 legCell1.font = { name: 'Calibri', size: 9, italic: true, color: { argb: 'FF475569' } };
                 legCell1.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
                 legCell1.alignment = { vertical: 'middle', horizontal: 'center' };
@@ -2679,8 +2707,23 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                         const inVal = rec.in ? String(rec.in).trim() : '';
                         const outVal = rec.out ? String(rec.out).trim() : '';
                         const hasPunch = Boolean((inVal && inVal !== '-' && inVal !== 'Leave') || (outVal && outVal !== '-' && outVal !== 'Approved'));
+                        const shiftView = (isSunday || isHoliday) && hasPunch ? specialShiftDisplay(shiftFor(empObj, item)) : null;
 
-                        if (isSunday && hasPunch) {
+                        if (shiftView) {
+                            // Verified / pending / rejected Sunday or holiday shift: status, actual times, hours and credit
+                            const detail = [(inVal || '--') + ' - ' + (outVal || '--'), shiftView.hours].filter(Boolean).join(' · ');
+                            cell.value = {
+                                richText: [
+                                    { text: `${shiftView.shortLabel || shiftView.label}\n`, font: { name: 'Calibri', size: 8.5, bold: true, color: { argb: shiftView.colors.xlFont } } },
+                                    { text: `${detail}\n`, font: { name: 'Calibri', size: 7, bold: true, color: { argb: shiftView.colors.xlFont } } },
+                                    { text: shiftView.creditLine, font: { name: 'Calibri', size: 7, italic: true, color: { argb: shiftView.colors.xlFont } } }
+                                ]
+                            };
+                            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: shiftView.colors.xlFill } };
+                            cell.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
+                            cell.note = shiftView.tooltip;
+                            wsRow.height = 40; // three lines: status, times/hours, credit
+                        } else if (isSunday && hasPunch) {
                             cell.value = {
                                 richText: [
                                     { text: 'WOS\n', font: { name: 'Calibri', size: 9, bold: true, color: { argb: 'FF92400E' } } },
@@ -2771,7 +2814,9 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                     'LOP',
                     'Sunday (WO)',
                     'Holiday (H)',
-                    'Total Payable Days'
+                    'Total Payable Days',
+                    // Sunday/holiday shift verification (appended so the existing columns keep their places)
+                    ...SPECIAL_SUMMARY_HEADERS
                 ];
 
                 const totalCols2 = 3 + dateItems.length + summaryHeaders.length;
@@ -2797,14 +2842,14 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                 // 3. Legend Row
                 ws2.mergeCells(3, 1, 3, totalCols2);
                 const legCell2 = ws2.getCell(3, 1);
-                legCell2.value = 'Status Codes:  🟢 Present  |  🔴 Absent  |  🔵 EL (Earned Leave)  |  🟠 Sunday/Holiday Consumed  |  🟣 LOP (Loss of Pay)  |  📅 Sunday (WO)  |  🌴 Holiday  |  ➖ Future Date / NA';
+                legCell2.value = 'Status Codes:  🟢 Present  |  🔴 Absent  |  🔵 EL (Earned Leave)  |  🟠 Sunday/Holiday Consumed  |  🟣 LOP (Loss of Pay)  |  📅 Sunday (WO)  |  🌴 Holiday  |  ➖ Future Date / NA  |  WOS/WOH (Pending) = awaiting verification, ✓ = verified & credited, (No Credit) = rejected/reversed';
                 legCell2.font = { name: 'Calibri', size: 9, bold: true, color: { argb: 'FF334155' } };
                 legCell2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
                 legCell2.alignment = { vertical: 'middle', horizontal: 'center' };
                 ws2.getRow(3).height = 18;
 
                 // 4. Table Header Row (Row 4)
-                ws2.getRow(4).height = 26;
+                ws2.getRow(4).height = 40; // room for the wrapped Sunday/holiday verification headers
                 const headerCols2 = [
                     'Emp ID',
                     'Name',
@@ -2846,6 +2891,7 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                 ws2.getColumn(3).width = 16;
                 for (let c = 4; c <= 3 + dateItems.length; c++) ws2.getColumn(c).width = 13;
                 for (let c = 4 + dateItems.length; c <= totalCols2; c++) ws2.getColumn(c).width = 14;
+                for (let c = totalCols2 - SPECIAL_SUMMARY_HEADERS.length + 1; c <= totalCols2; c++) ws2.getColumn(c).width = 18;
 
                 const startRowIdx2 = 5;
                 const endRowIdx2 = startRowIdx2 + reportRows.length - 1;
@@ -2885,6 +2931,7 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                     let lopCount = 0;
                     let sundayCount = 0;
                     let holidayCount = 0;
+                    const shiftCounts = emptySpecialCounts();
 
                     const empLeaves = (leaves || []).filter(l => {
                         const lStatus = l.status ? String(l.status).toLowerCase() : 'approved';
@@ -2945,6 +2992,14 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                                 fontColor = 'FF92400E';
                                 fillColor = 'FFFEF3C7';
                                 wosCount++;
+                                const shift = shiftFor(empObj, item);
+                                const view = specialShiftDisplay(shift);
+                                if (view) {
+                                    status = view.state === 'APPROVED' || view.state === 'PENDING' ? view.label : `${view.code} (No Credit)`;
+                                    fontColor = view.colors.xlFont;
+                                    fillColor = view.colors.xlFill;
+                                    addSpecialCount(shiftCounts, shift);
+                                }
                             } else {
                                 status = 'Sunday';
                                 fontColor = 'FF991B1B';
@@ -2957,6 +3012,14 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                                 fontColor = 'FF6B21A8';
                                 fillColor = 'FFEDE9FE';
                                 wohCount++;
+                                const shift = shiftFor(empObj, item);
+                                const view = specialShiftDisplay(shift);
+                                if (view) {
+                                    status = view.state === 'APPROVED' || view.state === 'PENDING' ? view.label : `${view.code} (No Credit)`;
+                                    fontColor = view.colors.xlFont;
+                                    fillColor = view.colors.xlFill;
+                                    addSpecialCount(shiftCounts, shift);
+                                }
                             } else {
                                 status = 'Holiday';
                                 fontColor = 'FF7E22CE';
@@ -2973,7 +3036,10 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                             const lReason = String(matchedLeave.reason || '').toLowerCase();
 
                             let isLopDay = lType.includes('lop') || lType.includes('loss of pay');
-                            if (!isLopDay && matchedLeave.startDate && matchedLeave.elDays !== undefined && matchedLeave.lopDays !== undefined) {
+                            if (!isLopDay && Array.isArray(matchedLeave.workingDates)) {
+                                // Newer requests store their working dates: EL covers the first elDays of them, the rest is LOP.
+                                isLopDay = matchedLeave.workingDates.indexOf(item.dateStr) >= Number(matchedLeave.elDays || 0);
+                            } else if (!isLopDay && matchedLeave.startDate && matchedLeave.elDays !== undefined && matchedLeave.lopDays !== undefined) {
                                 const lStart = new Date(matchedLeave.startDate);
                                 lStart.setHours(0, 0, 0, 0);
                                 const diffDays = Math.round((targetDate - lStart) / (1000 * 3600 * 24));
@@ -3032,14 +3098,15 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                         lopCount,
                         sundayCount,
                         holidayCount,
-                        payableDays
+                        payableDays,
+                        ...specialCountsRow(shiftCounts)
                     ];
 
                     counts.forEach((val, cIdx) => {
                         const colNum = 4 + dateItems.length + cIdx;
                         const cell = wsRow.getCell(colNum);
                         cell.value = val;
-                        const isPayableCol = cIdx === counts.length - 1;
+                        const isPayableCol = cIdx === summaryHeaders.indexOf('Total Payable Days');
                         cell.font = {
                             name: 'Calibri',
                             size: 10,
@@ -3306,14 +3373,32 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                         )}
                     </div>
 
-                    <button 
-                        className="btn btn-primary" 
-                        onClick={handleExportRecordExcel}
-                        style={{ height: '38px', display: 'flex', alignItems: 'center', gap: '8px' }}
-                    >
-                        <i className="fa-solid fa-file-excel"></i> Export Excel
-                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                        {specialShifts.available && onOpenWeekendShifts && (
+                            <button
+                                className="btn btn-outline"
+                                onClick={() => openShiftsPage(searchQuery)}
+                                style={{
+                                    height: '38px', display: 'flex', alignItems: 'center', gap: '8px', borderRadius: '6px', cursor: 'pointer', fontWeight: 600,
+                                    background: pendingShiftCount ? '#fef3c7' : 'white',
+                                    color: pendingShiftCount ? '#92400e' : '#374151',
+                                    border: `1px solid ${pendingShiftCount ? '#f59e0b' : '#d1d5db'}`
+                                }}
+                                title="Sunday and holiday shifts awaiting verification in this period"
+                            >
+                                <i className="fa-solid fa-calendar-check"></i> Review Weekend/Holiday Shifts ({pendingShiftCount})
+                            </button>
+                        )}
+                        <button
+                            className="btn btn-primary"
+                            onClick={handleExportRecordExcel}
+                            style={{ height: '38px', display: 'flex', alignItems: 'center', gap: '8px' }}
+                        >
+                            <i className="fa-solid fa-file-excel"></i> Export Excel
+                        </button>
+                    </div>
                 </div>
+
 
                 {/* Dummy Top Scrollbar */}
                 <div 
@@ -3405,6 +3490,43 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                                                 (record.in && record.in !== '-' && record.in !== 'Leave') || 
                                                 (record.out && record.out !== '-' && record.out !== 'Approved')
                                             );
+
+                                            // 0. Sunday/holiday shift with a verification status: Pending / ✓ / No Credit Approved
+                                            const shift = (isSunday || isHoliday) && hasPunch ? shiftFor(empObj, item) : null;
+                                            const shiftView = specialShiftDisplay(shift, { canVerify: specialShifts.canVerify });
+                                            if (shiftView) {
+                                                const clickable = shiftView.state === 'PENDING' && specialShifts.canVerify;
+                                                return (
+                                                    <td
+                                                        key={`c-${item.dateStr}-${dIdx}`}
+                                                        colSpan="2"
+                                                        style={{
+                                                            padding: '4px 6px',
+                                                            textAlign: 'center',
+                                                            borderRight: '1px solid #cbd5e1',
+                                                            background: shiftView.colors.bg,
+                                                            color: shiftView.colors.fg,
+                                                            cursor: clickable ? 'pointer' : 'default'
+                                                        }}
+                                                        title={shiftView.tooltip}
+                                                        onClick={clickable ? () => openShiftsPage(shift.empCode || '') : undefined}
+                                                        onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openShiftsPage(shift.empCode || ''); } } : undefined}
+                                                        tabIndex={clickable ? 0 : undefined}
+                                                        role={clickable ? 'button' : undefined}
+                                                        aria-label={clickable ? `Review ${row.name}'s shift on ${shift.workDate}` : undefined}
+                                                    >
+                                                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: shiftView.colors.badge, color: 'white', padding: '1px 6px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                                                            {shiftView.label}
+                                                        </div>
+                                                        <div style={{ fontSize: '0.68rem', fontWeight: 600, marginTop: '2px', whiteSpace: 'nowrap' }}>
+                                                            {record.in || '--'} - {record.out || '--'}
+                                                        </div>
+                                                        <div style={{ fontSize: '0.66rem', marginTop: '1px', whiteSpace: 'nowrap', opacity: 0.9 }}>
+                                                            {[shiftView.hours, shiftView.creditLine].filter(Boolean).join(' · ')}
+                                                        </div>
+                                                    </td>
+                                                );
+                                            }
 
                                             // 1. Worked on Sunday -> WOS
                                             if (isSunday && hasPunch) {
@@ -4235,72 +4357,100 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
         );
     }
 
+    // Sunday/holiday shifts waiting for verification, any month.
+    const pendingShifts = specialShifts.items.filter((s) => s.status === 'PENDING');
+
     return (
         <div id="attendance-view" className="view active" style={{ height: '100%', minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: '16px', overflow: 'hidden' }}>
 
             {/* Top Toolbar: Filters & Search */}
-            <div style={{ position: 'relative', overflow: 'visible', flexShrink: 0, zIndex: 9000 }}>
+            <div className="attendance-toolbar-container" style={{ position: 'relative', overflow: 'visible', flexShrink: 0, zIndex: 9000 }}>
                 <div className="glass" style={{ position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none' }}></div>
-                <div style={{ position: 'relative', zIndex: 9000, padding: '20px', display: 'flex', flexWrap: 'wrap', gap: '15px', alignItems: 'flex-end', justifyContent: 'space-between' }}>
-                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                        <button 
-                            className={`btn ${statusFilter === 'all' ? 'btn-primary' : ''}`} 
-                            onClick={() => setStatusFilter('all')}
-                            style={{ height: '38px', display: 'inline-flex', alignItems: 'center', background: statusFilter !== 'all' ? '#f3f4f6' : undefined, color: statusFilter !== 'all' ? '#374151' : undefined }}
-                        >
-                            All Logs
-                        </button>
-                        <button 
-                            className={`btn ${statusFilter === 'not-clocked-in' ? 'btn-primary' : ''}`} 
-                            onClick={() => setStatusFilter('not-clocked-in')}
-                            style={{ height: '38px', display: 'inline-flex', alignItems: 'center', background: statusFilter !== 'not-clocked-in' ? '#ef4444' : undefined, color: 'white' }}
-                            title="Employees who haven't checked-in today"
-                        >
-                            Not Clocked-In (Today)
-                        </button>
-                        <button 
-                            className={`btn ${statusFilter === 'clocked-out' ? 'btn-primary' : ''}`} 
-                            onClick={() => setStatusFilter('clocked-out')}
-                            style={{ height: '38px', display: 'inline-flex', alignItems: 'center', background: statusFilter !== 'clocked-out' ? '#10b981' : undefined, color: 'white' }}
-                            title="Employees who checked-out today"
-                        >
-                            Clocked-Out (Today)
-                        </button>
-                        <button 
-                            className={`btn ${statusFilter === 'active-today' ? 'btn-primary' : ''}`} 
-                            onClick={() => setStatusFilter('active-today')}
-                            style={{ height: '38px', display: 'inline-flex', alignItems: 'center', background: statusFilter !== 'active-today' ? '#f59e0b' : undefined, color: 'white' }}
-                            title="Employees currently clocked-in"
-                        >
-                            Active / Clocked-In (Today)
-                        </button>
-
-                        {/* Attendance Report Dropdown */}
-                        <div ref={dropdownRef} style={{ position: 'relative', display: 'inline-block', zIndex: 9999 }}>
+                <div className="attendance-toolbar-card" style={{ position: 'relative', zIndex: 9000, padding: '16px 20px', display: 'flex', flexWrap: 'wrap', gap: '14px', alignItems: 'center', justifyContent: 'space-between' }}>
+                    
+                    {/* Left: Status Filter Pills + Action Buttons */}
+                    <div className="attendance-toolbar-left" style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+                        
+                        {/* Horizontal Status Pills */}
+                        <div className="attendance-status-pills">
                             <button 
-                                className="btn" 
-                                onClick={() => setShowReportDropdown(prev => !prev)}
-                                style={{ 
-                                    background: 'linear-gradient(135deg, #4f46e5, #3730a3)', 
-                                    color: 'white',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '8px',
-                                    fontWeight: 600,
-                                    border: 'none',
-                                    borderRadius: '6px',
-                                    padding: '8px 16px',
-                                    cursor: 'pointer',
-                                    height: '38px',
-                                    boxShadow: '0 4px 6px -1px rgba(79, 70, 229, 0.2)'
-                                }}
+                                type="button"
+                                className={`btn attendance-pill ${statusFilter === 'all' ? 'active' : ''}`} 
+                                onClick={() => setStatusFilter('all')}
                             >
-                                <i className="fa-solid fa-file-invoice"></i>
-                                <span>Attendance Report</span>
-                                <i className={`fa-solid fa-chevron-${showReportDropdown ? 'up' : 'down'}`} style={{ fontSize: '0.8rem' }}></i>
+                                <span className="status-pill-desktop">All Logs</span>
+                                <span className="status-pill-mobile">All</span>
                             </button>
+                            <button 
+                                type="button"
+                                className={`btn attendance-pill pill-danger ${statusFilter === 'not-clocked-in' ? 'active' : ''}`} 
+                                onClick={() => setStatusFilter('not-clocked-in')}
+                                title="Employees who haven't checked-in today"
+                            >
+                                <span className="status-pill-desktop">Not Clocked-In</span>
+                                <span className="status-pill-mobile">Not In</span>
+                            </button>
+                            <button 
+                                type="button"
+                                className={`btn attendance-pill pill-warning ${statusFilter === 'active-today' ? 'active' : ''}`} 
+                                onClick={() => setStatusFilter('active-today')}
+                                title="Employees currently clocked-in"
+                            >
+                                <span className="status-pill-desktop">Active Today</span>
+                                <span className="status-pill-mobile">Active</span>
+                            </button>
+                            <button 
+                                type="button"
+                                className={`btn attendance-pill pill-success ${statusFilter === 'clocked-out' ? 'active' : ''}`} 
+                                onClick={() => setStatusFilter('clocked-out')}
+                                title="Employees who checked-out today"
+                            >
+                                <span className="status-pill-desktop">Clocked-Out</span>
+                                <span className="status-pill-mobile">Out</span>
+                            </button>
+                        </div>
+
+                        {/* Quick Actions (Weekend Shifts, Monthly Register, Report Dropdown) */}
+                        <div className="attendance-quick-actions">
+                            {specialShifts.available && onOpenWeekendShifts && (
+                                <button
+                                    type="button"
+                                    className="btn attendance-action-btn btn-purple"
+                                    onClick={() => openShiftsPage()}
+                                    title={pendingShifts.length
+                                        ? `${pendingShifts.length} Sunday/holiday shift(s) are waiting for approval`
+                                        : 'No Sunday/holiday shifts are waiting for approval'}
+                                >
+                                    <i className="fa-solid fa-calendar-check"></i>
+                                    <span className="quick-action-text-desktop">Weekend Shifts ({pendingShifts.length})</span>
+                                    <span className="quick-action-text-mobile">Shifts ({pendingShifts.length})</span>
+                                </button>
+                            )}
+
+                            <button
+                                type="button"
+                                className="btn attendance-action-btn btn-teal"
+                                onClick={() => setActiveSubView('monthly-register')}
+                                title="Every employee's attendance for a month (P / EL / A), with edits"
+                            >
+                                <i className="fa-solid fa-table-cells"></i>
+                                <span className="quick-action-text-desktop">Monthly Register</span>
+                                <span className="quick-action-text-mobile">Register</span>
+                            </button>
+
+                            {/* Attendance Report Dropdown */}
+                            <div ref={dropdownRef} className="attendance-report-dropdown-wrapper" style={{ position: 'relative', display: 'inline-block', zIndex: 9999 }}>
+                                <button 
+                                    type="button"
+                                    className="btn attendance-action-btn btn-gradient" 
+                                    onClick={() => setShowReportDropdown(prev => !prev)}
+                                >
+                                    <i className="fa-solid fa-file-invoice"></i>
+                                    <span>Report</span>
+                                    <i className={`fa-solid fa-chevron-${showReportDropdown ? 'up' : 'down'}`} style={{ fontSize: '0.75rem' }}></i>
+                                </button>
                             {showReportDropdown && (
-                                <div style={{
+                                <div className="attendance-report-dropdown-menu" style={{
                                     position: 'absolute',
                                     top: 'calc(100% + 8px)',
                                     left: 0,
@@ -4363,80 +4513,52 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                         </div>
                     </div>
 
-                    <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#4b5563', lineHeight: 1 }}>From Date</span>
-                            <input 
-                                type="date" 
-                                value={fromDate} 
-                                onChange={(e) => setFromDate(e.target.value)}
-                                style={{
-                                    padding: '8px 12px',
-                                    borderRadius: '6px',
-                                    border: '1px solid #e5e7eb',
-                                    fontSize: '0.875rem',
-                                    outline: 'none',
-                                    height: '38px',
-                                    boxSizing: 'border-box'
-                                }}
-                            />
-                        </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#4b5563', lineHeight: 1 }}>To Date</span>
-                            <input 
-                                type="date" 
-                                value={toDate} 
-                                onChange={(e) => setToDate(e.target.value)}
-                                style={{
-                                    padding: '8px 12px',
-                                    borderRadius: '6px',
-                                    border: '1px solid #e5e7eb',
-                                    fontSize: '0.875rem',
-                                    outline: 'none',
-                                    height: '38px',
-                                    boxSizing: 'border-box'
-                                }}
-                            />
-                        </div>
-                        {(fromDate || toDate) && (
-                            <button 
-                                className="btn"
-                                onClick={() => { setFromDate(''); setToDate(''); }}
-                                style={{ 
-                                    height: '38px', 
-                                    background: '#ef4444', 
-                                    color: 'white', 
-                                    padding: '0 14px', 
-                                    borderRadius: '6px', 
-                                    cursor: 'pointer',
-                                    fontSize: '0.85rem',
-                                    fontWeight: 600,
-                                    display: 'inline-flex',
-                                    alignItems: 'center'
-                                }}
-                            >
-                                Clear Range
-                            </button>
-                        )}
+                    </div>
 
-                        <div className="form-group" style={{ margin: 0, minWidth: '280px' }}>
+                    {/* Right: Date Range & Search Box */}
+                    <div className="attendance-toolbar-right" style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                        <div className={`attendance-dates-row ${(fromDate || toDate) ? 'has-clear' : ''}`}>
+                            <div className="attendance-date-item">
+                                <span className="attendance-field-label">From Date</span>
+                                <input 
+                                    type="date" 
+                                    value={fromDate} 
+                                    onChange={(e) => setFromDate(e.target.value)}
+                                    className="attendance-date-input"
+                                />
+                            </div>
+                            <div className="attendance-date-item">
+                                <span className="attendance-field-label">To Date</span>
+                                <input 
+                                    type="date" 
+                                    value={toDate} 
+                                    onChange={(e) => setToDate(e.target.value)}
+                                    className="attendance-date-input"
+                                />
+                            </div>
+                            {(fromDate || toDate) && (
+                                <button 
+                                    type="button"
+                                    className="btn btn-clear-dates"
+                                    onClick={() => { setFromDate(''); setToDate(''); }}
+                                >
+                                    Clear
+                                </button>
+                            )}
+                        </div>
+
+                        <div className="attendance-search-box">
+                            <i className="fa-solid fa-magnifying-glass attendance-search-icon"></i>
                             <input 
                                 type="text" 
-                                placeholder="Search by Employee Name..." 
+                                placeholder="Search by employee..." 
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
-                                style={{
-                                    width: '100%',
-                                    padding: '8px 14px',
-                                    borderRadius: '6px',
-                                    border: '1px solid #e5e7eb',
-                                    fontSize: '0.875rem',
-                                    outline: 'none',
-                                    height: '38px',
-                                    boxSizing: 'border-box',
-                                    boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.03)'
-                                }}
+                                className="attendance-search-input"
                             />
+                            {searchQuery && (
+                                <button type="button" onClick={() => setSearchQuery('')} className="attendance-search-clear">✕</button>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -4449,6 +4571,7 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                 className="table-container glass custom-scrollbar" 
                 style={{ padding: 0, flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'auto', borderRadius: '16px' }}
             >
+                <div className="desktop-table-view">
                 <table id="attendance-table">
                     <thead>
                         <tr>
@@ -4724,19 +4847,165 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                         )}
                     </tbody>
                 </table>
+                </div>
+
+                {/* Mobile Attendance Cards (Only visible on mobile <= 768px) */}
+                <div className="mobile-cards-only" style={{ padding: '12px', gap: '12px' }}>
+                    {loading ? (
+                        <LoadingSpinner message="Loading Attendance Records & Logs..." minHeight="180px" />
+                    ) : error ? (
+                        <div className="error-text" style={{ textAlign: 'center', padding: '24px' }}>Failed to load attendance</div>
+                    ) : paginatedData.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>No logs or matching records found.</div>
+                    ) : (
+                        paginatedData.map((record, index) => {
+                            const targetUid = String(record.userId || '').trim().toLowerCase();
+                            const targetUname = String(record.userName || '').trim().toLowerCase();
+                            const targetEmpCode = String(record.empCode || record.employeeId || '').trim().toLowerCase();
+
+                            const emp = record.employee || (employees || []).find(e => {
+                                if (!e) return false;
+                                const eId = String(e.id || '').trim().toLowerCase();
+                                const eCode = String(e.empCode || e.emp_code || e.employeeId || e.empId || '').trim().toLowerCase();
+                                const eName = String(e.name || '').trim().toLowerCase();
+                                return (targetUid && (targetUid === eId || targetUid === eCode || targetUid === eName)) ||
+                                       (targetEmpCode && (targetEmpCode === eCode || targetEmpCode === eId)) ||
+                                       (targetUname && (targetUname === eName || targetUname === eId || targetUname === eCode));
+                            });
+                            
+                            const displayName = emp?.name || record.userName || emp?.employeeName || record.userId || 'Employee';
+                            const displayCode = emp?.empCode || emp?.emp_code || emp?.employeeId || record.empCode || (record.userId && !String(record.userId).startsWith('EMP0') ? record.userId : '');
+                            const displayDept = emp?.department || record.department || emp?.designation || record.jobTitle || '';
+                            const targetId = (emp && (emp.id || emp.empCode || emp._id || emp.employeeId)) || record.userId || record.empCode || record.id;
+                            const targetName = (emp && emp.name) || displayName;
+                            const recDate = record.date ? record.date.split('T')[0] : '';
+                            const locInfo = getLocationInfo(emp, record);
+                            const auditedDist = getAuditedDistanceForRecord(record, emp);
+
+                            return (
+                                <div 
+                                    key={record.id || index}
+                                    className="mobile-record-card"
+                                    onClick={() => {
+                                        if (onSelectEmployee && targetId) {
+                                            onSelectEmployee(targetId, targetName, recDate);
+                                        }
+                                    }}
+                                    style={{ cursor: targetId ? 'pointer' : 'default' }}
+                                >
+                                    {/* Header Row: Name & Status */}
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+                                        <div>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                                <span style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-primary)' }}>👤 {displayName}</span>
+                                                {displayCode && (
+                                                    <span style={{ fontSize: '0.72rem', color: '#2563eb', fontWeight: 600, background: 'rgba(37, 99, 235, 0.1)', padding: '1px 6px', borderRadius: '4px', border: '1px solid rgba(37, 99, 235, 0.2)' }}>
+                                                        {displayCode}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            {displayDept && (
+                                                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                                                    {displayDept}
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div>
+                                            {record.type === 'absent' || statusFilter === 'not-clocked-in' ? (
+                                                <span className="badge-status badge-rejected" style={{ fontSize: '0.72rem' }}>
+                                                    {record.status || 'NOT CLOCKED IN'}
+                                                </span>
+                                            ) : record.checkOut ? (
+                                                <span className="badge-status badge-approved" style={{ fontSize: '0.72rem' }}>
+                                                    CLOCKED OUT
+                                                </span>
+                                            ) : (
+                                                <span className="badge-status badge-pending" style={{ fontSize: '0.72rem' }}>
+                                                    🟢 ACTIVE
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Timings Grid */}
+                                    {statusFilter !== 'not-clocked-in' && (
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px', background: 'var(--input-bg, #f8fafc)', padding: '10px', borderRadius: '10px', fontSize: '0.8rem' }}>
+                                            <div>
+                                                <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', display: 'block' }}>Date</span>
+                                                <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>📅 {formatDate(record.date)}</span>
+                                            </div>
+                                            <div>
+                                                <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', display: 'block' }}>Working Hours</span>
+                                                <span style={{ fontWeight: 700, color: record.checkOut ? '#10b981' : '#f59e0b' }}>
+                                                    ⏱️ {record.checkOut ? calculateWorkingHours(record) : (isToday(record.date) ? 'In Progress' : '-')}
+                                                </span>
+                                            </div>
+                                            <div>
+                                                <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', display: 'block' }}>Check In</span>
+                                                <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                                                    {record.checkIn ? formatDate(record.checkIn, true) : '-'}
+                                                </span>
+                                            </div>
+                                            <div>
+                                                <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', display: 'block' }}>Check Out</span>
+                                                <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                                                    {record.checkOut ? formatDate(record.checkOut, true) : '-'}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Absent Reason if not clocked in */}
+                                    {statusFilter === 'not-clocked-in' && record.reason && (
+                                        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', background: 'var(--input-bg, #f8fafc)', padding: '8px 10px', borderRadius: '8px' }}>
+                                            <b>Reason:</b> {record.reason}
+                                        </div>
+                                    )}
+
+                                    {/* Travel & Punches Row */}
+                                    {statusFilter !== 'not-clocked-in' && (
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                                            <span style={{ fontWeight: 600, color: '#10b981', background: '#d1fae5', padding: '2px 8px', borderRadius: '6px' }}>
+                                                🚗 {auditedDist && Number(auditedDist) > 0 ? `${auditedDist} km` : '0.00 km'}
+                                            </span>
+                                            <button 
+                                                type="button" 
+                                                onClick={(e) => { e.stopPropagation(); setSelectedPunchHistory(record); }} 
+                                                style={{ border: 'none', background: '#e0e7ff', color: '#4f46e5', padding: '3px 8px', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                            >
+                                                {record.punchCount || 1} {(record.punchCount || 1) === 1 ? 'punch' : 'punches'} <i className="fa-solid fa-clock-rotate-left"></i>
+                                            </button>
+                                            <span>{getBatteryIcon(emp, record)}</span>
+                                        </div>
+                                    )}
+
+                                    {/* Address footer */}
+                                    {statusFilter !== 'not-clocked-in' && locInfo.address && (
+                                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', borderTop: '1px dashed var(--border-glass, #e2e8f0)', paddingTop: '6px' }}>
+                                            📍 {locInfo.address}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })
+                    )}
+                </div>
 
                 {/* Gmail-style Pagination Footer */}
                 {totalItems > 0 && (
-                    <div style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'flex-end',
-                        padding: '14px 24px',
-                        borderTop: '1px solid #e5e7eb',
-                        gap: '20px',
-                        fontSize: '0.875rem',
-                        color: '#4b5563'
-                    }}>
+                    <div 
+                        className="attendance-pagination-footer"
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'flex-end',
+                            padding: '14px 24px',
+                            borderTop: '1px solid #e5e7eb',
+                            gap: '20px',
+                            fontSize: '0.875rem',
+                            color: '#4b5563'
+                        }}
+                    >
                         <span>
                             {startIndex + 1}â€“{endIndex} of {totalItems}
                         </span>

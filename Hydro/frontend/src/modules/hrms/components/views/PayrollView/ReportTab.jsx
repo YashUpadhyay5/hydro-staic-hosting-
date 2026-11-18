@@ -10,6 +10,7 @@ import {
 } from '../../../data/complianceFormsData';
 import ComplianceFormFullView from './ComplianceFormFullView';
 import { resolvePayrollRunItems, resolveOverrideValue } from '../../../services/payrollItemResolver';
+import { DataMapper } from '../../../services/excelEngine/DataMapper';
 
 export default function ReportTab({
   employees = [],
@@ -34,7 +35,7 @@ export default function ReportTab({
   const [selectedForm, setSelectedForm] = useState(null);
   const [selectedMonth, setSelectedMonth] = useState(selectedReportMonth || getCurrentMonthYYYYMM());
   const [selectedLocation, setSelectedLocation] = useState('ALL');
-  const [selectedStatus, setSelectedStatus] = useState('ALL');
+  const [selectedStatus, setSelectedStatus] = useState('ACTIVE');
   const [activeSection, setActiveSection] = useState('compliance'); // 'compliance' | 'tax'
   const [internalEmployees, setInternalEmployees] = useState([]);
   const [internalRunItems, setInternalRunItems] = useState([]);
@@ -82,6 +83,8 @@ export default function ReportTab({
   }, []);
 
   const allEmployees = employees && employees.length > 0 ? employees : internalEmployees;
+  // The forms name the Managing Director as employer, even when the filters leave them out
+  DataMapper.setDirectory(allEmployees);
 
   // Auto-fetch pay run items & wizard edits strictly for selectedMonth
   useEffect(() => {
@@ -134,9 +137,11 @@ export default function ReportTab({
     return () => { isCancelled = true; };
   }, [selectedMonth, employees, reportRefreshKey]);
 
-  const effectiveRunItems = hasRunForMonth 
-    ? ((internalRunItems && internalRunItems.length > 0) ? internalRunItems : (runItems || []))
-    : [];
+  const effectiveRunItems = useMemo(() => {
+    if (!hasRunForMonth) return [];
+    if (internalRunItems && internalRunItems.length > 0) return internalRunItems;
+    return runItems || [];
+  }, [hasRunForMonth, internalRunItems, runItems]);
   const isPayrollRun = Boolean(hasRunForMonth && effectiveRunItems.length > 0);
 
   // Sync selectedMonth with selectedReportMonth from parent
@@ -145,6 +150,11 @@ export default function ReportTab({
       setSelectedMonth(selectedReportMonth);
     }
   }, [selectedReportMonth]);
+
+  const reportOptions = useMemo(() => ({
+    ...attendanceSettings,
+    includeInactive: selectedStatus === 'NOT_ACTIVE'
+  }), [attendanceSettings, selectedStatus]);
 
   const monthLabel = formatMonthYearLabel(selectedMonth);
 
@@ -163,7 +173,7 @@ export default function ReportTab({
       setPayrollErrorModal({ show: true, month: monthLabel, currentStep: currentRunStep });
       return;
     }
-    exportFormToExcel(form.sheetName, selectedMonth, filteredEmployees, attendance, leaves, effectiveRunItems, attendanceSettings);
+    exportFormToExcel(form.sheetName, selectedMonth, filteredEmployees, attendance, leaves, effectiveRunItems, reportOptions);
   };
 
   const handleExportFormPDF = (form) => {
@@ -180,7 +190,7 @@ export default function ReportTab({
       setPayrollErrorModal({ show: true, month: monthLabel, currentStep: currentRunStep });
       return;
     }
-    exportAllFormsToExcel(selectedMonth, filteredEmployees, attendance, leaves, effectiveRunItems, attendanceSettings);
+    exportAllFormsToExcel(selectedMonth, filteredEmployees, attendance, leaves, effectiveRunItems, reportOptions);
   };
 
   // Dynamic location list derived from DB employees
@@ -200,28 +210,28 @@ export default function ReportTab({
     return Array.from(locSet);
   }, [allEmployees]);
 
-  // Dynamically filter employees by Location and Status
+  // Dynamically filter employees by Location, Status, and month/pay-run eligibility
   const filteredEmployees = useMemo(() => {
     if (!allEmployees || !Array.isArray(allEmployees)) return [];
-    return allEmployees.filter(emp => {
-      // 1. Location Filter
+    const locFiltered = allEmployees.filter(emp => {
       if (selectedLocation !== 'ALL') {
         const empLoc = String(emp.location || emp.site || '').trim().toLowerCase();
         if (empLoc !== selectedLocation.trim().toLowerCase()) {
           return false;
         }
       }
-      // 2. Status Filter
-      if (selectedStatus === 'ACTIVE') {
-        const st = String(emp.status || '').trim().toUpperCase();
-        if (st !== 'ACTIVE') return false;
-      } else if (selectedStatus === 'NOT_ACTIVE') {
-        const st = String(emp.status || '').trim().toUpperCase();
-        if (st === 'ACTIVE') return false;
-      }
       return true;
     });
-  }, [allEmployees, selectedLocation, selectedStatus]);
+
+    if (selectedStatus === 'ACTIVE') {
+      const onlyActive = locFiltered.filter(emp => String(emp.status || '').trim().toUpperCase() === 'ACTIVE');
+      return DataMapper.eligibleEmployeesForMonth(onlyActive, selectedMonth, effectiveRunItems);
+    }
+    if (selectedStatus === 'NOT_ACTIVE') {
+      return locFiltered.filter(emp => String(emp.status || '').trim().toUpperCase() !== 'ACTIVE');
+    }
+    return DataMapper.eligibleEmployeesForMonth(locFiltered, selectedMonth, effectiveRunItems);
+  }, [allEmployees, selectedLocation, selectedStatus, selectedMonth, effectiveRunItems]);
 
   // If a form is selected, render full-page view in the same tab
   if (selectedForm) {
@@ -424,7 +434,7 @@ export default function ReportTab({
       </div>
 
       {/* Sub-Navigation Switcher */}
-      <div style={{ display: 'flex', gap: '12px', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '8px' }}>
+      <div className="report-subnav-row" style={{ display: 'flex', gap: '12px', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '8px', flexWrap: 'wrap' }}>
         <button
           onClick={() => setActiveSection('compliance')}
           className={`btn ${activeSection === 'compliance' ? 'btn-primary' : 'btn-outline'}`}
@@ -445,10 +455,10 @@ export default function ReportTab({
 
       {/* Compliance Forms Cards Grid */}
       {activeSection === 'compliance' && (
-        <div
+        <div className="compliance-cards-grid"
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))',
             gap: '24px'
           }}
         >

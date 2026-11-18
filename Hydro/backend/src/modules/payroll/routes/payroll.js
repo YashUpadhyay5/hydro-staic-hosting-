@@ -172,6 +172,7 @@ router.post('/run', async (req, res) => {
     const newRun = await PayrollRun.create({
       month,
       status: 'DRAFT',
+      lopSource: 'REGISTER', // Step 1 LOP from the monthly attendance register (older runs keep leave LOP)
       totalGross: 0,
       totalDeductions: 0,
       totalNet: 0

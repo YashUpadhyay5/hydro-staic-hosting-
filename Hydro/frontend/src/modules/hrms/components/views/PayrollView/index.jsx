@@ -413,7 +413,7 @@ export default function PayrollView({ employees = [], adminUser }) {
   return (
     <div className="payroll-view-container" style={{ height: '100%', minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {/* Tabs Sidebar/Bar */}
-      <div className="tabs-header glass" style={{ display: 'flex', gap: '8px', padding: '12px', borderRadius: '12px', marginBottom: '16px', overflowX: 'auto', flexShrink: 0 }}>
+      <div className="tabs-header payroll-tabs-header glass" style={{ display: 'flex', gap: '8px', padding: '10px 12px', borderRadius: '12px', marginBottom: '16px', overflowX: 'auto', flexShrink: 0 }}>
         {[
           { id: 'dashboard', label: 'Dashboard', icon: 'fa-chart-pie' },
           { id: 'runs', label: 'Pay Runs', icon: 'fa-play' },
@@ -428,8 +428,8 @@ export default function PayrollView({ employees = [], adminUser }) {
           <button
             key={tab.id}
             onClick={() => { setActiveTab(tab.id); setMessage(''); }}
-            className={`btn ${activeTab === tab.id ? 'btn-primary' : 'btn-outline'}`}
-            style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', fontSize: '0.85rem' }}
+            className={`btn payroll-tab-btn ${activeTab === tab.id ? 'btn-primary' : 'btn-outline'}`}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '8px 16px', fontSize: '0.85rem', whiteSpace: 'nowrap', flexShrink: 0 }}
           >
             <i className={`fa-solid ${tab.icon}`}></i>
             {tab.label}
@@ -445,7 +445,7 @@ export default function PayrollView({ employees = [], adminUser }) {
       )}
 
       {/* Tab views */}
-      <div className="custom-scrollbar" style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+      <div className="custom-scrollbar payroll-tab-content-wrap" style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
       {activeTab === 'dashboard' && (
         <DashboardTab dashboardData={dashboardData} employees={liveEmployees} onTabChange={setActiveTab} latestRunItems={latestRunItems} leaves={leaves} />
       )}

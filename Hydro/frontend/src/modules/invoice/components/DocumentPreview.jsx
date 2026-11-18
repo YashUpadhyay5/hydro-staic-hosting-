@@ -34,19 +34,13 @@ function DocumentPreview({
     setIsDragging(false);
   }, [document]);
 
-  if (!document) {
-    return (
-      <div className="empty-state">
-        <p>No document selected</p>
-      </div>
-    );
-  }
+  const [downloading, setDownloading] = useState(false);
 
-  const filename = document.filename || "";
-  const isUploading = document.document_id === "temp-uploading";
+  const filename = document?.filename || "";
+  const isUploading = document?.document_id === "temp-uploading";
 
   const token = localStorage.getItem("token") || localStorage.getItem("adminToken") || "";
-  const docId = document.document_id || document.id || "";
+  const docId = document?.document_id || document?.id || "";
   const apiBaseUrl = (import.meta.env && import.meta.env.VITE_API_URL)
     ? `${import.meta.env.VITE_API_URL.replace(/\/$/, '')}/v1/invoice`
     : `/api/v1/invoice`;
@@ -58,8 +52,6 @@ function DocumentPreview({
   const zoomIn = () => setZoom((z) => Math.min(z + 0.15, 3.0));
   const zoomOut = () => setZoom((z) => Math.max(z - 0.15, 0.4));
   const zoomFit = () => setZoom(1.0);
-
-  const [downloading, setDownloading] = useState(false);
 
   const handleDownload = async () => {
     if (!document || isUploading) return;
@@ -165,8 +157,16 @@ function DocumentPreview({
     };
   }, [isDragging, selectionStart, pageIndex, onRegionSelected]);
 
+  if (!document) {
+    return (
+      <div className="empty-state">
+        <p>No document selected</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="document-preview-block" style={{ width: "40%" }}>
+    <div className="document-preview-block">
       <style>{`
         @keyframes pulse {
           0% { opacity: 1; }

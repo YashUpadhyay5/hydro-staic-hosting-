@@ -2,6 +2,7 @@ import LoadingSpinner from '../LoadingSpinner';
 import React, { useEffect, useRef, useState } from 'react';
 import { api } from '../../services/api';
 import { formatDate } from '../../utils/helpers';
+import DayActivitiesPanel from './DayActivitiesPanel';
 
 const parseBatteryPercentage = (val) => {
     if (val === null || val === undefined || val === '' || val === 'N/A') return 'N/A';
@@ -455,6 +456,8 @@ export default function EmployeeTrackingView({ userId, userName, employees = [],
                 <div className="glass" style={{ flex: '2 1 600px', height: '100%', maxHeight: '640px', position: 'relative', overflow: 'hidden', borderRadius: '16px' }}>
                     <div ref={mapRef} style={{ width: '100%', height: '100%', borderRadius: '16px' }}></div>
                 </div>
+
+                <DayActivitiesPanel employeeId={matchedEmp?.id || userId} date={trackingDate} />
 
                 <div id="tracking-history-sidebar" className="custom-scrollbar" style={{ flex: '1 1 320px', height: '100%', maxHeight: '640px', overflowY: 'auto', padding: '15px', borderLeft: '1px solid var(--border-glass)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', paddingBottom: '8px', borderBottom: '1px solid var(--border-glass)', position: 'sticky', top: 0, background: 'var(--bg-glass)', backdropFilter: 'blur(8px)', zIndex: 10 }}>

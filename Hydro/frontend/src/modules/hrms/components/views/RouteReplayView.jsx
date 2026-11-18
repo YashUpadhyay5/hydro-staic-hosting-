@@ -682,25 +682,34 @@ export default function RouteReplayView({ employees }) {
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             {/* Top Toolbar Selector Box */}
-            <div style={{ background: 'var(--bg-glass)', padding: '20px', borderRadius: '16px', border: '1px solid var(--border-glass)', boxShadow: 'var(--shadow-sm)' }}>
+            <div className="route-replay-header-card" style={{ background: 'var(--bg-glass)', padding: '20px', borderRadius: '16px', border: '1px solid var(--border-glass)', boxShadow: 'var(--shadow-sm)', boxSizing: 'border-box', width: '100%', maxWidth: '100%' }}>
                 <div className="route-replay-controls-wrap" style={{ display: 'flex', gap: '16px', alignItems: 'end', flexWrap: 'wrap' }}>
                     
-                    {/* Work Mode Filter */}
-                    <div className="route-control-item" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {/* Work Mode Filter (Segmented Touch Pills - Zero Radio Overlap) */}
+                    <div className="route-control-item route-workmode-item" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)' }}>Work Mode</label>
-                        <div style={{ display: 'flex', gap: '12px', alignItems: 'center', height: '42px' }}>
-                            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: 'var(--text-primary)' }}>
-                                <input type="radio" name="routeWorkMode" value="ALL" checked={workMode === 'ALL'} onChange={() => { setWorkMode('ALL'); setSelectedEmp(''); }} style={{ accentColor: '#2563eb' }} />
+                        <div className="route-workmode-pills" style={{ display: 'flex', gap: '4px', alignItems: 'center', height: '42px' }}>
+                            <button
+                                type="button"
+                                className={`route-pill-btn ${workMode === 'ALL' ? 'active' : ''}`}
+                                onClick={() => { setWorkMode('ALL'); setSelectedEmp(''); }}
+                            >
                                 All Staff
-                            </label>
-                            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: 'var(--text-primary)' }}>
-                                <input type="radio" name="routeWorkMode" value="OFFICE" checked={workMode === 'OFFICE'} onChange={() => { setWorkMode('OFFICE'); setSelectedEmp(''); }} style={{ accentColor: '#2563eb' }} />
+                            </button>
+                            <button
+                                type="button"
+                                className={`route-pill-btn ${workMode === 'OFFICE' ? 'active' : ''}`}
+                                onClick={() => { setWorkMode('OFFICE'); setSelectedEmp(''); }}
+                            >
                                 Office Person
-                            </label>
-                            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: 'var(--text-primary)' }}>
-                                <input type="radio" name="routeWorkMode" value="FIELD" checked={workMode === 'FIELD'} onChange={() => { setWorkMode('FIELD'); setSelectedEmp(''); }} style={{ accentColor: '#2563eb' }} />
+                            </button>
+                            <button
+                                type="button"
+                                className={`route-pill-btn ${workMode === 'FIELD' ? 'active' : ''}`}
+                                onClick={() => { setWorkMode('FIELD'); setSelectedEmp(''); }}
+                            >
                                 Field Person
-                            </label>
+                            </button>
                         </div>
                     </div>
 
@@ -733,7 +742,7 @@ export default function RouteReplayView({ employees }) {
                         <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)' }}>Select Date</label>
                         <input
                             type="date"
-                            style={{ width: '100%', height: '42px', padding: '0 16px', borderRadius: '8px', border: '1px solid var(--border-glass)', outline: 'none', background: 'var(--input-bg)', color: 'var(--text-primary)', fontSize: '14px', boxSizing: 'border-box' }}
+                            className="route-control-date-input" style={{ width: '100%', maxWidth: '100%', height: '42px', padding: '0 16px', borderRadius: '8px', border: '1px solid var(--border-glass)', outline: 'none', background: 'var(--input-bg)', color: 'var(--text-primary)', fontSize: '14px', boxSizing: 'border-box' }}
                             value={replayDate}
                             onChange={(e) => setReplayDate(e.target.value)}
                         />
@@ -745,6 +754,7 @@ export default function RouteReplayView({ employees }) {
                         <div style={{ display: 'flex', background: 'var(--input-bg)', padding: '4px', borderRadius: '8px', gap: '4px', height: '42px', boxSizing: 'border-box', alignItems: 'center', border: '1px solid var(--border-glass)' }}>
                             <button
                                 type="button"
+                                className="route-engine-btn"
                                 onClick={() => { setRouteMode('osrm'); handleLoadRoute('osrm'); }}
                                 style={{
                                     background: routeMode === 'osrm' ? '#2563eb' : 'transparent',
@@ -757,6 +767,7 @@ export default function RouteReplayView({ employees }) {
 
                             <button
                                 type="button"
+                                className="route-engine-btn"
                                 onClick={() => { setRouteMode('fast'); handleLoadRoute('fast'); }}
                                 style={{
                                     background: routeMode === 'fast' ? '#10b981' : 'transparent',

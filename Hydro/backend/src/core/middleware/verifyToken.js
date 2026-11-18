@@ -93,19 +93,42 @@ const verifyToken = (req, res, next) => {
           return res.status(403).json({ error: 'Your account has been deactivated. Access denied.' });
         }
         decodedUser.role = decodedUser.role || cached.role || 'EMPLOYEE';
+        if (cached.canonicalId) {
+          decodedUser.id = cached.canonicalId;
+          decodedUser.empCode = cached.empCode || cached.canonicalId;
+        }
         req.user = decodedUser;
         return next();
       }
 
-      const dbUser = await Employee.findByPk(uId);
+      let dbUser = await Employee.findByPk(uId);
+      if (!dbUser) {
+        // Resolve legacy identifier (e.g. EMP0128 -> HMPL39) dynamically
+        try {
+          const { resolveCanonicalEmployee } = require('../utils/employeeCache');
+          const canonical = await resolveCanonicalEmployee(uId);
+          const targetPk = canonical?.employee?.id || canonical?.canonicalId;
+          if (targetPk) {
+            dbUser = await Employee.findByPk(targetPk);
+          }
+          if (!dbUser && canonical?.canonicalId) {
+            dbUser = await Employee.findOne({ where: { empCode: canonical.canonicalId } });
+          }
+        } catch (e) {}
+      }
+
       if (dbUser) {
-        userStatusCache.set(uId, { status: dbUser.status, role: dbUser.role, ts: now });
+        const canonicalId = dbUser.id;
+        const empCode = dbUser.empCode || canonicalId;
+        userStatusCache.set(uId, { status: dbUser.status, role: dbUser.role, canonicalId, empCode, ts: now });
         if (dbUser.status === 'PAST') {
           return res.status(403).json({ error: 'Your account has been deactivated. Access denied.' });
         }
         if (!decodedUser.role && dbUser.role) {
           decodedUser.role = dbUser.role;
         }
+        decodedUser.id = canonicalId;
+        decodedUser.empCode = empCode;
       }
 
       if (!decodedUser.role) {

@@ -5,6 +5,15 @@ import { FormulaExtender } from './FormulaExtender.js';
 import { AttendanceColumnGenerator } from './AttendanceColumnGenerator.js';
 
 export class SheetRenderer {
+  static prepareWorkforce(employees = [], selectedMonth, payslips = [], options = {}) {
+    const filtered = DataMapper.eligibleEmployeesForMonth(employees, selectedMonth, payslips, options);
+    const meta = DataMapper.mapMetadata(filtered, selectedMonth);
+    if (!DataMapper.managingDirectorOf(filtered) && Array.isArray(employees) && employees.length > 0) {
+      meta.employerName = DataMapper.employerNameOf(employees);
+      meta.managerName = meta.employerName;
+    }
+    return { employees: filtered, meta };
+  }
   /**
    * Completely purges leftover template sample rows beyond actual database records
    */
@@ -31,10 +40,10 @@ export class SheetRenderer {
   /**
    * Render Form U on loaded official template sheet
    */
-  static renderFormU(worksheet, employees = [], selectedMonth = new Date().toISOString().slice(0, 7)) {
+  static renderFormU(worksheet, employees = [], selectedMonth = new Date().toISOString().slice(0, 7), payslips = [], options = {}) {
     if (!worksheet) return;
 
-    const meta = DataMapper.mapMetadata(employees, selectedMonth);
+    const { employees: activeList, meta } = this.prepareWorkforce(employees, selectedMonth, payslips, options);
     const monthLabel = AttendanceColumnGenerator.getFormattedDayHeader(selectedMonth, 1).slice(3);
 
     // Headers on official Form U:
@@ -46,7 +55,7 @@ export class SheetRenderer {
     // Row 6 has the table headers
     // Employee records start at Row 7
     const templateRowIndex = 7;
-    const formURows = DataMapper.mapFormURows(employees, selectedMonth);
+    const formURows = DataMapper.mapFormURows(activeList, selectedMonth);
 
     formURows.forEach((rowData, idx) => {
       const targetRowIndex = templateRowIndex + idx;
@@ -85,10 +94,10 @@ export class SheetRenderer {
   /**
    * Render Form S on loaded official template sheet
    */
-  static renderFormS(worksheet, employees = [], selectedMonth = new Date().toISOString().slice(0, 7)) {
+  static renderFormS(worksheet, employees = [], selectedMonth = new Date().toISOString().slice(0, 7), payslips = [], options = {}) {
     if (!worksheet) return;
 
-    const meta = DataMapper.mapMetadata(employees, selectedMonth);
+    const { employees: activeList, meta } = this.prepareWorkforce(employees, selectedMonth, payslips, options);
     const monthLabel = AttendanceColumnGenerator.getFormattedDayHeader(selectedMonth, 1).slice(3);
 
     // Form S Header layout:
@@ -104,7 +113,7 @@ export class SheetRenderer {
     // Row 9 is column names, Row 10 is column indices (1)..(16)
     // Employee records start at Row 11
     const templateRowIndex = 11;
-    const formSRows = DataMapper.mapFormSRows(employees);
+    const formSRows = DataMapper.mapFormSRows(activeList);
 
     formSRows.forEach((rowData, idx) => {
       const targetRowIndex = templateRowIndex + idx;
@@ -158,10 +167,10 @@ export class SheetRenderer {
   /**
    * Render Form V Muster on loaded official template sheet
    */
-  static renderFormVMuster(worksheet, employees = [], attendance = [], leaves = [], selectedMonth = new Date().toISOString().slice(0, 7)) {
+  static renderFormVMuster(worksheet, employees = [], attendance = [], leaves = [], selectedMonth = new Date().toISOString().slice(0, 7), payslips = [], options = {}) {
     if (!worksheet) return;
 
-    const meta = DataMapper.mapMetadata(employees, selectedMonth);
+    const { employees: activeList, meta } = this.prepareWorkforce(employees, selectedMonth, payslips, options);
     const monthLabel = AttendanceColumnGenerator.getFormattedDayHeader(selectedMonth, 1).slice(3);
     const daysInMonth = AttendanceColumnGenerator.getDaysInMonth(selectedMonth);
 
@@ -183,7 +192,7 @@ export class SheetRenderer {
 
     // Employee records start at Row 9
     const templateRowIndex = 9;
-    const musterData = DataMapper.mapFormVMusterRows(employees, attendance, leaves, selectedMonth);
+    const musterData = DataMapper.mapFormVMusterRows(activeList, attendance, leaves, selectedMonth);
 
     musterData.forEach((empData, idx) => {
       const targetRowIndex = templateRowIndex + idx;
@@ -240,10 +249,10 @@ export class SheetRenderer {
   /**
    * Render Form V Register on loaded official template sheet
    */
-  static renderFormVRegister(worksheet, employees = [], attendance = [], leaves = [], selectedMonth = new Date().toISOString().slice(0, 7)) {
+  static renderFormVRegister(worksheet, employees = [], attendance = [], leaves = [], selectedMonth = new Date().toISOString().slice(0, 7), payslips = [], options = {}) {
     if (!worksheet) return;
 
-    const meta = DataMapper.mapMetadata(employees, selectedMonth);
+    const { employees: activeList, meta } = this.prepareWorkforce(employees, selectedMonth, payslips, options);
     const monthLabel = AttendanceColumnGenerator.getFormattedDayHeader(selectedMonth, 1).slice(3);
     const daysInMonth = AttendanceColumnGenerator.getDaysInMonth(selectedMonth);
     const endDayPad = String(daysInMonth).padStart(2, '0');
@@ -270,7 +279,7 @@ export class SheetRenderer {
     const templateRowIndex = 13;
     const [year, month] = selectedMonth.split('-');
 
-    employees.forEach((emp, idx) => {
+    activeList.forEach((emp, idx) => {
       const targetRowIndex = templateRowIndex + idx;
       const targetRow = worksheet.getRow(targetRowIndex);
 
@@ -293,7 +302,7 @@ export class SheetRenderer {
         if (day <= daysInMonth) {
           const dayPad = String(day).padStart(2, '0');
           const dateStr = `${year}-${month}-${dayPad}`;
-          const symbol = AttendanceColumnGenerator.getAttendanceSymbol(dateStr, empPunches, empLeaves, emp.weekly_offs || emp.weeklyOffs);
+          const symbol = AttendanceColumnGenerator.getAttendanceSymbol(dateStr, empPunches, empLeaves, emp.weekly_offs || emp.weeklyOffs, emp);
           const hours = (symbol === 'P') ? 8 : (symbol === 'HD' ? 4 : 0);
           cell.value = hours > 0 ? hours : (symbol === 'WO' ? 'WO' : '-');
           totalHours += hours;
@@ -331,7 +340,7 @@ export class SheetRenderer {
       targetRow.commit();
     });
 
-    this.cleanUnusedTemplateRows(worksheet, templateRowIndex, employees.length, 45);
+    this.cleanUnusedTemplateRows(worksheet, templateRowIndex, activeList.length, 45);
 
     worksheet.pageSetup = {
       orientation: 'landscape',
@@ -356,6 +365,10 @@ export class SheetRenderer {
     worksheet.getCell('D5').value = meta.employerName || '';
     worksheet.getCell('D6').value = meta.managerName || '';
     worksheet.getCell('D7').value = meta.regNo || '';
+    // Persons employed: the employees paid in this pay run (the template holds sample figures)
+    const paid = DataMapper.paidHeadCount(employees, payslips);
+    worksheet.getCell('L6').value = paid.male;
+    worksheet.getCell('M6').value = paid.female;
     worksheet.getCell('A8').value = `Wage Period from 01 ${monthLabel} to ${endDayPad} ${monthLabel} (Monthly)`;
 
     // 1. Unmerge all template merges touching rows 9 to 100
@@ -696,10 +709,10 @@ export class SheetRenderer {
   /**
    * Render Form X on loaded official template sheet
    */
-  static renderFormX(worksheet, employees = [], leaves = [], selectedMonth = new Date().toISOString().slice(0, 7)) {
+  static renderFormX(worksheet, employees = [], leaves = [], selectedMonth = new Date().toISOString().slice(0, 7), payslips = [], options = {}) {
     if (!worksheet) return;
 
-    const meta = DataMapper.mapMetadata(employees, selectedMonth);
+    const { employees: activeList, meta } = this.prepareWorkforce(employees, selectedMonth, payslips, options);
     const monthLabel = AttendanceColumnGenerator.getFormattedDayHeader(selectedMonth, 1).slice(3);
 
     worksheet.getCell('D4').value = [meta.companyName, meta.companyAddress].filter(Boolean).join(', ');
@@ -712,7 +725,7 @@ export class SheetRenderer {
     // Employee records start at Row 12
     const templateRowIndex = 12;
 
-    employees.forEach((emp, idx) => {
+    activeList.forEach((emp, idx) => {
       const targetRowIndex = templateRowIndex + idx;
       const targetRow = worksheet.getRow(targetRowIndex);
 
@@ -774,7 +787,7 @@ export class SheetRenderer {
       targetRow.getCell(3).value = emp.empCode || emp.emp_code || emp.employeeId || emp.code || '';
       // Col 4-7: Earned Leave
       targetRow.getCell(4).value = openingEarned;
-      targetRow.getCell(5).value = 1;
+      targetRow.getCell(5).value = DataMapper.earnedLeaveAccruedForMonth(emp, payslips);
       targetRow.getCell(6).value = elCount;
       targetRow.getCell(7).value = { formula: `+D${targetRowIndex}+E${targetRowIndex}-F${targetRowIndex}` };
       // Col 8-10: Medical Leave
@@ -810,7 +823,7 @@ export class SheetRenderer {
       targetRow.commit();
     });
 
-    this.cleanUnusedTemplateRows(worksheet, templateRowIndex, employees.length, 25);
+    this.cleanUnusedTemplateRows(worksheet, templateRowIndex, activeList.length, 25);
 
     worksheet.pageSetup = {
       orientation: 'landscape',

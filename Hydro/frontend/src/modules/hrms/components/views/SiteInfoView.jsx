@@ -116,6 +116,10 @@ export default function SiteInfoView({ employees }) {
         const lng = parseFloat(site.longitude);
         if (isNaN(lat) || isNaN(lng)) return;
 
+        if (window.innerWidth <= 768 && mapRef.current) {
+            mapRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        mapInstance.current.invalidateSize();
         mapInstance.current.flyTo([lat, lng], 16, { animate: true, duration: 1.2 });
         const key = site.rawGfId || site.id || site.name;
         const circle = circleLayersRef.current[key] || circleLayersRef.current[site.name];
@@ -829,6 +833,10 @@ export default function SiteInfoView({ employees }) {
         const lng = parseFloat(ping.longitude);
 
         if (!isNaN(lat) && !isNaN(lng)) {
+            if (window.innerWidth <= 768 && mapRef.current) {
+                mapRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+            mapInstance.current.invalidateSize();
             mapInstance.current.flyTo([lat, lng], 17, { duration: 1.2 });
             const pingKey = `outside_${ping.date}_${ping.index}`;
             const marker = outsideMarkersRef.current[pingKey];
@@ -849,6 +857,10 @@ export default function SiteInfoView({ employees }) {
         const lng = parseFloat(ping.longitude);
 
         if (!isNaN(lat) && !isNaN(lng)) {
+            if (window.innerWidth <= 768 && mapRef.current) {
+                mapRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+            mapInstance.current.invalidateSize();
             mapInstance.current.flyTo([lat, lng], 17, { duration: 1.2 });
             const key = ping.assignedGfName || ping.nearestGfName;
             const circle = circleLayersRef.current[key];
@@ -1125,48 +1137,40 @@ export default function SiteInfoView({ employees }) {
     });
 
     return (
-        <div id="site-info-view" className="view active" style={{ display: 'flex', flexDirection: 'column', gap: '20px', height: 'calc(100vh - 120px)' }}>
+        <div id="site-info-view" className="view active site-info-container" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             
             {/* Filter Section */}
-            <div className="glass" style={{ padding: '20px', display: 'flex', alignItems: 'center', gap: '24px', flexWrap: 'wrap' }}>
+            <div className="glass site-info-filter-card" style={{ padding: '20px', display: 'flex', alignItems: 'center', gap: '24px', flexWrap: 'wrap' }}>
                 
                 {/* Work Mode Filter */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div className="site-info-control-item site-info-workmode-item" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     <label style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-secondary)' }}>Work Mode</label>
-                    <div style={{ display: 'flex', gap: '16px', alignItems: 'center', height: '42px' }}>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', fontWeight: '600', cursor: 'pointer', color: 'var(--text-primary)' }}>
-                            <input 
-                                type="radio" 
-                                name="workMode" 
-                                value="OFFICE" 
-                                checked={workMode === 'OFFICE'} 
-                                onChange={() => {
-                                    setWorkMode('OFFICE');
-                                    setSelectedEmp('');
-                                }}
-                                style={{ accentColor: 'var(--primary-color)', width: '16px', height: '16px' }}
-                            />
+                    <div className="site-workmode-pills" style={{ display: 'flex', gap: '4px', alignItems: 'center', height: '42px' }}>
+                        <button
+                            type="button"
+                            className={`site-pill-btn ${workMode === 'OFFICE' ? 'active' : ''}`}
+                            onClick={() => {
+                                setWorkMode('OFFICE');
+                                setSelectedEmp('');
+                            }}
+                        >
                             Office Person
-                        </label>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', fontWeight: '600', cursor: 'pointer', color: 'var(--text-primary)' }}>
-                            <input 
-                                type="radio" 
-                                name="workMode" 
-                                value="FIELD" 
-                                checked={workMode === 'FIELD'} 
-                                onChange={() => {
-                                    setWorkMode('FIELD');
-                                    setSelectedEmp('');
-                                }}
-                                style={{ accentColor: 'var(--primary-color)', width: '16px', height: '16px' }}
-                            />
+                        </button>
+                        <button
+                            type="button"
+                            className={`site-pill-btn ${workMode === 'FIELD' ? 'active' : ''}`}
+                            onClick={() => {
+                                setWorkMode('FIELD');
+                                setSelectedEmp('');
+                            }}
+                        >
                             Field Person
-                        </label>
+                        </button>
                     </div>
                 </div>
 
                 {/* Filter by State */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div className="site-info-control-item" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     <label style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-secondary)' }}>Filter by State</label>
                     <select 
                         value={selectedState} 
@@ -1184,7 +1188,7 @@ export default function SiteInfoView({ employees }) {
                     </select>
                 </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div className="site-info-control-item" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     <label style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-secondary)' }}>Select Employee</label>
                     <select 
                         value={selectedEmp} 
@@ -1199,7 +1203,7 @@ export default function SiteInfoView({ employees }) {
                 </div>
 
                 {/* Date Selection Mode Toggle */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div className="site-info-control-item" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     <label style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-secondary)' }}>Date Filter Mode</label>
                     <select 
                         value={dateMode}
@@ -1213,7 +1217,7 @@ export default function SiteInfoView({ employees }) {
 
                 {/* Date Input(s) */}
                 {dateMode === 'SINGLE' ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <div className="site-info-control-item" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                         <label style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-secondary)' }}>Select Date</label>
                         <input 
                             type="date" 
@@ -1223,8 +1227,8 @@ export default function SiteInfoView({ employees }) {
                         />
                     </div>
                 ) : (
-                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <div className="site-info-control-item site-info-date-range-row" style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                        <div className="site-info-date-subitem" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                             <label style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-secondary)' }}>From Date</label>
                             <input 
                                 type="date" 
@@ -1234,7 +1238,7 @@ export default function SiteInfoView({ employees }) {
                             />
                         </div>
                         <span style={{ marginTop: '22px', fontWeight: '700', color: 'var(--text-muted)' }}>➔</span>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <div className="site-info-date-subitem" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                             <label style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-secondary)' }}>To Date</label>
                             <input 
                                 type="date" 
@@ -1247,7 +1251,7 @@ export default function SiteInfoView({ employees }) {
                 )}
 
                 {/* Overlap Boundary Handling Mode */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div className="site-info-control-item" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     <label style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-secondary)' }}>
                         <i className="fa-solid fa-layer-group" style={{ marginRight: '5px', color: 'var(--primary-color)' }}></i>
                         Overlap Handling
@@ -1263,8 +1267,9 @@ export default function SiteInfoView({ employees }) {
                     </select>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '22px' }}>
+                <div className="site-info-btn-group" style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '22px' }}>
                     <button 
+                        className="site-info-calc-btn"
                         onClick={handleCalculate}
                         disabled={isAnalyzing || exporting}
                         style={{ padding: '10px 24px', borderRadius: '8px', background: 'var(--primary-color)', color: 'white', border: 'none', fontWeight: '700', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', transition: 'opacity 0.2s' }}
@@ -1281,8 +1286,9 @@ export default function SiteInfoView({ employees }) {
                     </button>
 
                     {/* Excel Export Button */}
-                    <div style={{ position: 'relative' }} ref={exportMenuRef}>
+                    <div className="site-info-export-wrapper" style={{ position: 'relative' }} ref={exportMenuRef}>
                         <button
+                            className="site-info-export-btn"
                             onClick={() => setShowExportMenu(!showExportMenu)}
                             disabled={exporting}
                             style={{
@@ -1310,7 +1316,7 @@ export default function SiteInfoView({ employees }) {
                         </button>
 
                         {showExportMenu && (
-                            <div style={{
+                            <div className="site-info-export-dropdown" style={{
                                 position: 'absolute',
                                 top: '100%',
                                 right: 0,
@@ -1414,16 +1420,16 @@ export default function SiteInfoView({ employees }) {
             </div>
 
             {/* Split Analytics View */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.8fr', gap: '20px', flex: 1, minHeight: 0 }}>
+            <div className="site-info-split-grid" style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.8fr', gap: '20px', flex: 1, minHeight: 0 }}>
                 
                 {/* Left Side: Summary and Visited Geofences */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', overflowY: 'auto', paddingRight: '4px' }}>
+                <div className="site-info-left-panel" style={{ display: 'flex', flexDirection: 'column', gap: '20px', overflowY: 'auto', paddingRight: '4px' }}>
                     
                     {/* Summary Metrics Cards */}
-                    <div className="glass" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    <div className="glass site-info-summary-card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
                         <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '700', color: 'var(--text-primary)' }}>GPS Geofence Summary</h3>
                         
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                        <div className="site-info-metrics-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                             
                             {/* Inside Geofence Card (Interactive Clickable) */}
                             {(() => {
@@ -1548,7 +1554,7 @@ export default function SiteInfoView({ employees }) {
                     </div>
 
                     {/* Visited Geofences List */}
-                    <div className="glass" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', flex: 1, minHeight: 0 }}>
+                    <div className="glass site-info-visited-card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', flex: 1, minHeight: 0 }}>
                         <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '700', color: 'var(--text-primary)' }}>Visited Office Sites</h3>
                         
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', overflowY: 'auto' }}>
@@ -1566,6 +1572,7 @@ export default function SiteInfoView({ employees }) {
                                         key={`${site.id}_${index}`} 
                                         onClick={() => handleSiteCardClick(site)}
                                         title="Click to zoom to geofence on map"
+                                        className="site-info-visited-item"
                                         style={{ 
                                             padding: '14px', 
                                             borderRadius: '10px', 
@@ -1643,7 +1650,7 @@ export default function SiteInfoView({ employees }) {
                                                 </span>
                                             )}
                                         </div>
-                                        <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                                        <div className="site-info-visited-stats" style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
                                             <span style={{ background: 'rgba(37, 99, 235, 0.1)', color: '#2563eb', padding: '4px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: '700' }}>
                                                 {formatMinutes(siteInfoSpending(site))} spent
                                             </span>
@@ -1657,8 +1664,8 @@ export default function SiteInfoView({ employees }) {
                 </div>
 
                 {/* Right Side: Leaflet Map */}
-                <div className="glass" style={{ padding: '8px', position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-                    <div ref={mapRef} style={{ width: '100%', height: '100%', borderRadius: '12px', zIndex: 1 }} />
+                <div className="glass site-info-map-panel" style={{ padding: '8px', position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                    <div ref={mapRef} className="site-info-map-container" style={{ width: '100%', height: '100%', borderRadius: '12px', zIndex: 1 }} />
                 </div>
             </div>
 
@@ -1666,7 +1673,7 @@ export default function SiteInfoView({ employees }) {
             {/* OUTSIDE GEOFENCE DETAILED BREAKDOWN MODAL */}
             {/* ---------------------------------------------------------------------- */}
             {showOutsideModal && (
-                <div style={{
+                <div className="payroll-modal-overlay site-info-modal-overlay" style={{
                     position: 'fixed',
                     top: 0,
                     left: 0,
@@ -1680,7 +1687,7 @@ export default function SiteInfoView({ employees }) {
                     justify: 'center',
                     padding: '20px'
                 }}>
-                    <div className="glass" style={{
+                    <div className="glass payroll-modal-content site-info-modal-card" style={{
                         width: '100%',
                         maxWidth: '850px',
                         maxHeight: '90vh',
@@ -1811,7 +1818,7 @@ export default function SiteInfoView({ employees }) {
                                     />
                                 </div>
 
-                                <div style={{ borderRadius: '8px', border: '1px solid var(--border-glass, #334155)', overflow: 'hidden' }}>
+                                <div className="payroll-table-wrap site-info-table-wrap" style={{ borderRadius: '8px', border: '1px solid var(--border-glass, #334155)', overflow: 'hidden' }}>
                                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
                                         <thead>
                                             <tr style={{ background: 'rgba(255,255,255,0.05)' }}>
@@ -1876,7 +1883,7 @@ export default function SiteInfoView({ employees }) {
             {/* INSIDE GEOFENCE DETAILED BREAKDOWN MODAL */}
             {/* ---------------------------------------------------------------------- */}
             {showInsideModal && (
-                <div style={{
+                <div className="payroll-modal-overlay site-info-modal-overlay" style={{
                     position: 'fixed',
                     top: 0,
                     left: 0,
@@ -1890,7 +1897,7 @@ export default function SiteInfoView({ employees }) {
                     justify: 'center',
                     padding: '20px'
                 }}>
-                    <div className="glass" style={{
+                    <div className="glass payroll-modal-content site-info-modal-card" style={{
                         width: '100%',
                         maxWidth: '900px',
                         maxHeight: '90vh',
@@ -2065,7 +2072,7 @@ export default function SiteInfoView({ employees }) {
                                     />
                                 </div>
 
-                                <div style={{ borderRadius: '8px', border: '1px solid var(--border-glass, #334155)', overflow: 'hidden' }}>
+                                <div className="payroll-table-wrap site-info-table-wrap" style={{ borderRadius: '8px', border: '1px solid var(--border-glass, #334155)', overflow: 'hidden' }}>
                                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
                                         <thead>
                                             <tr style={{ background: 'rgba(255,255,255,0.05)' }}>

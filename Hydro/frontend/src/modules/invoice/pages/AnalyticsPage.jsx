@@ -77,9 +77,9 @@ function StatCard({ title, value, subtitle, color, icon, trend, onClick, animate
           </span>
         )}
       </div>
-      <div className="analytics-stat-value">{animateValue ? displayValue : value}</div>
+      <div className="analytics-stat-value" title={typeof value === 'string' ? value : String(animateValue ? displayValue : value)}>{animateValue ? displayValue : value}</div>
       <div className="analytics-stat-title">{title}</div>
-      {subtitle && <div className="analytics-stat-sub">{subtitle}</div>}
+      {subtitle && <div className="analytics-stat-sub" title={String(subtitle)}>{subtitle}</div>}
     </div>
   );
 }
@@ -344,26 +344,31 @@ export default function AnalyticsPage() {
   return (
     <div className="page-analytics">
       {/* Page Header */}
-      <div className="page-header">
+      <div className="page-header analytics-header">
         <div className="page-header-left">
           <h1 className="page-title">Analytics & Reports</h1>
           <p className="page-subtitle">
             Real-time operational insights · <strong>{timeRangeLabel}</strong> · {total} documents
           </p>
         </div>
-        <div className="page-header-right" style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-          <button className="btn btn-ghost" onClick={handleExportCSV} title="Export CSV">
-            <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-            </svg>
-            Export
-          </button>
-          <select className="btn btn-ghost" value={timeRange} onChange={e => setTimeRange(e.target.value)} style={{ cursor: "pointer" }}>
+        <div className="analytics-header-actions">
+          <select
+            className="analytics-time-select"
+            value={timeRange}
+            onChange={e => setTimeRange(e.target.value)}
+            title="Filter analytics by time range"
+          >
             <option value="all">All Time</option>
             <option value="today">Today</option>
             <option value="week">This Week</option>
             <option value="month">This Month</option>
           </select>
+          <button className="btn btn-ghost analytics-export-btn" onClick={handleExportCSV} title="Export CSV Report">
+            <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            <span>Export</span>
+          </button>
         </div>
       </div>
 
@@ -609,55 +614,75 @@ export default function AnalyticsPage() {
 
       {/* Recent Activity Table */}
       <div className="analytics-activity-card">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-          <h3 style={{ margin: 0 }}>Recent Invoices</h3>
-          <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
-            Showing latest {recentActivity.length} of {readyDocs.length} processed
-          </span>
+        <div className="activity-card-header">
+          <div className="activity-card-title-group">
+            <h3 style={{ margin: 0 }}>Recent Invoices</h3>
+            <span className="activity-card-sub">
+              Showing latest {recentActivity.length} of {readyDocs.length} processed
+            </span>
+          </div>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm view-all-archive-btn"
+            onClick={() => navigate("/invoice/archive")}
+          >
+            <span>View All in Archive</span>
+            <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <polyline points="9 18 15 12 9 6"/>
+            </svg>
+          </button>
         </div>
         {recentActivity.length === 0 ? (
           <div className="chart-empty" style={{ padding: "40px 0" }}>No processed invoices yet.</div>
         ) : (
-          <table className="activity-table">
-            <thead>
-              <tr>
-                <th>Vendor</th>
-                <th>Invoice No.</th>
-                <th>Invoice Date</th>
-                <th>Grand Total</th>
-                <th>Verification Time</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recentActivity.map(doc => {
-                const { vendorName, invoiceNo, invoiceDate, grandTotal } = getDocDetails(doc);
-                return (
-                  <tr
-                     key={doc.document_id}
-                     style={{ cursor: "pointer", transition: "background 0.2s" }}
-                     onClick={() => navigate("/invoice/archive")}
-                     onMouseEnter={e => e.currentTarget.style.background = "var(--bg-hover)"}
-                     onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                  >
-                    <td><strong>{vendorName}</strong></td>
-                    <td>{invoiceNo}</td>
-                    <td>{invoiceDate}</td>
-                    <td className="amount-cell">₹{grandTotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
-                    <td>{doc.verification_time || 0}s</td>
-                    <td>
-                      <span
-                        className={`status-badge ${doc.status === "ARCHIVED" ? "archived" : "pending"}`}
-                        style={doc.status !== "ARCHIVED" ? { background: "rgba(245, 158, 11, 0.15)", color: "#d97706" } : {}}
-                      >
-                        {doc.status === "ARCHIVED" ? "✓ Verified" : "Pending"}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <div className="analytics-table-wrapper">
+            <table className="activity-table">
+              <thead>
+                <tr>
+                  <th className="col-vendor">Vendor</th>
+                  <th className="col-invoice">Invoice No.</th>
+                  <th className="col-date">Invoice Date</th>
+                  <th className="col-amount">Grand Total</th>
+                  <th className="col-time">Verification Time</th>
+                  <th className="col-status">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentActivity.map(doc => {
+                  const { vendorName, invoiceNo, invoiceDate, grandTotal } = getDocDetails(doc);
+                  return (
+                    <tr
+                       key={doc.document_id}
+                       style={{ cursor: "pointer", transition: "background 0.2s" }}
+                       onClick={() => navigate("/invoice/archive")}
+                       onMouseEnter={e => e.currentTarget.style.background = "var(--bg-hover)"}
+                       onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                    >
+                      <td className="col-vendor">
+                        <span className="vendor-name-cell" title={vendorName}>
+                          <strong>{vendorName}</strong>
+                        </span>
+                      </td>
+                      <td className="col-invoice">
+                        <span className="mono-cell">{invoiceNo}</span>
+                      </td>
+                      <td className="col-date">{invoiceDate}</td>
+                      <td className="col-amount amount-cell">₹{grandTotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+                      <td className="col-time">{doc.verification_time || 0}s</td>
+                      <td className="col-status">
+                        <span
+                          className={`status-badge ${doc.status === "ARCHIVED" ? "archived" : "pending"}`}
+                          style={doc.status !== "ARCHIVED" ? { background: "rgba(245, 158, 11, 0.15)", color: "#d97706" } : {}}
+                        >
+                          {doc.status === "ARCHIVED" ? "✓ Verified" : "Pending"}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>

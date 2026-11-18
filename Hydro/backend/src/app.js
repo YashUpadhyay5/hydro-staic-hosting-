@@ -16,6 +16,9 @@ const documentRoutes = require('./modules/hrms/employee/routes/document');
 const employeeRoutes = require('./modules/hrms/employee/routes/employee');
 const geofenceRoutes = require('./modules/hrms/organization/routes/geofence');
 const ledgerRoutes = require('./modules/hrms/expense/routes/ledger');
+const activityRoutes = require('./modules/hrms/activity/routes/activities');
+const regularizationRoutes = require('./modules/hrms/attendance/routes/regularization');
+const attendanceRegisterRoutes = require('./modules/hrms/attendance/routes/attendanceRegister');
 const siteRoutes = require('./modules/hrms/organization/routes/site');
 const clusterRoutes = require('./modules/hrms/organization/routes/cluster');
 const ruleRoutes = require('./modules/hrms/organization/routes/rule');
@@ -285,6 +288,9 @@ const registerRoutes = (prefix) => {
     app.use(`${prefix}/employees`, verifyToken, employeeRoutes);
     app.use(`${prefix}/geofence`, verifyToken, geofenceRoutes);
     app.use(`${prefix}/ledger`, verifyToken, ledgerRoutes);   // Preserved from v1
+    app.use(`${prefix}/activities`, verifyToken, activityRoutes);
+    app.use(`${prefix}/regularizations`, verifyToken, regularizationRoutes);
+    app.use(`${prefix}/attendance-register`, verifyToken, attendanceRegisterRoutes);
     app.use(`${prefix}/sites`, verifyToken, siteRoutes);       // Preserved from v2
     app.use(`${prefix}/rules`, verifyToken, ruleRoutes);
     app.use(`${prefix}/clusters`, verifyToken, clusterRoutes); // Preserved from v2

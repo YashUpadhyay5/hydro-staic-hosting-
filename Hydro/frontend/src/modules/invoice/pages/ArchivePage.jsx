@@ -60,6 +60,7 @@ export default function ArchivePage() {
   const [auditLog, setAuditLog] = useState(null);
   const [activeTemplate, setActiveTemplate] = useState(null);
   const [dynamicFilters, setDynamicFilters] = useState({});
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [showExcelModal, setShowExcelModal] = useState(false);
 
   const loadTemplates = async () => {
@@ -257,29 +258,52 @@ export default function ArchivePage() {
     return sum + grandTotal;
   }, 0);
 
+  // Collect filterable fields from active template
+  const filterableFields = [];
+  if (activeTemplate && Array.isArray(activeTemplate.sections)) {
+    activeTemplate.sections.forEach(sec => {
+      if (sec.enabled && Array.isArray(sec.fields)) {
+        sec.fields.forEach(f => {
+          if (f.filterable && !f.hidden) {
+            filterableFields.push({ ...f, sectionTitle: sec.title || sec.id });
+          }
+        });
+      }
+    });
+  }
+
+  const activeDynamicCount = Object.keys(dynamicFilters).filter(k => Boolean(dynamicFilters[k]?.trim())).length;
+  const totalActiveFilters = (searchQuery ? 1 : 0) + (filterDate ? 1 : 0) + activeDynamicCount;
+
+  const handleClearAllFilters = () => {
+    setSearchQuery("");
+    setFilterDate("");
+    setDynamicFilters({});
+  };
+
+  const handleClearSingleFilter = (key) => {
+    setDynamicFilters(prev => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  };
 
   return (
     <div className="page-archive">
       {/* Page Header */}
-      <div className="page-header">
+      <div className="page-header archive-header">
         <div className="page-header-left">
           <h1 className="page-title">Invoice Archive</h1>
-          <p className="page-subtitle">{archived.length} verified invoice(s) • Total: ₹{totalAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</p>
+          <p className="page-subtitle">
+            <span className="count-pill">{archived.length} verified invoice(s)</span>
+            <span className="dot-separator">•</span>
+            <span className="total-pill">Total: ₹{totalAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+          </p>
         </div>
-        <div className="page-header-right" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+        <div className="archive-header-actions">
           <button
-            className="btn btn-ghost"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "6px",
-              padding: "9px 14px",
-              borderRadius: "8px",
-              fontSize: "13px",
-              fontWeight: "500",
-              cursor: "pointer",
-              border: "1px solid var(--border-color, #e2e8f0)"
-            }}
+            className="btn btn-ghost archive-refresh-btn"
             onClick={() => loadArchived(false)}
             title="Refresh Archive"
           >
@@ -287,103 +311,234 @@ export default function ArchivePage() {
               <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
               <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
             </svg>
-            Refresh
+            <span>Refresh</span>
           </button>
           <button
-            className="btn"
-            style={{
-              background: "#10b981",
-              borderColor: "#10b981",
-              color: "#ffffff",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "8px",
-              fontWeight: "600",
-              fontSize: "13px",
-              padding: "9px 18px",
-              borderRadius: "8px",
-              boxShadow: "0 4px 12px rgba(16, 185, 129, 0.3)",
-              cursor: "pointer"
-            }}
+            className="btn btn-excel-report"
             onClick={() => {
               setShowExcelModal(true);
             }}
+            title="Download Excel Report"
           >
-            <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
               <polyline points="14 2 14 8 20 8"/>
               <line x1="16" y1="13" x2="8" y2="13"/>
               <line x1="16" y1="17" x2="8" y2="17"/>
             </svg>
-            Download Excel Report
+            <span className="btn-text-desktop">Download Excel Report</span>
+            <span className="btn-text-mobile">Excel Report</span>
           </button>
         </div>
       </div>
 
-      {/* Toolbar */}
-      <div className="archive-toolbar" style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "center" }}>
-        <div className="search-wrapper">
-          <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" className="search-icon">
-            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-          </svg>
-          <input
-            type="text"
-            className="archive-search"
-            placeholder="Search matching fields..."
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-          />
-          {searchQuery && (
-            <button className="search-clear" onClick={() => setSearchQuery("")}>×</button>
-          )}
-        </div>
-        <input
-          type="date"
-          className="archive-date-filter"
-          value={filterDate}
-          onChange={e => setFilterDate(e.target.value)}
-          title="Filter by date"
-        />
-
-        {/* Render dynamic metadata filters */}
-        {activeTemplate && activeTemplate.sections.map(sec => {
-          if (!sec.enabled) return null;
-          return sec.fields.filter(f => f.filterable && !f.hidden).map(field => (
+      {/* Archive Toolbar */}
+      <div className="archive-toolbar">
+        <div className="archive-toolbar-main">
+          <div className="search-wrapper">
+            <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" className="search-icon">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
             <input
-              key={field.key}
               type="text"
               className="archive-search"
-              style={{ width: "130px", height: "36px", padding: "6px 10px", fontSize: "12px" }}
-              placeholder={`Filter by ${field.label}...`}
-              value={dynamicFilters[field.key] || ""}
-              onChange={(e) => setDynamicFilters({
-                ...dynamicFilters,
-                [field.key]: e.target.value
-              })}
+              placeholder="Search by vendor, invoice #, PO..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
             />
-          ));
-        })}
+            {searchQuery && (
+              <button className="search-clear" onClick={() => setSearchQuery("")} title="Clear search">×</button>
+            )}
+          </div>
 
-        <select className="archive-sort" value={sortBy} onChange={e => setSortBy(e.target.value)}>
-          <option value="date_desc">Newest First</option>
-          <option value="date_asc">Oldest First</option>
-          <option value="amount_desc">Highest Amount</option>
-          <option value="vendor_asc">Vendor A-Z</option>
-          
-          {/* Render dynamic sort options */}
-          {activeTemplate && activeTemplate.sections.map(sec => {
-            if (!sec.enabled) return null;
-            return sec.fields.filter(f => f.sortable && !f.hidden).map(field => (
-              <option key={field.key} value={field.key}>
-                Sort by {field.label}
-              </option>
-            ));
-          })}
-        </select>
+          <div className="archive-toolbar-controls">
+            <div className="archive-date-wrapper">
+              <input
+                type="date"
+                className="archive-date-filter"
+                value={filterDate}
+                onChange={e => setFilterDate(e.target.value)}
+                title="Filter by upload date"
+              />
+              {filterDate && (
+                <button
+                  type="button"
+                  className="archive-date-clear"
+                  onClick={() => setFilterDate("")}
+                  title="Clear date filter"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+
+            <select className="archive-sort" value={sortBy} onChange={e => setSortBy(e.target.value)}>
+              <option value="date_desc">Newest First</option>
+              <option value="date_asc">Oldest First</option>
+              <option value="amount_desc">Highest Amount</option>
+              <option value="vendor_asc">Vendor A-Z</option>
+              
+              {/* Dynamic template sort options */}
+              {activeTemplate && activeTemplate.sections.map(sec => {
+                if (!sec.enabled) return null;
+                return sec.fields.filter(f => f.sortable && !f.hidden).map(field => (
+                  <option key={field.key} value={field.key}>
+                    Sort by {field.label}
+                  </option>
+                ));
+              })}
+            </select>
+
+            {filterableFields.length > 0 && (
+              <button
+                type="button"
+                className={`archive-filter-toggle-btn ${showAdvancedFilters ? "active" : ""} ${activeDynamicCount > 0 ? "has-filters" : ""}`}
+                onClick={() => setShowAdvancedFilters(prev => !prev)}
+                title="Toggle advanced template filters"
+              >
+                <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
+                </svg>
+                <span>Filters</span>
+                {activeDynamicCount > 0 && (
+                  <span className="filter-count-badge">{activeDynamicCount}</span>
+                )}
+                <svg
+                  className={`chevron-icon ${showAdvancedFilters ? "open" : ""}`}
+                  width="11"
+                  height="11"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  viewBox="0 0 24 24"
+                >
+                  <polyline points="6 9 12 15 18 9"/>
+                </svg>
+              </button>
+            )}
+
+            {totalActiveFilters > 0 && (
+              <button
+                type="button"
+                className="archive-reset-btn"
+                onClick={handleClearAllFilters}
+                title="Reset all search & filters"
+              >
+                Reset All
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Active Dynamic Filter Chips */}
+        {activeDynamicCount > 0 && (
+          <div className="archive-chips-bar">
+            <span className="chips-title">Active Filters:</span>
+            <div className="chips-list">
+              {Object.keys(dynamicFilters).map(key => {
+                const val = dynamicFilters[key];
+                if (!val || !val.trim()) return null;
+                const field = filterableFields.find(f => f.key === key);
+                const label = field ? field.label : key;
+                return (
+                  <span key={key} className="filter-pill-chip">
+                    <span className="pill-name">{label}:</span>
+                    <span className="pill-value">{val}</span>
+                    <button
+                      type="button"
+                      className="pill-close"
+                      onClick={() => handleClearSingleFilter(key)}
+                      title={`Remove ${label} filter`}
+                    >
+                      ×
+                    </button>
+                  </span>
+                );
+              })}
+              <button
+                type="button"
+                className="chips-clear-btn"
+                onClick={() => setDynamicFilters({})}
+              >
+                Clear Template Filters
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Collapsible Advanced Template Filters Drawer */}
+        {showAdvancedFilters && filterableFields.length > 0 && (
+          <div className="archive-advanced-drawer">
+            <div className="drawer-header">
+              <div className="drawer-header-title">
+                <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
+                </svg>
+                <span>Advanced Template Filters ({filterableFields.length})</span>
+                {activeDynamicCount > 0 && (
+                  <span className="drawer-active-badge">{activeDynamicCount} Active</span>
+                )}
+              </div>
+              <div className="drawer-header-actions">
+                {activeDynamicCount > 0 && (
+                  <button
+                    type="button"
+                    className="drawer-action-btn secondary"
+                    onClick={() => setDynamicFilters({})}
+                  >
+                    Clear All
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="drawer-action-btn primary"
+                  onClick={() => setShowAdvancedFilters(false)}
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+
+            <div className="drawer-fields-grid">
+              {filterableFields.map(field => {
+                const val = dynamicFilters[field.key] || "";
+                return (
+                  <div key={field.key} className="drawer-field-item">
+                    <div className="drawer-field-label-row">
+                      <label className="drawer-field-label">{field.label}</label>
+                      {val && (
+                        <button
+                          type="button"
+                          className="drawer-field-clear"
+                          onClick={() => handleClearSingleFilter(field.key)}
+                          title="Clear field"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                    <div className="drawer-input-wrapper">
+                      <input
+                        type="text"
+                        className="drawer-field-input"
+                        placeholder={`Filter by ${field.label}...`}
+                        value={val}
+                        onChange={(e) => setDynamicFilters({
+                          ...dynamicFilters,
+                          [field.key]: e.target.value
+                        })}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Archive Content */}
-      <div className="archive-layout">
+      <div className={`archive-layout ${selectedDoc ? "has-selected-doc" : ""}`}>
         {/* List Panel */}
         <div className="archive-list-panel">
           {loading ? (
@@ -531,30 +686,31 @@ function ArchiveDetailView({ doc, onClose }) {
   return (
     <div className="archive-detail">
       <div className="archive-detail-header">
-        <div>
-          <h3>{vendorName}</h3>
-          <span className="archive-badge">✓ Archived</span>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+        <div className="archive-detail-header-left">
           <button
-            className="btn btn-sm"
-            style={{
-              background: "rgba(16, 185, 129, 0.12)",
-              border: "1px solid #10b981",
-              color: "#10b981",
-              fontWeight: "600",
-              fontSize: "12px",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "6px",
-              cursor: "pointer",
-              padding: "6px 12px",
-              borderRadius: "6px"
-            }}
+            type="button"
+            className="archive-detail-back-btn"
+            onClick={onClose}
+            title="Back to Invoices list"
+          >
+            <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+              <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
+            </svg>
+            <span>Back</span>
+          </button>
+          <div className="archive-detail-title-group">
+            <h3>{vendorName}</h3>
+            <span className="archive-badge">✓ Archived</span>
+          </div>
+        </div>
+        <div className="archive-detail-header-actions">
+          <button
+            className="btn btn-sm btn-detail-excel"
             onClick={() => {
               const token = localStorage.getItem("token") || "";
               window.open(`/api/export/excel?document_id=${encodeURIComponent(doc.document_id)}&token=${token}`, "_blank");
             }}
+            title="Download Excel for this invoice"
           >
             <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
@@ -562,9 +718,9 @@ function ArchiveDetailView({ doc, onClose }) {
               <line x1="16" y1="13" x2="8" y2="13"/>
               <line x1="16" y1="17" x2="8" y2="17"/>
             </svg>
-            Download Excel
+            <span>Excel</span>
           </button>
-          <button className="icon-btn" onClick={onClose} title="Close">
+          <button className="icon-btn archive-detail-close-btn" onClick={onClose} title="Close detail panel">
             <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>

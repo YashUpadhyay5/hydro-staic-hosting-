@@ -4,10 +4,12 @@ const {
   Loan,
   LoanRepayment,
   Reimbursement,
-  Leave
+  Leave,
+  PayrollRun
 } = require('../../../shared/models/index');
 const { Op } = require('sequelize');
 const ProfessionalTaxService = require('../../../core/utils/ProfessionalTaxService');
+const { lopForMonth } = require('../../hrms/leave/services/LeaveLop');
 
 /**
  * PayCalculator - the ONLY place that decides an employee's pay for a payroll run.
@@ -163,8 +165,10 @@ async function resolveBaseMonthlyGross(employee, wizardAdj, periodStart, periodE
   return { amount: DEFAULT_MONTHLY_GROSS, source: 'DEFAULT' };
 }
 
-// Approved LOP / unpaid leave days starting in the pay month (used only when Step 1 has no LOP edit)
-async function lopDaysFromLeaves(who, year, month, transaction) {
+// LOP days of approved leave requests that fall in the pay month: the LOP part of an EL/LOP split and
+// LOP / unpaid leaves, by date (a leave spanning two months is split between them). Special leave is never LOP.
+// Used when Step 1 has no LOP edit for the employee. Returns { days, leaves: [{ leaveId, type, dates, ... }] }.
+async function lopFromLeaves(who, year, month, transaction) {
   const leaves = await Leave.findAll({
     where: {
       [Op.or]: [
@@ -175,21 +179,22 @@ async function lopDaysFromLeaves(who, year, month, transaction) {
     },
     transaction
   });
+  return lopForMonth(leaves, year, month);
+}
 
-  return leaves.reduce((sum, l) => {
-    if (String(l.status || '').toLowerCase() !== 'approved') return sum;
-    const start = parseDateParts(l.startDate);
-    if (!start || start.year !== year || start.month !== month) return sum;
-    const type = String(l.type || '').toLowerCase();
-    if (!type.includes('lop') && !type.includes('unpaid') && !type.includes('loss of pay')) return sum;
-
-    let days = Number(l.lopDays) > 0 ? Number(l.lopDays) : Number(l.totalDays) || 0;
-    if (days <= 0) {
-      const diff = Math.round((new Date(l.endDate || l.startDate) - new Date(l.startDate)) / 86400000) + 1;
-      days = isNaN(diff) ? 1 : Math.max(1, diff);
-    }
-    return sum + days;
-  }, 0);
+// LOP from the monthly attendance register: its A days (LOP leave days, and working days with neither attendance
+// nor EL; see AttendanceRegisterService). Only for pay runs marked lopSource 'REGISTER' (created since the register
+// exists); older runs keep leave LOP so their figures never change. Returns null when the employee is not in the
+// register (not active), or { days: null, reason: 'NO_ATTENDANCE' } when they have no attendance at all that month,
+// so a month without app clock-ins is not turned into a full month of LOP; leave LOP is used then.
+async function lopFromRegister(who, month, transaction) {
+  const AttendanceRegisterService = require('../../hrms/attendance/services/AttendanceRegisterService');
+  const reg = await AttendanceRegisterService.getRegister(month, { employeeId: who.id, transaction });
+  const row = reg.employees[0];
+  if (!row) return null;
+  if (!row.cells.some((c) => c.source === 'ATTENDANCE')) return { days: null, dates: [], reason: 'NO_ATTENDANCE' };
+  const dates = row.cells.filter((c) => c.mark === 'A' || (c.mark === 'EL' && c.part)).map((c) => c.date);
+  return { days: row.totals.lop, dates, reason: null };
 }
 
 /**
@@ -240,13 +245,21 @@ async function computeEmployeePay({ employee, month, wizardState = {}, payrollRu
     }
   }
 
-  // 2. LOP: Step 1 edit, else approved LOP leaves
+  // 2. LOP: Step 1 edit, else the monthly attendance register's LOP days, else the LOP days of approved leave
   const editedLop = ws.editedLop || {};
   const lopKey = findWizardKey(editedLop, who);
   const editedLopVal = lopKey !== undefined ? Number(editedLop[lopKey]) : NaN;
-  const lopDays = !isNaN(editedLopVal) && editedLopVal >= 0
-    ? editedLopVal
-    : await lopDaysFromLeaves(who, year, mon, transaction);
+  const lopEdited = !isNaN(editedLopVal) && editedLopVal >= 0;
+  const leaveLop = await lopFromLeaves(who, year, mon, transaction);
+  const run = payrollRunId ? await PayrollRun.findByPk(payrollRunId, { attributes: ['id', 'lopSource'], transaction }) : null;
+  const registerLop = run && run.lopSource === 'REGISTER' ? await lopFromRegister(who, month, transaction) : null;
+  const fromRegister = Boolean(registerLop && registerLop.days !== null);
+  // A run from before the register keeps the LOP it stored when processed: later attendance corrections (which
+  // add or change leave records) must not change the pay of a payroll that was already run.
+  const storedLop = !fromRegister && run && run.lopSource !== 'REGISTER' && existingItem && existingItem.lopDays !== null && existingItem.lopDays !== undefined
+    ? Number(existingItem.lopDays) : null;
+  const autoLop = fromRegister ? registerLop.days : (storedLop !== null ? storedLop : leaveLop.days);
+  const lopDays = lopEdited ? editedLopVal : autoLop;
 
   const workedDays = Math.max(0, employedDays - lopDays);
   const ratio = workingDays > 0 ? Math.min(1, workedDays / workingDays) : 0;
@@ -427,6 +440,12 @@ async function computeEmployeePay({ employee, month, wizardState = {}, payrollRu
     employedDays,
     workedDays,
     lopDays,
+    lopSource: lopEdited ? 'EDITED' : (fromRegister ? 'REGISTER' : (storedLop !== null ? 'STORED' : 'LEAVES')),
+    leaveLopDays: leaveLop.days, // what approved leave says, shown in Step 1 even when an edit overrides it
+    leaveLop: leaveLop.leaves,
+    registerLopDays: fromRegister ? registerLop.days : null, // what the monthly attendance register says
+    registerLopDates: fromRegister ? registerLop.dates : [],
+    registerLopNote: run && run.lopSource === 'REGISTER' ? (registerLop ? registerLop.reason : 'NOT_IN_REGISTER') : 'OLDER_RUN',
     ratio,
     isHeld,
     baseMonthlyGross: base.amount,

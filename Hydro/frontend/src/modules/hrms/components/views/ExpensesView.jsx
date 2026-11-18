@@ -5,7 +5,7 @@ import { api } from '../../services/api';
 import { formatDate, getFullUrl, forceDownload, isActiveEmployee } from '../../utils/helpers';
 
 // Same categories as the Add / Edit drop-downs; the Excel report lists them first
-const EXPENSE_CATEGORIES = ['Courier expense', 'Food expense', 'Goods expense', 'Goods transport', 'Petrol and diesel expense', 'Other expense'];
+const EXPENSE_CATEGORIES = ['Courier expense', 'Food expense', 'Goods expense', 'Goods transport', 'Office expense', 'Petrol and diesel expense', 'Other expense'];
 // Fuel claims, for the report's KM columns ("Petrol and diesel" is the reference app's name)
 const PETROL_CATEGORIES = ['Petrol and diesel expense', 'Petrol and diesel'];
 
@@ -101,7 +101,7 @@ export default function ExpensesView({ employees = [] }) {
 
     const handleOpenVerification = (exp) => {
         setSelectedExpense(exp);
-        const standardCats = ['Courier expense', 'Food expense', 'Goods expense', 'Goods transport', 'Petrol and diesel expense', 'Other expense'];
+        const standardCats = EXPENSE_CATEGORIES;
         const isStandard = standardCats.includes(exp.category);
         setEditCategory(isStandard ? exp.category : 'Other expense');
         setEditCustomCategory(isStandard ? '' : (exp.category || ''));
@@ -579,6 +579,14 @@ window.URL.revokeObjectURL(downloadUrl);
     const currentWidth = Math.round((baseW * zoomLevel) / 100);
     const currentHeight = Math.round((baseH * zoomLevel) / 100);
 
+    const previewUrl = selectedExpense ? (selectedExpense.cloudinaryUrl || (selectedExpense.invoiceUrl ? getFullUrl(selectedExpense.invoiceUrl) : '')) : '';
+    const previewIsPdf = Boolean(
+        previewUrl && (
+            previewUrl.toLowerCase().split('?')[0].endsWith('.pdf') ||
+            previewUrl.toLowerCase().includes('/pdf/')
+        )
+    );
+
     return (
         <div id="expenses-view" className="view active" style={{ minHeight: '100%', flex: 1, display: 'flex', flexDirection: 'column', gap: '16px' }}>
             {selectedExpense ? (
@@ -701,10 +709,10 @@ window.URL.revokeObjectURL(downloadUrl);
                                     >
                                         <i className="fa-solid fa-rotate-right"></i>
                                     </button>
-                                    {(selectedExpense.invoiceUrl || selectedExpense.cloudinaryUrl) && (
+                                    {(previewUrl || selectedExpense.invoiceUrl || selectedExpense.cloudinaryUrl) && (
                                         <>
                                             <a 
-                                                href={selectedExpense.cloudinaryUrl || getFullUrl(selectedExpense.invoiceUrl)} 
+                                                href={previewUrl || selectedExpense.cloudinaryUrl || getFullUrl(selectedExpense.invoiceUrl)} 
                                                 target="_blank" 
                                                 rel="noreferrer" 
                                                 className="btn btn-outline" 
@@ -717,7 +725,7 @@ window.URL.revokeObjectURL(downloadUrl);
                                                 type="button" 
                                                 className="btn btn-outline" 
                                                 style={{ padding: '4px 8px', fontSize: '0.75rem' }} 
-                                                onClick={() => forceDownload(selectedExpense.cloudinaryUrl || getFullUrl(selectedExpense.invoiceUrl), `invoice_${selectedExpense.id}`)}
+                                                onClick={() => forceDownload(previewUrl || selectedExpense.cloudinaryUrl || getFullUrl(selectedExpense.invoiceUrl), `invoice_${selectedExpense.id}`)}
                                                 title="Download File"
                                             >
                                                 <i className="fa-solid fa-download"></i>
@@ -750,7 +758,7 @@ window.URL.revokeObjectURL(downloadUrl);
                                         title="Invoice PDF"
                                         style={{ display: 'block', width: '100%', height: '100%', minHeight: '62vh', border: 'none', borderRadius: '8px', background: '#ffffff' }}
                                     />
-                                ) : selectedExpense.invoiceUrl || selectedExpense.cloudinaryUrl ? (
+                                ) : (previewUrl || selectedExpense.invoiceUrl || selectedExpense.cloudinaryUrl) ? (
                                     <div 
                                         style={{ 
                                             display: 'flex', 
@@ -775,9 +783,10 @@ window.URL.revokeObjectURL(downloadUrl);
                                         >
                                             <img 
                                                 ref={imgRef}
-                                                src={selectedExpense.cloudinaryUrl || getFullUrl(selectedExpense.invoiceUrl)} 
+                                                src={previewUrl || selectedExpense.cloudinaryUrl || getFullUrl(selectedExpense.invoiceUrl)} 
                                                 alt="Invoice Bill" 
                                                 draggable={false}
+                                                onClick={() => setModalImage(previewUrl || selectedExpense.cloudinaryUrl || getFullUrl(selectedExpense.invoiceUrl))}
                                                 onLoad={(e) => {
                                                     const el = e.target;
                                                     if (el) {
@@ -800,6 +809,7 @@ window.URL.revokeObjectURL(downloadUrl);
                                                     imageRendering: 'high-quality',
                                                     WebkitFontSmoothing: 'subpixel-antialiased',
                                                     display: 'block',
+                                                    cursor: zoomLevel === 100 ? 'zoom-in' : (isDragging ? 'grabbing' : 'grab'),
                                                     pointerEvents: isDragging ? 'none' : 'auto'
                                                 }}
                                                 onError={(e) => {
@@ -854,6 +864,7 @@ window.URL.revokeObjectURL(downloadUrl);
                                             <option value="Food expense">Food expense</option>
                                             <option value="Goods expense">Goods expense</option>
                                             <option value="Goods transport">Goods transport</option>
+                                            <option value="Office expense">Office expense</option>
                                             <option value="Petrol and diesel expense">Petrol and diesel expense</option>
                                             <option value="Other expense">Other expense</option>
                                         </select>
@@ -1505,6 +1516,7 @@ window.URL.revokeObjectURL(downloadUrl);
                                     <option value="Food expense">Food expense</option>
                                     <option value="Goods expense">Goods expense</option>
                                     <option value="Goods transport">Goods transport</option>
+                                    <option value="Office expense">Office expense</option>
                                     <option value="Petrol and diesel expense">Petrol and diesel expense</option>
                                     <option value="Other expense">Other expense</option>
                                 </select>
@@ -1673,25 +1685,40 @@ window.URL.revokeObjectURL(downloadUrl);
                                 width: '30px',
                                 height: '30px',
                                 cursor: 'pointer',
-                                fontWeight: 'bold'
+                                fontWeight: 'bold',
+                                zIndex: 10
                             }}
                         >
                             &times;
                         </button>
-                        <img 
-                            src={modalImage} 
-                            alt="Invoice Preview" 
-                            style={{
-                                maxWidth: '100%',
-                                maxHeight: '80vh',
-                                objectFit: 'contain',
-                                borderRadius: '4px'
-                            }}
-                            onError={(e) => {
-                                e.target.onerror = null;
-                                e.target.src = 'https://via.placeholder.com/400x300?text=Invoice+Not+Available';
-                            }}
-                        />
+                        {String(modalImage || '').toLowerCase().split('?')[0].endsWith('.pdf') ? (
+                            <iframe 
+                                src={`${modalImage}#view=FitH`}
+                                title="Invoice PDF Modal"
+                                style={{
+                                    width: '85vw',
+                                    height: '80vh',
+                                    border: 'none',
+                                    borderRadius: '4px',
+                                    background: '#ffffff'
+                                }}
+                            />
+                        ) : (
+                            <img 
+                                src={modalImage} 
+                                alt="Invoice Preview" 
+                                style={{
+                                    maxWidth: '100%',
+                                    maxHeight: '80vh',
+                                    objectFit: 'contain',
+                                    borderRadius: '4px'
+                                }}
+                                onError={(e) => {
+                                    e.target.onerror = null;
+                                    e.target.src = 'https://via.placeholder.com/400x300?text=Invoice+Not+Available';
+                                }}
+                            />
+                        )}
                         <div style={{ marginTop: '10px', display: 'flex', gap: '10px' }}>
                             <a 
                                 href={modalImage} 
@@ -1700,7 +1727,7 @@ window.URL.revokeObjectURL(downloadUrl);
                                 className="btn btn-primary"
                                 style={{ padding: '6px 12px', fontSize: '13px' }}
                             >
-                                Open Full Image
+                                Open Full Document
                             </a>
                             <button 
                                 onClick={() => forceDownload(modalImage, 'invoice_preview')} 

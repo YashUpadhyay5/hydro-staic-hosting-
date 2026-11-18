@@ -78,8 +78,8 @@ export default function PayrollAdminTab({
   );
 
   return (
-    <div style={{ padding: '0 12px' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '24px' }}>
+    <div style={{ padding: '0 4px' }}>
+      <div className="payroll-admin-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 380px), 1fr))', gap: '20px' }}>
         
         {/* Left Column */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>

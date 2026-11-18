@@ -289,9 +289,9 @@ export default function PayRunsTab({
               />
 
               {/* 3. Main Grid layout: Steps & Activity Sidebar */}
-              <div style={{ display: 'grid', gridTemplateColumns: '3fr 1fr', gap: '20px', alignItems: 'flex-start' }}>
+              <div className="payrun-main-grid" style={{ display: 'grid', gridTemplateColumns: '3fr 1fr', gap: '20px', alignItems: 'flex-start', width: '100%', boxSizing: 'border-box' }}>
                 {/* Steps Overview Summary */}
-                <div className="card glass" style={{ padding: '24px', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                <div className="card glass" style={{ padding: '24px', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '20px', width: '100%', boxSizing: 'border-box' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px', justifyContent: 'center' }}>
                     <div style={{ fontSize: '2rem', color: 'var(--accent-primary)' }}>
                       <i className="fa-solid fa-wand-magic-sparkles"></i>
@@ -303,12 +303,14 @@ export default function PayRunsTab({
                   </p>
                   
                   {/* Production-grade Step Grid */}
-                  <div style={{
+                  <div className="payrun-steps-grid" style={{
                     display: 'grid',
                     gridTemplateColumns: 'repeat(4, 1fr)',
                     gap: '12px',
                     margin: '10px 0',
-                    textAlign: 'left'
+                    textAlign: 'left',
+                    width: '100%',
+                    boxSizing: 'border-box'
                   }}>
                     {[
                       { id: 1, label: 'Leave & Payable Units', icon: 'fa-calendar-check', desc: 'Verify LOP & leaves' },

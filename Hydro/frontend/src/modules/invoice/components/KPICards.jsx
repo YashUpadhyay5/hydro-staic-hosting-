@@ -467,7 +467,7 @@ function KPICards({ selectedDocument, documents = [], localExtraction = null, db
       : getDocumentGrandTotal(selectedDocument);
 
     return (
-      <div className="kpi-container" style={{ gridTemplateColumns: "repeat(6, 1fr)" }}>
+      <div className="kpi-container validation-kpi-container">
         {/* Confidence Card */}
         <div className="kpi-card">
           <div className="kpi-title-row">
@@ -635,8 +635,8 @@ function KPICards({ selectedDocument, documents = [], localExtraction = null, db
                 borderRadius: "8px",
                 padding: "12px 14px",
                 boxShadow: "0 16px 36px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(245, 158, 11, 0.4)",
-                minWidth: "340px",
-                maxWidth: "420px",
+                minWidth: "260px",
+                maxWidth: "min(420px, calc(100vw - 32px))",
                 maxHeight: "calc(80vh - 160px)",
                 overflowY: "auto",
                 pointerEvents: "auto",
@@ -761,7 +761,7 @@ function KPICards({ selectedDocument, documents = [], localExtraction = null, db
   const estimatedSpend = totalScanned * 0.42;
 
   return (
-    <div className="kpi-container" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+    <div className="kpi-container overview-kpi-container">
       {/* Total Scanned */}
       <div 
         className="kpi-card" 

@@ -6,6 +6,7 @@ const fs = require('fs');
 const Ledger = require('../../../../shared/models/Ledger');
 const Employee = require('../../../../shared/models/Employee');
 const Expense = require('../../../../shared/models/Expense');
+const RouteReplayService = require('../../attendance/services/RouteReplayService');
 const { Op } = require('sequelize');
 
 const upload = multer({ dest: 'uploads/' });
@@ -264,6 +265,68 @@ router.get('/employee/:employeeId', async (req, res) => {
     res.status(200).json(timelineWithBalance);
   } catch (error) {
     console.error('Error fetching employee ledger details:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Payments and fuel-claim km for the Expenses Excel report
+router.get('/employee/:employeeId/ledger-extras', async (req, res) => {
+  try {
+    const { employeeId } = req.params;
+    const petrolDates = (req.query.petrolDates || '')
+      .split(',')
+      .map(d => d.trim())
+      .filter(Boolean);
+
+    // The route param may be the employee's internal id, empCode, or name —
+    // resolve to the canonical employee record. Ledger.employeeId is always the
+    // internal id (see /upload and /:id/map); footprints are stored under the
+    // internal id or the empCode, so both are searched.
+    const employee = await Employee.findOne({
+      where: {
+        [Op.or]: [
+          { id: String(employeeId) },
+          { empCode: String(employeeId) },
+          { name: String(employeeId) }
+        ]
+      }
+    });
+
+    if (!employee) {
+      return res.status(200).json({
+        employeeResolved: false,
+        payments: [],
+        hrmsKm: petrolDates.map(() => null)
+      });
+    }
+
+    const ledgers = await Ledger.findAll({
+      where: { employeeId: employee.id },
+      order: [['date', 'ASC']]
+    });
+    const payments = ledgers.map(l => ({
+      id: l.id,
+      date: l.date,
+      amount: l.amount,
+      description: l.description || l.source || 'Payment'
+    }));
+
+    // km travelled between each Petrol/diesel claim and the one right before
+    // it (same employee) — the first claim has no "before", so it's null.
+    const footprintUserIds = [employee.id, employee.empCode].filter(Boolean);
+    const hrmsKm = [];
+    for (let i = 0; i < petrolDates.length; i++) {
+      if (i === 0) {
+        hrmsKm.push(null);
+        continue;
+      }
+      const km = await RouteReplayService.computeGroundDistanceKm(footprintUserIds, petrolDates[i - 1], petrolDates[i]);
+      hrmsKm.push(km);
+    }
+
+    res.status(200).json({ employeeResolved: true, payments, hrmsKm });
+  } catch (error) {
+    console.error('Error fetching employee ledger extras:', error);
     res.status(500).json({ error: error.message });
   }
 });

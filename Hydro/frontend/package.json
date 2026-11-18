@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build && node scripts/precompress.cjs",
     "lint": "oxlint",
+    "test": "node --test \"test/**/*.test.js\"",
     "preview": "vite preview"
   },
   "dependencies": {

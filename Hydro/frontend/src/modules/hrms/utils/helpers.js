@@ -232,7 +232,11 @@ export function parseDateOnly(val, endOfDay = false) {
         const str = val.trim();
         const parts = str.split('T')[0].split(/[-/]/);
         if (parts.length === 3) {
-            d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+            const isDMY = parts[2].length === 4 && parts[0].length <= 2;
+            const year = parseInt(isDMY ? parts[2] : parts[0], 10);
+            const month = parseInt(parts[1], 10) - 1;
+            const day = parseInt(isDMY ? parts[0] : parts[2], 10);
+            d = (!isNaN(year) && !isNaN(month) && !isNaN(day)) ? new Date(year, month, day) : new Date(str);
         } else {
             d = new Date(str);
         }

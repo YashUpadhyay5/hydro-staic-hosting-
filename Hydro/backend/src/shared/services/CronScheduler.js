@@ -67,6 +67,14 @@ class CronScheduler {
           await this.run5MinClockOutReminderLoop(todayStr);
         }
 
+        // 2b. Day activities past their planned time: ring the employee's phone asking for extra time
+        try {
+          const { rang } = await require('../../modules/hrms/activity/services/ActivityService').runOverdueReminders(now.getTime());
+          if (rang) console.log(`[CronScheduler] Day activities: rang ${rang} phone(s) about activities past their time.`);
+        } catch (activityErr) {
+          console.error('[CronScheduler Day Activities Error]:', activityErr.message);
+        }
+
         // 3. 1st of the month: Auto-increment allowed leaves
         if (now.getDate() === 1 && HH === 0 && MM < 5) {
           const leaveFlagFile = path.join(__dirname, `../../../../storage/leaves_incremented_${todayStr.slice(0, 7)}.flag`);

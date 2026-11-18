@@ -1,3 +1,5 @@
+import { isEmpActiveOnDate } from '../../utils/helpers.js';
+
 export class AttendanceColumnGenerator {
   /**
    * Get total days in month for selected YYYY-MM
@@ -61,9 +63,13 @@ export class AttendanceColumnGenerator {
   }
 
   /**
-   * Get statutory attendance symbol (P, A, L, WO, H, OD, HD) for an employee on a date
+   * Get statutory attendance symbol (P, A, L, WO, H, OD, HD, or '-' outside tenure) for an employee on a date
    */
-  static getAttendanceSymbol(dateStr, empPunches = [], empLeaves = [], weeklyOffsSetting = 'Sunday') {
+  static getAttendanceSymbol(dateStr, empPunches = [], empLeaves = [], weeklyOffsSetting = 'Sunday', emp = null) {
+    if (emp && !isEmpActiveOnDate(emp, dateStr)) {
+      return '-';
+    }
+
     // Check if approved leave exists for dateStr
     const hasApprovedLeave = empLeaves.some(l => {
       const sDate = this.extractYYYYMMDD(l.startDate || l.start_date || l.date || '');

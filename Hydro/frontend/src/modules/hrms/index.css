@@ -761,6 +761,258 @@ body.dark-theme .stat-card:hover {
 /* Responsive Breakpoint (Tablets and Mobile) */
 /* Responsive Breakpoint (Tablets and Mobile) */
 @media (max-width: 768px) {
+
+    /* Attendance View Mobile Overhaul */
+    #attendance-view {
+        display: flex !important;
+        flex-direction: column !important;
+        overflow-y: visible !important;
+        overflow-x: hidden !important;
+        height: auto !important;
+        min-height: auto !important;
+        padding-bottom: 12px !important;
+        gap: 12px !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+    }
+    .table-container {
+        background: transparent !important;
+        border: none !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+        overflow: visible !important;
+        flex: none !important;
+        height: auto !important;
+        min-height: auto !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+    .mobile-cards-only {
+        padding: 0 !important;
+        gap: 12px !important;
+    }
+    .attendance-pagination-footer {
+        background: #ffffff !important;
+        border: 1px solid var(--border-glass, #e2e8f0) !important;
+        border-radius: 12px !important;
+        padding: 10px 14px !important;
+        margin-top: 8px !important;
+        margin-bottom: 12px !important;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04) !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+        font-size: 13px !important;
+        color: #4b5563 !important;
+    }
+    .status-pill-desktop,
+    .quick-action-text-desktop {
+        display: none !important;
+    }
+    .status-pill-mobile,
+    .quick-action-text-mobile {
+        display: inline !important;
+    }
+    .attendance-toolbar-card {
+        padding: 12px 14px !important;
+        border-radius: 14px !important;
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 10px !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+        overflow: visible !important;
+    }
+    .attendance-toolbar-container {
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+        overflow: visible !important;
+        position: relative !important;
+        z-index: 9000 !important;
+    }
+    .attendance-toolbar-left {
+        width: 100% !important;
+        max-width: 100% !important;
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 8px !important;
+        box-sizing: border-box !important;
+    }
+    .attendance-status-pills {
+        display: grid !important;
+        grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+        gap: 5px !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+    }
+    .attendance-status-pills::-webkit-scrollbar {
+        display: none !important;
+    }
+    .attendance-status-pills .attendance-pill {
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+        height: 36px !important;
+        padding: 4px 2px !important;
+        font-size: 12px !important;
+        font-weight: 600 !important;
+        border-radius: 8px !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        justify-content: center !important;
+        align-items: center !important;
+        display: inline-flex !important;
+        text-align: center !important;
+        box-sizing: border-box !important;
+    }
+    .attendance-quick-actions {
+        display: flex !important;
+        flex-direction: row !important;
+        gap: 6px !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        align-items: stretch !important;
+        box-sizing: border-box !important;
+    }
+    .attendance-quick-actions::-webkit-scrollbar {
+        display: none !important;
+    }
+    .attendance-quick-actions > * {
+        flex: 1 1 0% !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+    }
+    .attendance-action-btn {
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+        height: 36px !important;
+        padding: 4px 4px !important;
+        font-size: 11.5px !important;
+        font-weight: 600 !important;
+        border-radius: 8px !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        justify-content: center !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        gap: 4px !important;
+        box-sizing: border-box !important;
+    }
+    .attendance-report-dropdown-wrapper {
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+        position: relative !important;
+    }
+    .attendance-report-dropdown-wrapper > button {
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+        height: 36px !important;
+        font-size: 11.5px !important;
+        font-weight: 600 !important;
+        padding: 4px 4px !important;
+        justify-content: center !important;
+        box-sizing: border-box !important;
+    }
+    .attendance-report-dropdown-menu {
+        left: auto !important;
+        right: 0 !important;
+        min-width: 230px !important;
+        max-width: calc(100vw - 32px) !important;
+        box-sizing: border-box !important;
+        z-index: 99999 !important;
+    }
+    .attendance-toolbar-right {
+        width: 100% !important;
+        max-width: 100% !important;
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 8px !important;
+        box-sizing: border-box !important;
+    }
+    .attendance-dates-row {
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+        gap: 8px !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        align-items: flex-end !important;
+        box-sizing: border-box !important;
+    }
+    .attendance-dates-row.has-clear {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto !important;
+    }
+    .attendance-date-item {
+        min-width: 0 !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 4px !important;
+        box-sizing: border-box !important;
+        overflow: hidden !important;
+    }
+    .attendance-date-input {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        height: 38px !important;
+        padding: 0 8px !important;
+        border-radius: 8px !important;
+        border: 1px solid var(--border-glass, #cbd5e1) !important;
+        font-size: 13px !important;
+        background: var(--input-bg, #f8fafc) !important;
+        color: var(--text-primary) !important;
+        box-sizing: border-box !important;
+        display: block !important;
+        -webkit-appearance: none !important;
+        -moz-appearance: none !important;
+        appearance: none !important;
+    }
+    .btn-clear-dates {
+        height: 38px !important;
+        background: #ef4444 !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 8px !important;
+        padding: 0 10px !important;
+        font-size: 12px !important;
+        white-space: nowrap !important;
+        cursor: pointer !important;
+        box-sizing: border-box !important;
+    }
+    .attendance-search-box {
+        width: 100% !important;
+        min-width: 100% !important;
+        max-width: 100% !important;
+        position: relative !important;
+        box-sizing: border-box !important;
+    }
+    .attendance-search-input {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        height: 40px !important;
+        padding: 0 34px 0 36px !important;
+        border-radius: 8px !important;
+        border: 1px solid var(--border-glass, #cbd5e1) !important;
+        font-size: 13.5px !important;
+        background: var(--input-bg, #f8fafc) !important;
+        color: var(--text-primary) !important;
+        box-sizing: border-box !important;
+    }
+
     #dashboard-screen {
         display: flex !important;
         flex-direction: column !important;
@@ -1250,6 +1502,14 @@ body.dark-theme .mobile-nav-btn {
     .desktop-table-view {
         display: block !important;
     }
+    .status-pill-desktop,
+    .quick-action-text-desktop {
+        display: inline !important;
+    }
+    .status-pill-mobile,
+    .quick-action-text-mobile {
+        display: none !important;
+    }
 }
 @media (max-width: 768px) {
     .mobile-header-bar {
@@ -1480,7 +1740,6 @@ body.dark-theme .mobile-record-card {
 .route-replay-split-grid,
 .geofence-split-grid,
 .site-info-split-grid,
-.tracking-split-container,
 .clustering-grid {
     display: grid;
     grid-template-columns: 380px 1fr;
@@ -1493,11 +1752,13 @@ body.dark-theme .mobile-record-card {
 .site-info-split-grid {
     grid-template-columns: 1.2fr 1.8fr;
 }
+.site-info-container {
+    height: calc(100vh - 120px);
+}
 @media (max-width: 960px) {
     .route-replay-split-grid,
     .geofence-split-grid,
     .site-info-split-grid,
-    .tracking-split-container,
     .clustering-grid {
         grid-template-columns: 1fr !important;
         height: auto !important;
@@ -1538,20 +1799,313 @@ body.dark-theme .mobile-record-card {
     }
 }
 
+
+
+/* Route Replay & Site Info Segmented Controls */
+.route-workmode-pills,
+.site-workmode-pills {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    background: var(--hover-bg, #f1f5f9);
+    padding: 3px;
+    border-radius: 9px;
+    border: 1px solid var(--border-subtle, #e2e8f0);
+    box-sizing: border-box;
+}
+.route-pill-btn,
+.site-pill-btn {
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--text-secondary, #334155);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 6px 14px;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+}
+.route-pill-btn:hover,
+.site-pill-btn:hover {
+    color: var(--text-primary, #0f172a);
+}
+.route-pill-btn.active,
+.site-pill-btn.active {
+    background: #2563eb !important;
+    color: #ffffff !important;
+    box-shadow: 0 1px 3px rgba(37, 99, 235, 0.35);
+}
+
+/* Live Tracking Segmented Controls & Pills */
+.live-workmode-pills {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    background: var(--hover-bg, #f1f5f9);
+    padding: 3px;
+    border-radius: 9px;
+    border: 1px solid var(--border-subtle, #e2e8f0);
+}
+.live-pill-btn {
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--text-secondary, #334155);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 6px 14px;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+}
+.live-pill-btn:hover {
+    color: var(--text-primary, #0f172a);
+}
+.live-pill-btn.active {
+    background: #2563eb !important;
+    color: #ffffff !important;
+    box-shadow: 0 1px 3px rgba(37, 99, 235, 0.35);
+}
+.live-mobile-nav-tabs {
+    display: none;
+}
+
+/* Live Tracking Desktop Layout */
+#live-tracking-view {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 0;
+    width: 100%;
+    overflow: hidden;
+}
+.tracking-split-container {
+    flex: 1;
+    display: flex;
+    gap: 16px;
+    min-height: 0;
+    width: 100%;
+    overflow: hidden;
+}
+.tracking-split-container .panel-left {
+    flex: 1;
+    min-width: 300px;
+    max-width: 420px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    height: 100%;
+    overflow: hidden;
+}
+.tracking-split-container .panel-map {
+    position: relative;
+    flex: 2;
+    min-width: 360px;
+    padding: 10px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+.panel-map #live-map {
+    margin-top: 0 !important;
+    height: 100% !important;
+    width: 100% !important;
+}
+
+
+/* Attendance View Toolbar Desktop Base */
+.attendance-status-pills {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+.attendance-status-pills .attendance-pill {
+    height: 38px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 7px;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 6px 14px;
+    border: 1px solid var(--border-subtle, #e2e8f0);
+    background: var(--input-bg, #f8fafc);
+    color: var(--text-secondary, #334155);
+    transition: all 0.15s ease;
+    cursor: pointer;
+}
+.attendance-status-pills .attendance-pill.active {
+    background: #2563eb !important;
+    color: #ffffff !important;
+    border-color: #2563eb !important;
+    box-shadow: 0 1px 3px rgba(37, 99, 235, 0.35);
+}
+.attendance-status-pills .attendance-pill.pill-danger {
+    background: #ef4444;
+    color: #ffffff;
+    border-color: #ef4444;
+}
+.attendance-status-pills .attendance-pill.pill-danger.active {
+    background: #dc2626 !important;
+    box-shadow: 0 1px 3px rgba(239, 68, 68, 0.4);
+}
+.attendance-status-pills .attendance-pill.pill-warning {
+    background: #f59e0b;
+    color: #ffffff;
+    border-color: #f59e0b;
+}
+.attendance-status-pills .attendance-pill.pill-warning.active {
+    background: #d97706 !important;
+    box-shadow: 0 1px 3px rgba(245, 158, 11, 0.4);
+}
+.attendance-status-pills .attendance-pill.pill-success {
+    background: #10b981;
+    color: #ffffff;
+    border-color: #10b981;
+}
+.attendance-status-pills .attendance-pill.pill-success.active {
+    background: #059669 !important;
+    box-shadow: 0 1px 3px rgba(16, 185, 129, 0.4);
+}
+.attendance-quick-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+.attendance-action-btn {
+    height: 38px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 6px 14px;
+    border-radius: 7px;
+    border: none;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.attendance-action-btn.btn-purple {
+    background: #7c3aed;
+    color: #ffffff;
+}
+.attendance-action-btn.btn-teal {
+    background: #0d9488;
+    color: #ffffff;
+}
+.attendance-action-btn.btn-gradient {
+    background: linear-gradient(135deg, #4f46e5, #3730a3);
+    color: #ffffff;
+    box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.2);
+}
+.attendance-dates-row {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+}
+.attendance-date-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.attendance-field-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-muted, #4b5563);
+    line-height: 1;
+}
+.attendance-date-input {
+    height: 38px;
+    padding: 0 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border-subtle, #e5e7eb);
+    font-size: 0.875rem;
+    background: var(--input-bg, #ffffff);
+    color: var(--text-primary);
+    box-sizing: border-box;
+}
+.btn-clear-dates {
+    height: 38px;
+    background: #ef4444;
+    color: white;
+    padding: 0 12px;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+}
+.attendance-search-box {
+    position: relative;
+    min-width: 260px;
+}
+.attendance-search-input {
+    width: 100%;
+    height: 38px;
+    padding: 0 32px 0 34px;
+    border-radius: 6px;
+    border: 1px solid var(--border-subtle, #e5e7eb);
+    font-size: 0.875rem;
+    background: var(--input-bg, #ffffff);
+    color: var(--text-primary);
+    box-sizing: border-box;
+    outline: none;
+}
+.attendance-search-icon {
+    position: absolute;
+    left: 11px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-muted, #9ca3af);
+    font-size: 13px;
+    pointer-events: none;
+}
+.attendance-search-clear {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    border: none;
+    background: transparent;
+    color: var(--text-muted, #9ca3af);
+    cursor: pointer;
+    font-size: 13px;
+}
+
 /* Responsive Leaflet Map Containers & Operational Views */
 @media (max-width: 768px) {
-    /* Live Tracking Mobile Optimization (Matches Screen 3) */
+    /* Live Tracking Mobile Optimization */
     #live-tracking-view {
-        overflow-y: auto !important;
-        overflow-x: hidden !important;
+        display: flex !important;
+        flex-direction: column !important;
+        overflow: visible !important;
         height: auto !important;
-        min-height: 100% !important;
-        padding-bottom: 30px !important;
-        gap: 14px !important;
+        min-height: auto !important;
+        padding-bottom: 12px !important;
+        gap: 12px !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
     }
     .live-tracking-header-card {
-        padding: 14px 14px !important;
-        border-radius: 16px !important;
+        padding: 12px 14px !important;
+        border-radius: 14px !important;
         width: 100% !important;
         box-sizing: border-box !important;
     }
@@ -1559,70 +2113,195 @@ body.dark-theme .mobile-record-card {
         display: flex !important;
         flex-direction: column !important;
         align-items: stretch !important;
-        gap: 12px !important;
+        gap: 10px !important;
         width: 100% !important;
     }
     .live-tracking-controls-wrap > .live-control-item {
         width: 100% !important;
         min-width: 100% !important;
+        max-width: 100% !important;
         flex: none !important;
+        margin: 0 !important;
+    }
+    .live-workmode-pills {
+        width: 100% !important;
+        display: flex !important;
+        gap: 4px !important;
+        padding: 3px !important;
+        height: 40px !important;
+        box-sizing: border-box !important;
+    }
+    .live-pill-btn {
+        flex: 1 1 0% !important;
+        padding: 8px 4px !important;
+        font-size: 12.5px !important;
+        text-align: center !important;
+        height: 100% !important;
     }
     .live-tracking-controls-wrap select,
-    .live-tracking-controls-wrap input,
+    .live-tracking-controls-wrap input:not([type="radio"]):not([type="checkbox"]),
     .live-tracking-controls-wrap #btn-refresh-live {
         width: 100% !important;
+        min-width: 100% !important;
+        max-width: 100% !important;
+        height: 40px !important;
         box-sizing: border-box !important;
     }
     .live-tracking-controls-wrap #btn-refresh-live {
         justify-content: center !important;
-        height: 42px !important;
+    }
+    .live-mobile-nav-tabs {
+        display: flex !important;
+        gap: 6px !important;
+        width: 100% !important;
+        padding: 4px !important;
+        background: var(--bg-card, #fff) !important;
+        border-radius: 12px !important;
+        border: 1px solid var(--border-glass, #e2e8f0) !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
+        box-sizing: border-box !important;
+    }
+    .live-mobile-tab-btn {
+        flex: 1 1 0% !important;
+        height: 38px !important;
+        border: none !important;
+        outline: none !important;
+        background: transparent !important;
+        color: var(--text-secondary, #475569) !important;
+        font-size: 12px !important;
+        font-weight: 600 !important;
+        border-radius: 8px !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        gap: 6px !important;
+        cursor: pointer !important;
+        transition: all 0.2s ease !important;
+    }
+    .live-mobile-tab-btn.active {
+        background: #2563eb !important;
+        color: #ffffff !important;
+        box-shadow: 0 2px 6px rgba(37, 99, 235, 0.3) !important;
+    }
+    .hidden-mobile {
+        display: none !important;
     }
     .tracking-split-container {
         display: flex !important;
         flex-direction: column !important;
+        width: 100% !important;
+        min-width: 100% !important;
+        max-width: 100% !important;
         height: auto !important;
         min-height: unset !important;
         overflow: visible !important;
         gap: 14px !important;
-        width: 100% !important;
+        box-sizing: border-box !important;
     }
+    .tracking-split-container .panel-map,
     .panel-map {
         order: 1 !important;
         width: 100% !important;
         min-width: 100% !important;
+        max-width: 100% !important;
         box-sizing: border-box !important;
-        min-height: 380px !important;
-        height: 420px !important;
+        min-height: 340px !important;
+        height: 340px !important;
         flex: none !important;
         border-radius: 16px !important;
         overflow: hidden !important;
+        padding: 10px !important;
     }
+    .mobile-tab-map .panel-map {
+        height: calc(100vh - 360px) !important;
+        min-height: 420px !important;
+    }
+    .tracking-split-container .panel-left,
     .panel-left {
         order: 2 !important;
         width: 100% !important;
         min-width: 100% !important;
+        max-width: 100% !important;
         box-sizing: border-box !important;
+        height: auto !important;
+        min-height: 320px !important;
         max-height: 520px !important;
-        min-height: 260px !important;
         flex: none !important;
         border-radius: 16px !important;
+        padding: 16px !important;
+        overflow: hidden !important;
+    }
+    .mobile-tab-list .panel-left {
+        min-height: 420px !important;
+        max-height: calc(100vh - 340px) !important;
     }
 
-    /* Route Replay Mobile Optimization (Matches Screen 4) */
+    /* Route Replay Mobile Optimization */
+    .route-replay-header-card {
+        padding: 12px 14px !important;
+        border-radius: 14px !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+        overflow: hidden !important;
+    }
     .route-replay-controls-wrap {
         flex-direction: column !important;
         align-items: stretch !important;
-        gap: 12px !important;
+        gap: 10px !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
     }
     .route-replay-controls-wrap > .route-control-item {
         width: 100% !important;
         min-width: 100% !important;
+        max-width: 100% !important;
         flex: none !important;
+        margin: 0 !important;
+        box-sizing: border-box !important;
+    }
+    .route-workmode-pills,
+    .site-workmode-pills {
+        width: 100% !important;
+        display: flex !important;
+        gap: 4px !important;
+        padding: 3px !important;
+        height: 40px !important;
+        box-sizing: border-box !important;
+    }
+    .route-pill-btn,
+    .site-pill-btn {
+        flex: 1 1 0% !important;
+        padding: 8px 4px !important;
+        font-size: 12.5px !important;
+        text-align: center !important;
+        height: 100% !important;
     }
     .route-replay-controls-wrap select,
-    .route-replay-controls-wrap input,
-    .route-replay-controls-wrap button {
+    .route-replay-controls-wrap input:not([type="radio"]):not([type="checkbox"]):not([type="range"]),
+    .route-replay-controls-wrap .route-btn-item button {
         width: 100% !important;
+        max-width: 100% !important;
+        height: 40px !important;
+        box-sizing: border-box !important;
+    }
+    .route-engine-item > div {
+        width: 100% !important;
+        box-sizing: border-box !important;
+        display: flex !important;
+        gap: 4px !important;
+    }
+    .route-engine-btn {
+        flex: 1 1 0% !important;
+        width: auto !important;
+        height: 34px !important;
+        padding: 0 8px !important;
+        font-size: 12.5px !important;
+        box-sizing: border-box !important;
+    }
+    .route-btn-item button {
+        justify-content: center !important;
     }
     .desktop-spacer {
         display: none !important;
@@ -1630,20 +2309,231 @@ body.dark-theme .mobile-record-card {
     .route-replay-split-grid {
         display: flex !important;
         flex-direction: column !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        gap: 14px !important;
+        box-sizing: border-box !important;
     }
     .route-replay-map-panel {
         order: 1 !important;
+        width: 100% !important;
+        max-width: 100% !important;
         height: auto !important;
-        min-height: 400px !important;
+        min-height: 360px !important;
         padding: 10px !important;
+        box-sizing: border-box !important;
     }
-    .route-replay-map-panel > div:first-child {
-        height: 380px !important;
-        min-height: 380px !important;
+    .route-replay-map-panel #replay-map {
+        margin-top: 0 !important;
+        height: 340px !important;
+        width: 100% !important;
     }
     .route-replay-logs-panel {
         order: 2 !important;
-        max-height: 380px !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        min-height: 280px !important;
+        max-height: 480px !important;
+        box-sizing: border-box !important;
+    }
+
+    /* Site Info / Geofence Summary Mobile Optimization */
+    #site-info-view,
+    .site-info-container {
+        height: auto !important;
+        min-height: auto !important;
+        overflow: visible !important;
+        overflow-y: visible !important;
+        overflow-x: hidden !important;
+        gap: 14px !important;
+        padding-bottom: 30px !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+    }
+
+    .site-info-filter-card {
+        padding: 14px 12px !important;
+        border-radius: 14px !important;
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 12px !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+    }
+
+    .site-info-control-item {
+        width: 100% !important;
+        min-width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+    }
+
+    .site-info-control-item select,
+    .site-info-control-item input:not([type="radio"]):not([type="checkbox"]) {
+        width: 100% !important;
+        min-width: 100% !important;
+        max-width: 100% !important;
+        height: 42px !important;
+        font-size: 13.5px !important;
+        box-sizing: border-box !important;
+    }
+
+    .site-info-date-range-row {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 8px !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+    }
+
+    .site-info-date-range-row .site-info-date-separator,
+    .site-info-date-range-row > span {
+        display: none !important;
+    }
+
+    .site-info-date-subitem {
+        width: 100% !important;
+        box-sizing: border-box !important;
+    }
+
+    .site-info-btn-group {
+        width: 100% !important;
+        margin-top: 6px !important;
+        display: flex !important;
+        flex-direction: row !important;
+        gap: 8px !important;
+        box-sizing: border-box !important;
+    }
+
+    .site-info-btn-group > button,
+    .site-info-calc-btn,
+    .site-info-export-wrapper,
+    .site-info-export-btn {
+        flex: 1 1 0% !important;
+        width: 100% !important;
+        height: 42px !important;
+        justify-content: center !important;
+        padding: 0 10px !important;
+        font-size: 13px !important;
+        box-sizing: border-box !important;
+    }
+
+    .site-info-export-wrapper {
+        position: relative !important;
+    }
+
+    .site-info-export-dropdown {
+        position: absolute !important;
+        top: 100% !important;
+        right: 0 !important;
+        width: 100% !important;
+        min-width: 250px !important;
+        max-width: calc(100vw - 32px) !important;
+        box-sizing: border-box !important;
+        z-index: 9999 !important;
+    }
+
+    .site-info-split-grid {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 14px !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        height: auto !important;
+        min-height: unset !important;
+        box-sizing: border-box !important;
+    }
+
+    .site-info-left-panel {
+        width: 100% !important;
+        max-width: 100% !important;
+        height: auto !important;
+        overflow: visible !important;
+        padding-right: 0 !important;
+        gap: 14px !important;
+        box-sizing: border-box !important;
+    }
+
+    .site-info-summary-card {
+        padding: 14px 12px !important;
+        border-radius: 14px !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+    }
+
+    .site-info-metrics-grid {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr !important;
+        gap: 10px !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+    }
+
+    .site-info-visited-card {
+        padding: 14px 12px !important;
+        border-radius: 14px !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        max-height: 420px !important;
+        box-sizing: border-box !important;
+    }
+
+    .site-info-visited-item {
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        gap: 10px !important;
+        padding: 12px 10px !important;
+        box-sizing: border-box !important;
+    }
+
+    .site-info-visited-stats {
+        width: 100% !important;
+        display: flex !important;
+        flex-direction: row !important;
+        justify-content: space-between !important;
+        align-items: center !important;
+        border-top: 1px solid rgba(255, 255, 255, 0.08) !important;
+        padding-top: 8px !important;
+        margin-top: 4px !important;
+        box-sizing: border-box !important;
+    }
+
+    .site-info-map-panel {
+        width: 100% !important;
+        max-width: 100% !important;
+        height: 360px !important;
+        min-height: 360px !important;
+        border-radius: 14px !important;
+        padding: 6px !important;
+        box-sizing: border-box !important;
+        overflow: hidden !important;
+    }
+
+    .site-info-map-panel .site-info-map-container,
+    .site-info-map-panel > div {
+        height: 348px !important;
+        min-height: 348px !important;
+        width: 100% !important;
+        border-radius: 10px !important;
+    }
+
+    .site-info-modal-card {
+        width: 95% !important;
+        max-width: 95% !important;
+        max-height: 88vh !important;
+        border-radius: 14px !important;
+        margin: auto !important;
+    }
+
+    .site-info-table-wrap {
+        width: 100% !important;
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
     }
 }
 
@@ -1683,98 +2573,10 @@ body.dark-theme .mobile-record-card {
         padding: 0 !important;
     }
     .content-wrapper {
-        padding: 12px 10px 84px 10px !important;
+        padding: 10px 10px 16px 10px !important;
     }
 
-    /* Attendance View Mobile Optimization */
-    .attendance-toolbar-container {
-        position: relative !important;
-        z-index: 10 !important;
-    }
-    .attendance-toolbar-card {
-        padding: 12px 14px !important;
-        gap: 12px !important;
-        border-radius: 14px !important;
-        display: flex !important;
-        flex-direction: column !important;
-        align-items: stretch !important;
-    }
-    .attendance-toolbar-left {
-        width: 100% !important;
-        display: flex !important;
-        flex-direction: column !important;
-        align-items: stretch !important;
-        gap: 10px !important;
-    }
-    .attendance-filter-tabs {
-        width: 100% !important;
-        display: flex !important;
-        flex-wrap: nowrap !important;
-        overflow-x: auto !important;
-        -webkit-overflow-scrolling: touch !important;
-        gap: 8px !important;
-        padding-bottom: 4px !important;
-        scrollbar-width: none;
-    }
-    .attendance-filter-tabs::-webkit-scrollbar {
-        display: none;
-    }
-    .attendance-filter-tabs > button {
-        flex-shrink: 0 !important;
-        white-space: nowrap !important;
-        height: 34px !important;
-        border-radius: 9999px !important;
-        font-size: 12px !important;
-        padding: 0 14px !important;
-    }
-    .attendance-report-dropdown-wrapper {
-        width: 100% !important;
-    }
-    .attendance-report-btn {
-        width: 100% !important;
-        justify-content: center !important;
-        height: 38px !important;
-        border-radius: 8px !important;
-    }
-    .attendance-report-menu {
-        left: 0 !important;
-        right: 0 !important;
-        width: 100% !important;
-        min-width: 100% !important;
-        box-sizing: border-box !important;
-    }
-    .attendance-date-search-row {
-        width: 100% !important;
-        display: flex !important;
-        flex-direction: column !important;
-        align-items: stretch !important;
-        gap: 10px !important;
-    }
-    .attendance-date-inputs-group {
-        display: grid !important;
-        grid-template-columns: 1fr 1fr !important;
-        gap: 8px !important;
-        width: 100% !important;
-    }
-    .attendance-date-item {
-        width: 100% !important;
-    }
-    .attendance-date-item input[type="date"] {
-        width: 100% !important;
-        height: 38px !important;
-        padding: 6px 10px !important;
-        font-size: 13px !important;
-    }
-    .attendance-clear-range-btn {
-        grid-column: 1 / -1 !important;
-        width: 100% !important;
-        justify-content: center !important;
-        height: 36px !important;
-    }
-    .attendance-search-group {
-        width: 100% !important;
-        min-width: 100% !important;
-    }
+    /* (Attendance View Mobile Overhaul defined above at line 765) */
 
     /* Expenses View Mobile Optimization */
     .expenses-toolbar-wrap {
@@ -1978,7 +2780,7 @@ body.dark-theme .mobile-record-card {
         min-height: auto !important;
         overflow-x: hidden !important;
         overflow-y: visible !important;
-        padding: 4px 0 96px 0 !important;
+        padding: 4px 0 16px 0 !important;
         width: 100% !important;
         max-width: 100% !important;
         margin: 0 !important;
@@ -2020,5 +2822,332 @@ body.dark-theme .mobile-record-card {
     #delivery-audit-section .custom-scrollbar {
         max-height: none !important;
         overflow-y: visible !important;
+    }
+}
+
+/* ========================================================================= */
+/* PAYROLL VIEW & SUBPAGES COMPREHENSIVE RESPONSIVE DESIGN (MOBILE & DESKTOP)*/
+/* ========================================================================= */
+.payroll-table-wrap {
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    box-sizing: border-box !important;
+}
+
+.payroll-tabs-header {
+    display: flex !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+}
+.payroll-tabs-header::-webkit-scrollbar {
+    display: none !important;
+}
+
+.payroll-tab-btn {
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+}
+
+.wizard-stepper-wrap {
+    width: 100% !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    scrollbar-width: thin !important;
+    padding-bottom: 8px !important;
+}
+
+@media (max-width: 768px) {
+    /* Payroll Module Container */
+    .payroll-view-container {
+        height: auto !important;
+        min-height: auto !important;
+        flex: none !important;
+        overflow: visible !important;
+        overflow-y: visible !important;
+        overflow-x: hidden !important;
+        padding: 4px 0 16px 0 !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+    }
+
+    .payroll-tab-content-wrap {
+        height: auto !important;
+        min-height: auto !important;
+        flex: none !important;
+        overflow: visible !important;
+        overflow-y: visible !important;
+    }
+
+    .pt-tab-container {
+        gap: 14px !important;
+        padding-bottom: 12px !important;
+    }
+
+    /* Tabs Header */
+    .payroll-tabs-header {
+        padding: 4px 2px 8px 2px !important;
+        gap: 8px !important;
+        margin-bottom: 14px !important;
+        width: 100% !important;
+    }
+
+    .payroll-tab-btn {
+        padding: 8px 14px !important;
+        font-size: 0.82rem !important;
+        border-radius: 8px !important;
+    }
+
+    /* Dashboard Tab */
+    .payroll-dashboard-cards-grid {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 12px !important;
+        width: 100% !important;
+    }
+
+    .payroll-stat-card {
+        width: 100% !important;
+        box-sizing: border-box !important;
+        padding: 16px 14px !important;
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: stretch !important;
+        justify-content: flex-start !important;
+        text-align: left !important;
+        min-height: auto !important;
+    }
+
+    .payroll-stat-card > div {
+        width: 100% !important;
+        box-sizing: border-box !important;
+    }
+
+    .compensation-charts-grid {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 14px !important;
+        width: 100% !important;
+    }
+
+    .compensation-chart-card {
+        padding: 16px 14px !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+    }
+
+    .donut-chart-row {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: center !important;
+        gap: 16px !important;
+    }
+
+    .donut-data-breakdown {
+        width: 100% !important;
+    }
+
+    .variance-section-card {
+        padding: 16px 14px !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+    }
+
+    /* Pay Runs Tab */
+    .payrun-summary-grid {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 12px !important;
+        width: 100% !important;
+    }
+
+    .payrun-cycle-details-card {
+        padding: 16px 14px !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+    }
+
+    .payrun-main-grid {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 16px !important;
+        width: 100% !important;
+    }
+
+    .payrun-steps-grid {
+        display: grid !important;
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 10px !important;
+        width: 100% !important;
+    }
+
+    /* Wizard Steps */
+    .wizard-step-meta-header {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        gap: 10px !important;
+        width: 100% !important;
+    }
+
+    .wizard-step-meta-header > div {
+        width: 100% !important;
+        justify-content: space-between !important;
+        flex-wrap: wrap !important;
+    }
+
+    .wizard-stepper-wrap {
+        width: 100% !important;
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+    }
+
+    .wizard-stepper-inner {
+        min-width: 620px !important;
+        padding: 4px 8px !important;
+    }
+
+    .wizard-override-form-grid {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 10px !important;
+        width: 100% !important;
+    }
+
+    .wizard-validation-grid {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 12px !important;
+        width: 100% !important;
+    }
+
+    /* Split Grids (Loans, Benefits, Admin) */
+    .payroll-split-2col {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 16px !important;
+        width: 100% !important;
+    }
+
+    .payroll-admin-grid {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 16px !important;
+        width: 100% !important;
+    }
+
+    /* Professional Tax Tab */
+    .pt-title-bar {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        gap: 14px !important;
+        padding: 16px 14px !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+    }
+
+    .pt-title-bar > div {
+        width: 100% !important;
+    }
+
+    .pt-title-bar button {
+        flex: 1 1 auto !important;
+        justify-content: center !important;
+    }
+
+    .pt-metrics-grid {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 10px !important;
+        width: 100% !important;
+    }
+
+    /* Report & Compliance Tab */
+    .report-subnav-row {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 8px !important;
+        width: 100% !important;
+    }
+
+    .report-subnav-row button {
+        width: 100% !important;
+        justify-content: center !important;
+    }
+
+    .compliance-cards-grid {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 14px !important;
+        width: 100% !important;
+    }
+
+    /* Payslips Archive Toolbar */
+    .payslips-toolbar {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 10px !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+    }
+
+    .payslips-toolbar > * {
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+    }
+
+    .payslips-toolbar input,
+    .payslips-toolbar select,
+    .payslips-toolbar button {
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+    }
+
+    /* Universal Payroll Modals */
+    .payroll-modal-overlay {
+        position: fixed !important;
+        inset: 0 !important;
+        z-index: 9999 !important;
+        background: rgba(0, 0, 0, 0.7) !important;
+        display: flex !important;
+        align-items: flex-end !important;
+        justify-content: center !important;
+        backdrop-filter: blur(5px) !important;
+        padding: 0 !important;
+    }
+
+    .payroll-modal-content {
+        width: 100% !important;
+        max-width: 100% !important;
+        max-height: 85vh !important;
+        border-radius: 20px 20px 0 0 !important;
+        padding: 20px 16px !important;
+        margin: 0 !important;
+        overflow-y: auto !important;
+        box-sizing: border-box !important;
+    }
+
+    /* Universal Scrollable Tables */
+    .payroll-table-wrap {
+        width: 100% !important;
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+        margin: 0 !important;
+        display: block !important;
+    }
+
+    .payroll-table-wrap > table {
+        min-width: 600px !important;
+        width: 100% !important;
     }
 }

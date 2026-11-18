@@ -464,7 +464,11 @@ test('integration', async (t) => {
     assert.equal(first.status, 201);
     assert.equal(first.body.elDays, available);
     assert.equal(first.body.lopDays, first.body.totalDays - available);
-    const second = await api('POST', '/api/leaves', { body: { userId: 'C2', userName: 'Name E2', startDate: TODAY, endDate: TODAY, reason: 'again' } });
+    // A working day for E2 (today is a holiday in the calendar E2 sees, and leave skips Sundays)
+    const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    if (next.getDay() === 0) next.setDate(next.getDate() + 1);
+    const nextISO = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`;
+    const second = await api('POST', '/api/leaves', { body: { userId: 'C2', userName: 'Name E2', startDate: nextISO, endDate: nextISO, reason: 'again' } });
     assert.equal(second.body.elDays, 0, 'EL already reserved by the pending request');
     assert.equal(second.body.lopDays, 1);
   });

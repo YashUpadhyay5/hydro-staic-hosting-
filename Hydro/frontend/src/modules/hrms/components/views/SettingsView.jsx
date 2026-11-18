@@ -224,7 +224,14 @@ export default function SettingsView() {
   if (loading) return <LoadingSpinner message="Loading System Settings..." minHeight="400px" />;
 
     return (
-    <div id="settings-view" className="view active custom-scrollbar" style={{ height: '100%', minHeight: 0, flex: 1, overflowY: 'auto', width: '100%', maxWidth: 'none', margin: '0', padding: '20px 24px 40px 24px', boxSizing: 'border-box', fontFamily: 'Inter, system-ui, -apple-system, sans-serif', color: 'var(--text-primary)' }}>
+    <div id="settings-view" className="view active custom-scrollbar" style={{ height: '100%', minHeight: 0, flex: 1, overflowY: 'auto', width: '100%', maxWidth: 'none', margin: '0', padding: isDirty ? '20px 24px 110px 24px' : '20px 24px 40px 24px', boxSizing: 'border-box', fontFamily: 'Inter, system-ui, -apple-system, sans-serif', color: 'var(--text-primary)' }}>
+      {/* Accents readable in both themes; spans take their box's size, not the global span size */}
+      <style>{`
+        #settings-view { --sv-blue: #1d4ed8; --sv-green: #047857; --sv-purple: #7c3aed; --sv-amber: #b45309; }
+        body.dark-theme #settings-view { --sv-blue: #60a5fa; --sv-green: #34d399; --sv-purple: #c084fc; --sv-amber: #fbbf24; }
+        #settings-view span { font-size: inherit; line-height: inherit; }
+        body.dark-theme #settings-view input[type="time"] { color-scheme: dark; }
+      `}</style>
       
       {/* Toast Notification Banner */}
       {toast && (
@@ -252,7 +259,7 @@ export default function SettingsView() {
       {/* Status Indicators & Controls */}
       {isDirty && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '12px', marginBottom: '16px' }}>
-          <div style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', padding: '6px 14px', borderRadius: '20px', fontSize: '13px', fontWeight: 700, border: '1px solid rgba(245, 158, 11, 0.3)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <div style={{ background: 'rgba(245, 158, 11, 0.15)', color: 'var(--sv-amber)', padding: '6px 14px', borderRadius: '20px', fontSize: '13px', fontWeight: 700, border: '1px solid rgba(245, 158, 11, 0.3)', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#F59E0B' }}></span>
             <span>Unsaved Changes</span>
           </div>
@@ -260,13 +267,13 @@ export default function SettingsView() {
       )}
 
       {/* 4 STRIPE-STYLE KPI SUMMARY CARDS IN ONE ROW */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '20px', marginBottom: '32px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '20px', marginBottom: '32px' }}>
         
         {/* Card 1: Attendance Policy */}
         <div className="glass" style={{ background: 'var(--bg-glass)', borderRadius: '16px', padding: '20px 24px', border: '1px solid var(--border-glass)', boxShadow: 'var(--shadow-sm)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
             <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Attendance Shift Policy</span>
-            <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'rgba(37, 99, 235, 0.15)', color: '#60a5fa', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'rgba(37, 99, 235, 0.15)', color: 'var(--sv-blue)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <i className="fa-regular fa-clock" style={{ fontSize: '18px' }}></i>
             </div>
           </div>
@@ -280,7 +287,7 @@ export default function SettingsView() {
         <div className="glass" style={{ background: 'var(--bg-glass)', borderRadius: '16px', padding: '20px 24px', border: '1px solid var(--border-glass)', boxShadow: 'var(--shadow-sm)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
             <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Shift Thresholds</span>
-            <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'rgba(37, 99, 235, 0.15)', color: '#60a5fa', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'rgba(37, 99, 235, 0.15)', color: 'var(--sv-blue)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <i className="fa-solid fa-calendar-check" style={{ fontSize: '18px' }}></i>
             </div>
           </div>
@@ -294,7 +301,7 @@ export default function SettingsView() {
         <div className="glass" style={{ background: 'var(--bg-glass)', borderRadius: '16px', padding: '20px 24px', border: '1px solid var(--border-glass)', boxShadow: 'var(--shadow-sm)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
             <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>GPS & Ratio Protocol</span>
-            <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'rgba(16, 185, 129, 0.15)', color: 'var(--sv-green)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <i className="fa-solid fa-location-crosshairs" style={{ fontSize: '18px' }}></i>
             </div>
           </div>
@@ -310,27 +317,27 @@ export default function SettingsView() {
         <div className="glass" style={{ background: 'var(--bg-glass)', borderRadius: '16px', padding: '20px 24px', border: '1px solid var(--border-glass)', boxShadow: 'var(--shadow-sm)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
             <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Night Shift Protocol</span>
-            <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'rgba(168, 85, 247, 0.15)', color: 'var(--sv-purple)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <i className="fa-solid fa-moon" style={{ fontSize: '18px' }}></i>
             </div>
           </div>
           <div>
             <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)' }}>{allowCrossDay ? 'Cross-Day Enabled' : 'Day Shift Only'}</div>
-            <div style={{ fontSize: '13px', color: '#34d399', fontWeight: 600, marginTop: '4px' }}>Overtime Threshold: {overtimeThresholdMinutes / 60} hrs</div>
+            <div style={{ fontSize: '13px', color: 'var(--sv-green)', fontWeight: 600, marginTop: '4px' }}>Overtime Threshold: {overtimeThresholdMinutes / 60} hrs</div>
           </div>
         </div>
 
       </div>
 
       {/* SYMMETRICAL EQUAL-WIDTH 3-COLUMN DESKTOP GRID LAYOUT (1fr 1fr 1fr) */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '24px', alignItems: 'stretch' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '24px', alignItems: 'stretch' }}>
         
         {/* LEFT COLUMN: SHIFT ENGINE & ATTENDANCE POLICY */}
         <div className="glass" style={{ background: 'var(--bg-glass)', borderRadius: '16px', padding: '28px', border: '1px solid var(--border-glass)', boxShadow: 'var(--shadow-sm)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
           <div>
             {/* Header */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '24px', paddingBottom: '16px', borderBottom: '1px solid var(--border-glass)' }}>
-              <div style={{ width: '42px', height: '42px', borderRadius: '12px', background: 'rgba(37, 99, 235, 0.15)', color: '#60a5fa', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ width: '42px', height: '42px', borderRadius: '12px', background: 'rgba(37, 99, 235, 0.15)', color: 'var(--sv-blue)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <i className="fa-regular fa-clock" style={{ fontSize: '20px' }}></i>
               </div>
               <div>
@@ -392,7 +399,7 @@ export default function SettingsView() {
                     type="time"
                     value={punchInStart}
                     onChange={(e) => markDirty(setPunchInStart, e.target.value)}
-                    style={{ width: '100%', height: '42px', padding: '0 12px', borderRadius: '10px', border: '1px solid var(--border-glass)', background: 'var(--input-bg)', color: 'var(--text-primary)', colorScheme: 'dark', fontSize: '14px', fontWeight: 500, boxSizing: 'border-box' }}
+                    style={{ width: '100%', height: '42px', padding: '0 12px', borderRadius: '10px', border: '1px solid var(--border-glass)', background: 'var(--input-bg)', color: 'var(--text-primary)', fontSize: '14px', fontWeight: 500, boxSizing: 'border-box' }}
                   />
                 </div>
                 <div>
@@ -403,7 +410,7 @@ export default function SettingsView() {
                     type="time"
                     value={punchOutTime}
                     onChange={(e) => markDirty(setPunchOutTime, e.target.value)}
-                    style={{ width: '100%', height: '42px', padding: '0 12px', borderRadius: '10px', border: '1px solid var(--border-glass)', background: 'var(--input-bg)', color: 'var(--text-primary)', colorScheme: 'dark', fontSize: '14px', fontWeight: 500, boxSizing: 'border-box' }}
+                    style={{ width: '100%', height: '42px', padding: '0 12px', borderRadius: '10px', border: '1px solid var(--border-glass)', background: 'var(--input-bg)', color: 'var(--text-primary)', fontSize: '14px', fontWeight: 500, boxSizing: 'border-box' }}
                   />
                 </div>
               </div>
@@ -512,7 +519,7 @@ export default function SettingsView() {
           <div>
             {/* Header */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '24px', paddingBottom: '16px', borderBottom: '1px solid var(--border-glass)' }}>
-              <div style={{ width: '42px', height: '42px', borderRadius: '12px', background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ width: '42px', height: '42px', borderRadius: '12px', background: 'rgba(16, 185, 129, 0.15)', color: 'var(--sv-green)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <i className="fa-solid fa-location-crosshairs" style={{ fontSize: '20px' }}></i>
               </div>
               <div>
@@ -553,7 +560,7 @@ export default function SettingsView() {
                         }}
                       >
                         <div>
-                          <div style={{ fontSize: '13px', fontWeight: 700, color: isSelected ? '#60a5fa' : 'var(--text-primary)' }}>
+                          <div style={{ fontSize: '13px', fontWeight: 700, color: isSelected ? 'var(--sv-blue)' : 'var(--text-primary)' }}>
                             {p.title}
                           </div>
                           <div style={{ fontSize: '11px', color: isSelected ? 'var(--text-secondary)' : 'var(--text-muted)', marginTop: '1px' }}>{p.desc}</div>
@@ -577,7 +584,7 @@ export default function SettingsView() {
                 <div style={{ padding: '14px', background: 'var(--input-bg)', borderRadius: '12px', border: '1px solid var(--border-glass)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <h4 style={{ margin: 0, fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>Custom Ping Ratio Sequence</h4>
-                    <span style={{ fontSize: '11px', fontWeight: 700, background: 'rgba(37, 99, 235, 0.25)', color: '#60a5fa', padding: '2px 8px', borderRadius: '10px' }}>Active</span>
+                    <span style={{ fontSize: '11px', fontWeight: 700, background: 'rgba(37, 99, 235, 0.25)', color: 'var(--sv-blue)', padding: '2px 8px', borderRadius: '10px' }}>Active</span>
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
@@ -608,7 +615,7 @@ export default function SettingsView() {
                   </div>
 
                   {/* Execution Preview Box */}
-                  <div style={{ padding: '8px 10px', background: 'rgba(37, 99, 235, 0.12)', borderRadius: '8px', border: '1px solid rgba(37, 99, 235, 0.25)', fontSize: '11px', color: '#93c5fd', lineHeight: 1.4 }}>
+                  <div style={{ padding: '8px 10px', background: 'rgba(37, 99, 235, 0.12)', borderRadius: '8px', border: '1px solid rgba(37, 99, 235, 0.25)', fontSize: '11px', color: 'var(--sv-blue)', lineHeight: 1.4 }}>
                     💡 <strong>Execution Preview:</strong> Clock In ➔ <strong>Strict GPS Anchor</strong> ➔ {gpsRatioCount} GPS ➔ {cellularRatioCount} Cell ➔ Repeat
                   </div>
                 </div>
@@ -648,16 +655,16 @@ export default function SettingsView() {
                           padding: '6px 2px',
                           borderRadius: '6px',
                           border: 'none',
-                          background: isPresetSelected ? 'rgba(37, 99, 235, 0.3)' : 'transparent',
-                          boxShadow: isPresetSelected ? '0 1px 3px rgba(0,0,0,0.3)' : 'none',
+                          background: isPresetSelected ? 'var(--bg-glass)' : 'transparent',
+                          boxShadow: isPresetSelected ? 'inset 0 0 0 2px #2563EB' : 'none',
                           cursor: 'pointer',
                           textAlign: 'center'
                         }}
                       >
-                        <div style={{ fontSize: '12px', fontWeight: 700, color: isPresetSelected ? '#60a5fa' : 'var(--text-secondary)' }}>
+                        <div style={{ fontSize: '12px', fontWeight: 700, color: isPresetSelected ? 'var(--sv-blue)' : 'var(--text-secondary)' }}>
                           {i.label}
                         </div>
-                        <div style={{ fontSize: '9px', fontWeight: 600, color: isPresetSelected ? '#60a5fa' : 'var(--text-muted)' }}>
+                        <div style={{ fontSize: '10px', fontWeight: 600, color: isPresetSelected ? 'var(--sv-blue)' : 'var(--text-muted)' }}>
                           {i.badge}
                         </div>
                       </button>
@@ -672,7 +679,7 @@ export default function SettingsView() {
                       <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>
                         Enter Custom Interval (Seconds)
                       </label>
-                      <span style={{ fontSize: '11px', fontWeight: 700, color: '#60a5fa', background: 'rgba(37, 99, 235, 0.25)', padding: '2px 8px', borderRadius: '6px', border: '1px solid rgba(37, 99, 235, 0.3)' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--sv-blue)', background: 'rgba(37, 99, 235, 0.25)', padding: '2px 8px', borderRadius: '6px', border: '1px solid rgba(37, 99, 235, 0.3)' }}>
                         {(() => {
                           const num = parseInt(customIntervalSeconds, 10) || 30;
                           if (num >= 60) {
@@ -710,7 +717,7 @@ export default function SettingsView() {
                       />
                       <span style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: 600 }}>Seconds</span>
                     </div>
-                    <div style={{ marginTop: '8px', fontSize: '11px', color: '#fbbf24', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <div style={{ marginTop: '8px', fontSize: '11px', color: 'var(--sv-amber)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}>
                       <i className="fa-solid fa-circle-info"></i>
                       <span>Click green <strong>"Update Protocol"</strong> button below to save {customIntervalSeconds}s to database.</span>
                     </div>
@@ -752,7 +759,7 @@ export default function SettingsView() {
           <div>
             {/* Header */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '24px', paddingBottom: '16px', borderBottom: '1px solid var(--border-glass)' }}>
-              <div style={{ width: '42px', height: '42px', borderRadius: '12px', background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ width: '42px', height: '42px', borderRadius: '12px', background: 'rgba(168, 85, 247, 0.15)', color: 'var(--sv-purple)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <i className="fa-solid fa-shield-halved" style={{ fontSize: '20px' }}></i>
               </div>
               <div>
@@ -790,14 +797,14 @@ export default function SettingsView() {
                   <button
                     type="button"
                     onClick={() => setActiveFilter('ALL')}
-                    style={{ padding: '4px 10px', borderRadius: '6px', border: 'none', background: activeFilter === 'ALL' ? 'rgba(37, 99, 235, 0.3)' : 'transparent', color: activeFilter === 'ALL' ? '#60a5fa' : 'var(--text-muted)', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}
+                    style={{ padding: '4px 10px', borderRadius: '6px', border: 'none', background: activeFilter === 'ALL' ? 'rgba(37, 99, 235, 0.15)' : 'transparent', color: activeFilter === 'ALL' ? 'var(--sv-blue)' : 'var(--text-muted)', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}
                   >
                     All ({acknowledgments.length})
                   </button>
                   <button
                     type="button"
                     onClick={() => setActiveFilter('ACCEPTED')}
-                    style={{ padding: '4px 10px', borderRadius: '6px', border: 'none', background: activeFilter === 'ACCEPTED' ? 'rgba(34, 197, 94, 0.3)' : 'transparent', color: activeFilter === 'ACCEPTED' ? '#4ade80' : 'var(--text-muted)', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}
+                    style={{ padding: '4px 10px', borderRadius: '6px', border: 'none', background: activeFilter === 'ACCEPTED' ? 'rgba(34, 197, 94, 0.15)' : 'transparent', color: activeFilter === 'ACCEPTED' ? 'var(--sv-green)' : 'var(--text-muted)', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}
                   >
                     Accepted
                   </button>
@@ -818,7 +825,7 @@ export default function SettingsView() {
             <div className="custom-scrollbar" style={{ maxHeight: '380px', overflowY: 'auto', borderRadius: '12px', border: '1px solid var(--border-glass)', background: 'var(--input-bg)' }}>
               {loadingAck ? (
                 <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                  <i className="fa-solid fa-spinner fa-spin" style={{ fontSize: '22px', color: '#c084fc', marginBottom: '8px', display: 'block' }}></i>
+                  <i className="fa-solid fa-spinner fa-spin" style={{ fontSize: '22px', color: 'var(--sv-purple)', marginBottom: '8px', display: 'block' }}></i>
                   <span style={{ fontSize: '13px', fontWeight: 500 }}>Fetching audit records...</span>
                 </div>
               ) : filteredAcknowledgments.length === 0 ? (
@@ -845,7 +852,7 @@ export default function SettingsView() {
                     <div key={item.id} style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-glass)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ fontWeight: 700, fontSize: '13px', color: 'var(--text-primary)' }}>{item.employee_name}</span>
-                        <span style={{ background: 'rgba(16, 185, 129, 0.2)', color: '#34d399', padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 700 }}>
+                        <span style={{ background: 'rgba(16, 185, 129, 0.2)', color: 'var(--sv-green)', padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 700 }}>
                           ✓ {item.status}
                         </span>
                       </div>

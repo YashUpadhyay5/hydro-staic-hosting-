@@ -14,8 +14,27 @@ const { profileUpload } = require('../../../../core/middleware/upload');
 const requireRole = require('../../../../core/middleware/requireRole');
 const verifyToken = require('../../../../core/middleware/verifyToken');
 const { Op } = require('sequelize');
-const { invalidateEmployeeCache } = require('../../../../core/utils/employeeCache');
+const { invalidateEmployeeCache, resolveCanonicalEmployee } = require('../../../../core/utils/employeeCache');
 const LeaveBalanceService = require('../../leave/services/LeaveBalanceService');
+const { resolveEmployeeCalendar } = require('../../../../shared/services/EmployeeHolidayCalendar');
+
+async function getEmployeeByIdOrAlias(id) {
+  if (!id) return null;
+  let emp = await Employee.findByPk(id);
+  if (!emp) {
+    try {
+      const canonical = await resolveCanonicalEmployee(id);
+      const targetPk = canonical?.employee?.id || canonical?.canonicalId;
+      if (targetPk) {
+        emp = await Employee.findByPk(targetPk);
+      }
+      if (!emp && canonical?.canonicalId) {
+        emp = await Employee.findOne({ where: { empCode: canonical.canonicalId } });
+      }
+    } catch (e) {}
+  }
+  return emp;
+}
 
 // Replaces the computed leave figures with the Leave Balances ledger so the employee profile, the mobile
 // app and the Leave Balances pages agree. Form fields (allowedLeaves, openingLeaveBalance) are left untouched.
@@ -103,27 +122,13 @@ router.get('/my-holidays', verifyToken, async (req, res) => {
       return res.status(401).json({ error: 'Unauthorized. Employee ID not found in token.' });
     }
 
-    const employee = await Employee.findByPk(employeeId);
+    const employee = await getEmployeeByIdOrAlias(employeeId);
     if (!employee) {
       return res.status(404).json({ error: 'Employee profile not found.' });
     }
 
-    const locationName = employee.location || employee.holidayDetails || 'Headquarters';
-
-    // Search for location calendar in DB
-    let calendar = null;
-    try {
-      const allCalendars = await HolidayCalendar.findAll();
-      calendar = allCalendars.find(c => 
-        (c.location && c.location.toLowerCase() === locationName.toLowerCase()) ||
-        (c.name && c.name.toLowerCase().includes(locationName.toLowerCase()))
-      );
-      if (!calendar && allCalendars.length > 0) {
-        calendar = allCalendars.find(c => c.isDefault) || allCalendars[0];
-      }
-    } catch (dbErr) {
-      console.warn('HolidayCalendar table query warning:', dbErr.message);
-    }
+    // Same calendar lookup as leave day counting (shared/services/EmployeeHolidayCalendar.js)
+    const { locationName, calendar } = await resolveEmployeeCalendar(employee);
 
     const rawHolidays = calendar?.holidays || [];
     const formattedHolidays = formatHolidayList(rawHolidays);
@@ -156,26 +161,12 @@ router.get('/my-holidays', verifyToken, async (req, res) => {
 router.get('/:id/holidays', verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const employee = await Employee.findByPk(id);
+    const employee = await getEmployeeByIdOrAlias(id);
     if (!employee) {
       return res.status(404).json({ error: 'Employee not found.' });
     }
 
-    const locationName = employee.location || employee.holidayDetails || 'Headquarters';
-
-    let calendar = null;
-    try {
-      const allCalendars = await HolidayCalendar.findAll();
-      calendar = allCalendars.find(c => 
-        (c.location && c.location.toLowerCase() === locationName.toLowerCase()) ||
-        (c.name && c.name.toLowerCase().includes(locationName.toLowerCase()))
-      );
-      if (!calendar && allCalendars.length > 0) {
-        calendar = allCalendars.find(c => c.isDefault) || allCalendars[0];
-      }
-    } catch (dbErr) {
-      console.warn('HolidayCalendar table query warning:', dbErr.message);
-    }
+    const { locationName, calendar } = await resolveEmployeeCalendar(employee);
 
     const rawHolidays = calendar?.holidays || [];
     const formattedHolidays = formatHolidayList(rawHolidays);
@@ -349,7 +340,7 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const employee = await Employee.findByPk(id);
+    const employee = await getEmployeeByIdOrAlias(id);
     if (!employee) {
       return res.status(404).json({ error: 'Employee not found.' });
     }
@@ -595,7 +586,7 @@ router.put('/:id', requireRole(['ADMIN']), async (req, res) => {
     } = req.body;
 
 
-    const employee = await Employee.findByPk(id);
+    const employee = await getEmployeeByIdOrAlias(id);
     if (!employee) {
       return res.status(404).json({ error: 'Employee not found.' });
     }
@@ -1061,7 +1052,7 @@ router.put('/:id', requireRole(['ADMIN']), async (req, res) => {
 router.delete('/:id', requireRole(['ADMIN']), async (req, res) => {
   try {
     const { id } = req.params;
-    const employee = await Employee.findByPk(id);
+    const employee = await getEmployeeByIdOrAlias(id);
     if (!employee) {
       return res.status(404).json({ error: 'Employee not found.' });
     }
@@ -1086,7 +1077,7 @@ router.post('/:id/profile-photo', (req, res, next) => {
 }, async (req, res) => {
   try {
     const { id } = req.params;
-    const employee = await Employee.findByPk(id);
+    const employee = await getEmployeeByIdOrAlias(id);
     if (!employee) {
       if (req.file && fs.existsSync(req.file.path)) {
         fs.unlinkSync(req.file.path);
@@ -1130,7 +1121,7 @@ router.post('/:id/profile-photo', (req, res, next) => {
 router.delete('/:id/profile-photo', async (req, res) => {
   try {
     const { id } = req.params;
-    const employee = await Employee.findByPk(id);
+    const employee = await getEmployeeByIdOrAlias(id);
     if (!employee) {
       return res.status(404).json({ error: 'Employee not found.' });
     }
@@ -1163,7 +1154,7 @@ router.post('/fcm-token', async (req, res) => {
     if (!token) {
       return res.status(400).json({ error: 'Token parameter is required.' });
     }
-    const employee = await Employee.findByPk(req.user.id);
+    const employee = await getEmployeeByIdOrAlias(req.user.id);
     if (!employee) {
       return res.status(404).json({ error: 'Employee not found.' });
     }
@@ -1185,7 +1176,7 @@ router.patch('/:id/bypass-clockin', async (req, res) => {
     }
 
     const { id } = req.params;
-    const employee = await Employee.findByPk(id);
+    const employee = await getEmployeeByIdOrAlias(id);
     if (!employee) {
       return res.status(404).json({ error: 'Employee not found.' });
     }
@@ -1227,7 +1218,7 @@ const avatarUpload = multer({
 router.post('/:id/avatar', avatarUpload.single('avatar'), async (req, res) => {
   try {
     const { id } = req.params;
-    const employee = await Employee.findByPk(id);
+    const employee = await getEmployeeByIdOrAlias(id);
     if (!employee) {
       if (req.file && fs.existsSync(req.file.path)) {
         try { fs.unlinkSync(req.file.path); } catch (e) {}
@@ -1266,7 +1257,7 @@ router.post('/:id/avatar', avatarUpload.single('avatar'), async (req, res) => {
 router.delete('/:id/avatar', async (req, res) => {
   try {
     const { id } = req.params;
-    const employee = await Employee.findByPk(id);
+    const employee = await getEmployeeByIdOrAlias(id);
     if (!employee) {
       return res.status(404).json({ error: 'Employee not found.' });
     }
@@ -1300,7 +1291,7 @@ router.delete('/:id/avatar', async (req, res) => {
 router.get('/:id/salary-history', async (req, res) => {
   try {
     const { id } = req.params;
-    let employee = await Employee.findByPk(id);
+    let employee = await getEmployeeByIdOrAlias(id);
     if (!employee) {
       employee = await Employee.findOne({ where: { empCode: id } });
     }

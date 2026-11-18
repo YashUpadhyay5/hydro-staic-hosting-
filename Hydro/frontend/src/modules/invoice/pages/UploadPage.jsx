@@ -493,7 +493,7 @@ export default function UploadPage() {
 
   // RENDER UPLOAD HISTORY / INGESTION ZONE VIEW (DEFAULT)
   return (
-    <div className="page-upload" style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "24px", height: "100%", overflowY: "auto", boxSizing: "border-box" }}>
+    <div className="page-upload">
       {/* Page Header */}
       <div className="page-header" style={{ marginBottom: 0 }}>
         <div className="page-header-left">
@@ -573,121 +573,195 @@ export default function UploadPage() {
       )}
 
       {/* Uploaded Documents List Section */}
-      <div className="ocr-section" style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minHeight: "300px" }}>
-        <div className="ocr-section-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div className="ocr-section invoice-history-section">
+        <div className="ocr-section-header invoice-history-header">
           <span>Extraction History (View Only)</span>
           <span style={{ fontSize: "12px", fontWeight: "normal", color: "var(--text-secondary)" }}>
             Total Invoices: {documents.length}
           </span>
         </div>
-        <div className="ocr-section-content" style={{ padding: 0, overflowY: "auto", flex: 1, display: "flex", flexDirection: "column" }}>
+        <div className="ocr-section-content invoice-history-content">
           {documents.length === 0 ? (
             <div style={{ padding: "40px", textAlign: "center", color: "var(--text-secondary)" }}>
               No uploaded documents found. Drag & drop files above to start.
             </div>
           ) : (
-            <>
-              <div style={{ flex: 1, overflowY: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px", textAlign: "left" }}>
-                  <thead>
-                    <tr style={{ background: "var(--bg-table-header)", borderBottom: "1px solid var(--border-color)" }}>
-                      <th style={{ padding: "12px 16px", fontWeight: "600", color: "var(--text-secondary)" }}>Invoice File</th>
-                      <th style={{ padding: "12px 16px", fontWeight: "600", color: "var(--text-secondary)" }}>Upload Time</th>
-                      <th style={{ padding: "12px 16px", fontWeight: "600", color: "var(--text-secondary)" }}>Status</th>
-                      <th style={{ padding: "12px 16px", fontWeight: "600", color: "var(--text-secondary)" }}>Processing Time</th>
-                      <th style={{ padding: "12px 16px", fontWeight: "600", color: "var(--text-secondary)", textAlign: "right" }}>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(() => {
-                      const totalPages = Math.ceil(documents.length / pageSize) || 1;
-                      const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
-                      const paginatedDocs = documents.slice((safeCurrentPage - 1) * pageSize, safeCurrentPage * pageSize);
-                      return paginatedDocs.map((doc) => (
-                        <tr 
-                          key={doc.document_id} 
-                          style={{ borderBottom: "1px solid var(--border-color)", cursor: "pointer" }}
-                          onClick={() => handleSelectDocument(doc)}
-                        >
-                          <td style={{ padding: "12px 16px", fontWeight: "500", color: "var(--text-primary)" }}>{doc.filename}</td>
-                          <td style={{ padding: "12px 16px", color: "var(--text-secondary)" }}>{formatTime(doc.created_at)}</td>
-                          <td style={{ padding: "12px 16px" }}>
-                            <span className="status-badge" style={getStatusBadgeStyle(doc.status)}>
-                              {doc.status}
-                            </span>
-                          </td>
-                          <td style={{ padding: "12px 16px", color: "var(--text-secondary)" }}>
-                            {doc.processing_time_ms ? `${(parseFloat(doc.processing_time_ms) / 1000).toFixed(1)}s` : "-"}
-                          </td>
-                          <td style={{ padding: "12px 16px", textAlign: "right" }}>
-                            <div style={{ display: "inline-flex", gap: "8px" }}>
-                              <button
-                                onClick={async (e) => {
-                                  e.stopPropagation();
-                                  showToast(`Downloading "${doc.filename}"...`);
-                                  await downloadInvoiceFile(doc);
-                                }}
-                                className="btn btn-secondary"
-                                style={{ padding: "4px 10px", fontSize: "11px", borderRadius: "var(--radius-sm)", height: "auto", display: "inline-flex", alignItems: "center", gap: "4px" }}
-                                title="Download original invoice file"
-                              >
-                                📥 Download
-                              </button>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleSelectDocument(doc);
-                                }}
-                                className="btn btn-ghost"
-                                style={{ padding: "4px 12px", fontSize: "11px", borderRadius: "var(--radius-sm)", height: "auto" }}
-                              >
-                                View Details
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ));
-                    })()}
-                  </tbody>
-                </table>
-              </div>
+            (() => {
+              const totalPages = Math.ceil(documents.length / pageSize) || 1;
+              const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+              const paginatedDocs = documents.slice((safeCurrentPage - 1) * pageSize, safeCurrentPage * pageSize);
+              const startIdx = (safeCurrentPage - 1) * pageSize + 1;
+              const endIdx = Math.min(safeCurrentPage * pageSize, documents.length);
 
-              {/* High-Performance Pagination Bar */}
-              {documents.length > pageSize && (() => {
-                const totalPages = Math.ceil(documents.length / pageSize) || 1;
-                const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
-                const startIdx = (safeCurrentPage - 1) * pageSize + 1;
-                const endIdx = Math.min(safeCurrentPage * pageSize, documents.length);
-                return (
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", borderTop: "1px solid var(--border-color)", background: "var(--bg-table-header)", fontSize: "12px" }}>
-                    <span style={{ color: "var(--text-secondary)" }}>
-                      Showing <strong>{startIdx}</strong> to <strong>{endIdx}</strong> of <strong>{documents.length}</strong> invoices
-                    </span>
-                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                      <button
-                        disabled={safeCurrentPage <= 1}
-                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                        className="btn btn-secondary"
-                        style={{ padding: "4px 10px", fontSize: "11px", height: "auto", cursor: safeCurrentPage <= 1 ? "not-allowed" : "pointer" }}
-                      >
-                        ← Prev
-                      </button>
-                      <span style={{ padding: "0 8px", color: "var(--text-primary)", fontWeight: "600" }}>
-                        Page {safeCurrentPage} of {totalPages}
-                      </span>
-                      <button
-                        disabled={safeCurrentPage >= totalPages}
-                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                        className="btn btn-secondary"
-                        style={{ padding: "4px 10px", fontSize: "11px", height: "auto", cursor: safeCurrentPage >= totalPages ? "not-allowed" : "pointer" }}
-                      >
-                        Next →
-                      </button>
+              return (
+                <>
+                  {/* Desktop Table View (>= 769px) with horizontal scroll protection */}
+                  <div className="desktop-table-container">
+                    <div className="invoice-table-scroll">
+                      <table className="invoice-history-table">
+                        <thead>
+                          <tr>
+                            <th>Invoice File</th>
+                            <th>Upload Time</th>
+                            <th>Status</th>
+                            <th>Processing Time</th>
+                            <th style={{ textAlign: "right" }}>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {paginatedDocs.map((doc) => (
+                            <tr 
+                              key={doc.document_id} 
+                              onClick={() => handleSelectDocument(doc)}
+                            >
+                              <td style={{ fontWeight: "500", color: "var(--text-primary)" }}>{doc.filename}</td>
+                              <td style={{ color: "var(--text-secondary)" }}>{formatTime(doc.created_at)}</td>
+                              <td>
+                                <span className="status-badge" style={getStatusBadgeStyle(doc.status)}>
+                                  {doc.status}
+                                </span>
+                              </td>
+                              <td style={{ color: "var(--text-secondary)" }}>
+                                {doc.processing_time_ms ? `${(parseFloat(doc.processing_time_ms) / 1000).toFixed(1)}s` : "-"}
+                              </td>
+                              <td style={{ textAlign: "right" }}>
+                                <div style={{ display: "inline-flex", gap: "8px" }}>
+                                  <button
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      showToast(`Downloading "${doc.filename}"...`);
+                                      await downloadInvoiceFile(doc);
+                                    }}
+                                    className="btn btn-secondary"
+                                    style={{ padding: "4px 10px", fontSize: "11px", borderRadius: "var(--radius-sm)", height: "auto", display: "inline-flex", alignItems: "center", gap: "5px" }}
+                                    title="Download original invoice file"
+                                  >
+                                    <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                                    </svg>
+                                    <span>Download</span>
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleSelectDocument(doc);
+                                    }}
+                                    className="btn btn-ghost"
+                                    style={{ padding: "4px 12px", fontSize: "11px", borderRadius: "var(--radius-sm)", height: "auto" }}
+                                  >
+                                    View Details
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
-                );
-              })()}
-            </>
+
+                  {/* Mobile Cards View (<= 768px) */}
+                  <div className="mobile-cards-container">
+                    {paginatedDocs.map((doc) => (
+                      <div 
+                        key={doc.document_id} 
+                        className="invoice-mobile-card"
+                        onClick={() => handleSelectDocument(doc)}
+                      >
+                        <div className="invoice-mobile-card-top">
+                          <div className="invoice-mobile-card-title-wrap">
+                            <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" style={{ color: "var(--primary-color, #4f46e5)", flexShrink: 0 }}>
+                              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                              <polyline points="14 2 14 8 20 8"/>
+                            </svg>
+                            <span className="invoice-mobile-card-filename" title={doc.filename}>
+                              {doc.filename}
+                            </span>
+                          </div>
+                          <span className="status-badge" style={getStatusBadgeStyle(doc.status)}>
+                            {doc.status}
+                          </span>
+                        </div>
+
+                        <div className="invoice-mobile-card-meta">
+                          <span className="invoice-mobile-meta-item">
+                            <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                              <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                            </svg>
+                            {formatTime(doc.created_at)}
+                          </span>
+                          {doc.processing_time_ms && (
+                            <span className="invoice-mobile-meta-item">
+                              <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                <circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/><path d="M5 3L2 6"/><path d="M22 6l-3-3"/><path d="M10 2h4"/>
+                              </svg>
+                              {(parseFloat(doc.processing_time_ms) / 1000).toFixed(1)}s OCR
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="invoice-mobile-card-actions">
+                          <button
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              showToast(`Downloading "${doc.filename}"...`);
+                              await downloadInvoiceFile(doc);
+                            }}
+                            className="btn btn-secondary invoice-mobile-btn"
+                            title="Download original invoice file"
+                          >
+                            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                            </svg>
+                            <span>Download</span>
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSelectDocument(doc);
+                            }}
+                            className="btn btn-primary invoice-mobile-btn"
+                          >
+                            <span>View Details</span>
+                            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                              <polyline points="9 18 15 12 9 6"/>
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* High-Performance Pagination Bar */}
+                  {documents.length > pageSize && (
+                    <div className="invoice-pagination-bar">
+                      <span className="invoice-pagination-summary">
+                        Showing <strong>{startIdx}</strong> to <strong>{endIdx}</strong> of <strong>{documents.length}</strong> invoices
+                      </span>
+                      <div className="invoice-pagination-controls">
+                        <button
+                          disabled={safeCurrentPage <= 1}
+                          onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                          className="btn btn-secondary pagination-btn"
+                        >
+                          ← Prev
+                        </button>
+                        <span className="pagination-page-indicator">
+                          Page {safeCurrentPage} of {totalPages}
+                        </span>
+                        <button
+                          disabled={safeCurrentPage >= totalPages}
+                          onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                          className="btn btn-secondary pagination-btn"
+                        >
+                          Next →
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              );
+            })()
           )}
         </div>
       </div>

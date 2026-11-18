@@ -48,6 +48,7 @@ async function validateChanges(employee, changes, transaction) {
 
   const existing = await LeaveAdjustment.findAll({ where: { employeeId: employee.id }, transaction });
   const activeCreditDates = new Set(existing.filter((a) => a.adjustmentType === 'SPECIAL_EARNED_CREDIT' && a.status === 'ACTIVE').map((a) => a.workDate));
+  const pendingCreditDates = new Set(existing.filter((a) => a.adjustmentType === 'SPECIAL_EARNED_CREDIT' && a.status === 'PENDING').map((a) => a.workDate));
   const creditsById = new Map(existing.filter((a) => a.adjustmentType === 'SPECIAL_EARNED_CREDIT').map((a) => [a.id, a]));
 
   const migrationStart = LeaveBalanceService.parseMonthSetting(policy.MIGRATION_START_MONTH);
@@ -105,6 +106,7 @@ async function validateChanges(employee, changes, transaction) {
         if (joiningISO && iso < joiningISO) fail(i, 'Work date is before the employee joined.');
         if (!(days > 0 && days <= 1) || !isStep(days)) fail(i, 'Credited duration must be 0.5 or 1 day.');
         if (activeCreditDates.has(iso)) fail(i, `A special-earned credit already exists for ${iso}.`);
+        else if (pendingCreditDates.has(iso)) fail(i, `The shift on ${iso} is awaiting verification in Attendance. Approve or reject it there instead of adding a second credit.`);
         // Sunday credits must be Sundays; holiday credits must be in the employee's own holiday calendar.
         let leaveType = 'Special Earned Leave';
         if (c.creditType === 'SUNDAY') {

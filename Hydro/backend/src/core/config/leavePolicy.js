@@ -28,5 +28,26 @@ module.exports = {
 
   // Roles allowed to view every employee's balances, and to change them.
   BALANCE_VIEW_ROLES: ['ADMIN', 'SUPER_ADMIN', 'HR', 'HR_ADMIN', 'MANAGER', 'TRACKING_MANAGER', 'FIELD_INVOICE_MANAGER'],
-  BALANCE_EDIT_ROLES: ['ADMIN', 'SUPER_ADMIN']
+  BALANCE_EDIT_ROLES: ['ADMIN', 'SUPER_ADMIN'],
+
+  // ---- Sunday / holiday shifts (special earned leave) ----
+  // A shift worked on a weekly off or a holiday is recorded as a PENDING credit; it only counts in the
+  // balance once an admin approves it (ACTIVE). Rejected credits (REJECTED) never count.
+  // Calculated credit by actual working hours, highest threshold first. Below the lowest threshold the
+  // calculated credit is 0 and an admin must explicitly override to credit anything.
+  SPECIAL_SHIFT_CREDIT_RULES: [
+    { minHours: 6, days: 1 },
+    { minHours: 4, days: 0.5 }
+  ],
+  // Most a single Sunday/holiday shift can be credited, even with an override.
+  SPECIAL_SHIFT_MAX_DAYS: 1,
+  // Shifts are evaluated automatically from this month on. Earlier months are register history
+  // (Excel import / typed in), where an automatic credit would count the same Sunday twice.
+  SPECIAL_SHIFT_AUTO_START_MONTH: '2026-10',
+  // Who may see the review list, and who may approve or reject. Nobody may approve their own shift.
+  SPECIAL_SHIFT_VIEW_ROLES: ['ADMIN', 'SUPER_ADMIN', 'HR', 'HR_ADMIN', 'MANAGER', 'TRACKING_MANAGER', 'FIELD_INVOICE_MANAGER'],
+  SPECIAL_SHIFT_VERIFY_ROLES: ['ADMIN', 'SUPER_ADMIN'],
+  // Payroll run statuses that close a month: approvals in that month are refused (rejections still allowed,
+  // they change no balance). 'PAID' is the existing "released and locked" state.
+  SPECIAL_SHIFT_LOCKED_PAYROLL_STATUSES: ['PAID']
 };

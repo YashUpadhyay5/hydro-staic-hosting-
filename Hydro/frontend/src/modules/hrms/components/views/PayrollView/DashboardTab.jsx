@@ -368,35 +368,35 @@ export default function DashboardTab({ dashboardData, employees = [], onTabChang
   let accumulatedPercentLoc = 0;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '100%', boxSizing: 'border-box' }}>
       {/* Top Cards Row */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
+      <div className="payroll-dashboard-cards-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', width: '100%', boxSizing: 'border-box' }}>
         
         {/* Card 1: Last Salary Processed */}
-        <div className="stat-card glass" style={{ padding: '20px', borderRadius: '12px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '120px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+        <div className="stat-card glass payroll-stat-card" style={{ padding: '20px', borderRadius: '12px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: 'stretch', minHeight: '120px', width: '100%', boxSizing: 'border-box' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap', width: '100%' }}>
             <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', fontWeight: 600 }}>Last Salary Processed</span>
             <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '10px', background: 'rgba(79, 70, 229, 0.1)', color: 'var(--accent-primary)', fontWeight: 600 }}>{lastSalaryMonth}</span>
           </div>
-          <h3 style={{ fontSize: '1.75rem', fontWeight: 700, margin: '12px 0 0 0', color: 'var(--text-primary)' }}>₹{lastSalary.toLocaleString()}</h3>
+          <h3 style={{ fontSize: '1.75rem', fontWeight: 700, margin: '12px 0 0 0', color: 'var(--text-primary)', textAlign: 'left' }}>₹{lastSalary.toLocaleString()}</h3>
         </div>
 
         {/* Card 2: Upcoming Salary */}
-        <div className="stat-card glass" style={{ padding: '20px', borderRadius: '12px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '120px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+        <div className="stat-card glass payroll-stat-card" style={{ padding: '20px', borderRadius: '12px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: 'stretch', minHeight: '120px', width: '100%', boxSizing: 'border-box' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap', width: '100%' }}>
             <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', fontWeight: 600 }}>Upcoming Salary</span>
             <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '10px', background: 'rgba(16, 185, 129, 0.1)', color: '#10b981', fontWeight: 600 }}>{upcomingSalaryMonth}</span>
           </div>
-          <h3 style={{ fontSize: '1.75rem', fontWeight: 700, margin: '12px 0 0 0', color: 'var(--text-primary)' }}>₹{upcomingSalary.toLocaleString()}</h3>
+          <h3 style={{ fontSize: '1.75rem', fontWeight: 700, margin: '12px 0 0 0', color: 'var(--text-primary)', textAlign: 'left' }}>₹{upcomingSalary.toLocaleString()}</h3>
         </div>
 
         {/* Card 3: Upcoming Revisions */}
         <div 
-          className="stat-card glass" 
+          className="stat-card glass payroll-stat-card" 
           onClick={() => setShowUpcomingModal(true)}
-          style={{ padding: '20px', borderRadius: '12px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '120px', cursor: 'pointer', transition: 'all 0.2s ease', border: '1px solid rgba(139, 92, 246, 0.3)' }}
+          style={{ padding: '20px', borderRadius: '12px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: 'stretch', minHeight: '120px', cursor: 'pointer', transition: 'all 0.2s ease', border: '1px solid rgba(139, 92, 246, 0.3)', width: '100%', boxSizing: 'border-box' }}
         >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap', width: '100%' }}>
             <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', fontWeight: 600 }}>Upcoming Revisions</span>
             <button 
               onClick={(e) => { e.stopPropagation(); setShowUpcomingModal(true); }}
@@ -405,19 +405,19 @@ export default function DashboardTab({ dashboardData, employees = [], onTabChang
               View Employees 👁️
             </button>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: '12px' }}>
-            <h3 style={{ fontSize: '1.75rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>{upcomingRevisionEmployees.length}</h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: '12px', width: '100%' }}>
+            <h3 style={{ fontSize: '1.75rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)', textAlign: 'left' }}>{upcomingRevisionEmployees.length}</h3>
             <span style={{ fontSize: '0.75rem', color: '#8b5cf6', background: 'rgba(139, 92, 246, 0.1)', padding: '2px 8px', borderRadius: '10px', fontWeight: 700 }}>3 MONTHS</span>
           </div>
         </div>
 
         {/* Card 5: Unprocessed & Held Salaries */}
         <div 
-          className="stat-card glass" 
+          className="stat-card glass payroll-stat-card" 
           onClick={() => setShowUnprocessedModal(true)}
-          style={{ padding: '20px', borderRadius: '12px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '120px', cursor: 'pointer', transition: 'all 0.2s ease', border: '1px solid rgba(245, 158, 11, 0.35)', background: 'rgba(245, 158, 11, 0.05)' }}
+          style={{ padding: '20px', borderRadius: '12px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: 'stretch', minHeight: '120px', cursor: 'pointer', transition: 'all 0.2s ease', border: '1px solid rgba(245, 158, 11, 0.35)', background: 'rgba(245, 158, 11, 0.05)', width: '100%', boxSizing: 'border-box' }}
         >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap', width: '100%' }}>
             <span style={{ color: '#fbbf24', fontSize: '0.85rem', fontWeight: 700 }}>Unprocessed Salaries</span>
             <button 
               onClick={(e) => { e.stopPropagation(); setShowUnprocessedModal(true); }}
@@ -426,9 +426,9 @@ export default function DashboardTab({ dashboardData, employees = [], onTabChang
               View List 👁️
             </button>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: '12px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: '12px', width: '100%', flexWrap: 'wrap', gap: '8px' }}>
             <div>
-              <h3 style={{ fontSize: '1.75rem', fontWeight: 800, margin: 0, color: '#f59e0b' }}>{unprocessedEmployees.length}</h3>
+              <h3 style={{ fontSize: '1.75rem', fontWeight: 800, margin: 0, color: '#f59e0b', textAlign: 'left' }}>{unprocessedEmployees.length}</h3>
               <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>₹{totalUnprocessedAmount.toLocaleString()} pending</span>
             </div>
             <span style={{ fontSize: '0.7rem', color: '#fbbf24', background: 'rgba(245, 158, 11, 0.15)', border: '1px solid rgba(245, 158, 11, 0.3)', padding: '2px 8px', borderRadius: '10px', fontWeight: 700 }}>
@@ -437,13 +437,13 @@ export default function DashboardTab({ dashboardData, employees = [], onTabChang
           </div>
         </div>
 
-                {/* Card 4: Pending Revisions */}
+        {/* Card 4: Pending Revisions */}
         <div 
-          className="stat-card glass" 
+          className="stat-card glass payroll-stat-card" 
           onClick={() => setShowPendingModal(true)}
-          style={{ padding: '20px', borderRadius: '12px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '120px', cursor: 'pointer', transition: 'all 0.2s ease', border: '1px solid rgba(239, 68, 68, 0.3)' }}
+          style={{ padding: '20px', borderRadius: '12px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: 'stretch', minHeight: '120px', cursor: 'pointer', transition: 'all 0.2s ease', border: '1px solid rgba(239, 68, 68, 0.3)', width: '100%', boxSizing: 'border-box' }}
         >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap', width: '100%' }}>
             <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', fontWeight: 600 }}>Pending Revisions</span>
             <button 
               onClick={(e) => { e.stopPropagation(); setShowPendingModal(true); }}
@@ -452,8 +452,8 @@ export default function DashboardTab({ dashboardData, employees = [], onTabChang
               View Employees 👁️
             </button>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: '12px' }}>
-            <h3 style={{ fontSize: '1.75rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>{pendingRevisionEmployees.length}</h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: '12px', width: '100%' }}>
+            <h3 style={{ fontSize: '1.75rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)', textAlign: 'left' }}>{pendingRevisionEmployees.length}</h3>
             <span style={{ fontSize: '0.75rem', color: '#ef4444', background: 'rgba(239, 68, 68, 0.1)', padding: '2px 8px', borderRadius: '10px', fontWeight: 700 }}>OVERDUE</span>
           </div>
         </div>
@@ -461,8 +461,8 @@ export default function DashboardTab({ dashboardData, employees = [], onTabChang
       </div>
 
       {/* Compensation Summary Section */}
-      <div className="card glass" style={{ padding: '24px', borderRadius: '12px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
+      <div className="card glass compensation-summary-card" style={{ padding: '24px', borderRadius: '12px', width: '100%', boxSizing: 'border-box' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '12px', width: '100%' }}>
           <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>Compensation Summary</h2>
           <select
             value={financialYear}
@@ -484,15 +484,15 @@ export default function DashboardTab({ dashboardData, employees = [], onTabChang
         </div>
 
         {/* Charts Row */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '24px' }}>
+        <div className="compensation-charts-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '24px', width: '100%', boxSizing: 'border-box' }}>
           
           {/* Chart 1: Compensation by Department */}
-          <div style={{ background: 'rgba(255, 255, 255, 0.02)', padding: '20px', borderRadius: '12px', border: '1px solid var(--border-glass)' }}>
+          <div className="card glass compensation-chart-card" style={{ background: 'rgba(255, 255, 255, 0.02)', padding: '20px', borderRadius: '12px', border: '1px solid var(--border-glass)', width: '100%', boxSizing: 'border-box' }}>
             <h4 style={{ margin: '0 0 20px 0', fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Compensation Distribution by Department/Sub-Department</h4>
             
-            <div style={{ display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
+            <div className="donut-chart-row" style={{ display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap', width: '100%', boxSizing: 'border-box' }}>
               {/* SVG Donut */}
-              <div style={{ position: 'relative', width: '150px', height: '150px' }}>
+              <div style={{ position: 'relative', width: '150px', height: '150px', flexShrink: 0 }}>
                 <svg width="100%" height="100%" viewBox="0 0 42 42" className="donut">
                   <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="rgba(255,255,255,0.05)" strokeWidth="4.5"></circle>
                   {totalDeptCompensation === 0 ? (
@@ -525,7 +525,7 @@ export default function DashboardTab({ dashboardData, employees = [], onTabChang
               </div>
 
               {/* Data Breakdown list */}
-              <div style={{ flex: 1, minWidth: '180px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div className="donut-data-breakdown" style={{ flex: 1, minWidth: '180px', display: 'flex', flexDirection: 'column', gap: '12px', boxSizing: 'border-box' }}>
                 <div>
                   <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block' }}>TOTAL COMPENSATION</span>
                   <strong style={{ fontSize: '1.05rem', color: 'var(--text-primary)' }}>₹{totalDeptCompensation.toLocaleString()}</strong>
@@ -557,12 +557,12 @@ export default function DashboardTab({ dashboardData, employees = [], onTabChang
           </div>
 
           {/* Chart 2: Compensation by Location */}
-          <div style={{ background: 'rgba(255, 255, 255, 0.02)', padding: '20px', borderRadius: '12px', border: '1px solid var(--border-glass)' }}>
+          <div className="card glass compensation-chart-card" style={{ background: 'rgba(255, 255, 255, 0.02)', padding: '20px', borderRadius: '12px', border: '1px solid var(--border-glass)', width: '100%', boxSizing: 'border-box' }}>
             <h4 style={{ margin: '0 0 20px 0', fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Compensation Distribution by Location</h4>
             
-            <div style={{ display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
+            <div className="donut-chart-row" style={{ display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap', width: '100%', boxSizing: 'border-box' }}>
               {/* SVG Donut */}
-              <div style={{ position: 'relative', width: '150px', height: '150px' }}>
+              <div style={{ position: 'relative', width: '150px', height: '150px', flexShrink: 0 }}>
                 <svg width="100%" height="100%" viewBox="0 0 42 42" className="donut">
                   <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="rgba(255,255,255,0.05)" strokeWidth="4.5"></circle>
                   {totalLocCompensation === 0 ? (
@@ -589,13 +589,13 @@ export default function DashboardTab({ dashboardData, employees = [], onTabChang
                   )}
                 </svg>
                 <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', textAlign: 'center' }}>
-                  <span style={{ fontSize: '0.7', color: 'var(--text-secondary)', display: 'block' }}>Locations</span>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', display: 'block' }}>Locations</span>
                   <strong style={{ fontSize: '1rem', color: 'var(--text-primary)' }}>{locationData.length} Active</strong>
                 </div>
               </div>
 
               {/* Data Breakdown list */}
-              <div style={{ flex: 1, minWidth: '180px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div className="donut-data-breakdown" style={{ flex: 1, minWidth: '180px', display: 'flex', flexDirection: 'column', gap: '12px', boxSizing: 'border-box' }}>
                 <div>
                   <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block' }}>TOTAL COMPENSATION</span>
                   <strong style={{ fontSize: '1.05rem', color: 'var(--text-primary)' }}>₹{totalLocCompensation.toLocaleString()}</strong>
@@ -630,7 +630,7 @@ export default function DashboardTab({ dashboardData, employees = [], onTabChang
       </div>
 
       {/* Variance Section */}
-      <div className="card glass" style={{ padding: '24px', borderRadius: '12px' }}>
+      <div className="card glass variance-section-card" style={{ padding: '24px', borderRadius: '12px', width: '100%', boxSizing: 'border-box' }}>
         <h3 style={{ margin: '0 0 16px 0', fontSize: '1.1rem', color: 'var(--text-primary)' }}>Planned Vs Actual Compensation (Variance) - Past Months</h3>
         
         {(!dashboardData.runsTrend || dashboardData.runsTrend.length === 0) ? (
@@ -715,7 +715,7 @@ export default function DashboardTab({ dashboardData, employees = [], onTabChang
 
       {/* Upcoming Revisions Employee Modal */}
       {showUpcomingModal && (
-        <div style={{
+        <div className="payroll-modal-overlay" style={{
           position: 'fixed',
           top: 0,
           left: 0,
@@ -729,7 +729,7 @@ export default function DashboardTab({ dashboardData, employees = [], onTabChang
           zIndex: 9999,
           padding: '20px'
         }}>
-          <div style={{
+          <div className="payroll-modal-content" style={{
             background: '#ffffff',
             borderRadius: '16px',
             width: '100%',
@@ -804,7 +804,8 @@ export default function DashboardTab({ dashboardData, employees = [], onTabChang
                   No upcoming salary revisions match your search filter.
                 </div>
               ) : (
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem', textAlign: 'left', marginTop: '16px' }}>
+                <div className="payroll-table-wrap">
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem', textAlign: 'left', marginTop: '16px' }}>
                   <thead>
                     <tr style={{ background: '#f8fafc', color: '#64748b', borderBottom: '1px solid #e2e8f0' }}>
                       <th style={{ padding: '12px', fontWeight: 700 }}>Employee Details</th>
@@ -887,6 +888,7 @@ export default function DashboardTab({ dashboardData, employees = [], onTabChang
                     })}
                   </tbody>
                 </table>
+                </div>
               )}
             </div>
 
@@ -920,7 +922,7 @@ export default function DashboardTab({ dashboardData, employees = [], onTabChang
 
       {/* Unprocessed & Held Salaries Employee Modal */}
       {showUnprocessedModal && (
-        <div style={{
+        <div className="payroll-modal-overlay" style={{
           position: 'fixed',
           top: 0,
           left: 0,
@@ -934,7 +936,7 @@ export default function DashboardTab({ dashboardData, employees = [], onTabChang
           zIndex: 9999,
           padding: '20px'
         }}>
-          <div style={{
+          <div className="payroll-modal-content" style={{
             background: '#ffffff',
             borderRadius: '16px',
             width: '100%',
@@ -1040,7 +1042,8 @@ export default function DashboardTab({ dashboardData, employees = [], onTabChang
                   No unprocessed or on-hold employee records match your filter.
                 </div>
               ) : (
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem', textAlign: 'left', marginTop: '16px' }}>
+                <div className="payroll-table-wrap">
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem', textAlign: 'left', marginTop: '16px' }}>
                   <thead>
                     <tr style={{ background: '#f8fafc', color: '#64748b', borderBottom: '1px solid #e2e8f0' }}>
                       <th style={{ padding: '12px', fontWeight: 700 }}>Employee Details</th>
@@ -1101,6 +1104,7 @@ export default function DashboardTab({ dashboardData, employees = [], onTabChang
                     ))}
                   </tbody>
                 </table>
+                </div>
               )}
             </div>
 
@@ -1161,7 +1165,7 @@ export default function DashboardTab({ dashboardData, employees = [], onTabChang
 
       {/* Pending Revisions Employee Modal */}
       {showPendingModal && (
-        <div style={{
+        <div className="payroll-modal-overlay" style={{
           position: 'fixed',
           top: 0,
           left: 0,
@@ -1175,7 +1179,7 @@ export default function DashboardTab({ dashboardData, employees = [], onTabChang
           zIndex: 9999,
           padding: '20px'
         }}>
-          <div style={{
+          <div className="payroll-modal-content" style={{
             background: '#ffffff',
             borderRadius: '16px',
             width: '100%',
@@ -1250,7 +1254,8 @@ export default function DashboardTab({ dashboardData, employees = [], onTabChang
                   No pending salary revisions match your search filter.
                 </div>
               ) : (
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem', textAlign: 'left', marginTop: '16px' }}>
+                <div className="payroll-table-wrap">
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem', textAlign: 'left', marginTop: '16px' }}>
                   <thead>
                     <tr style={{ background: '#f8fafc', color: '#64748b', borderBottom: '1px solid #e2e8f0' }}>
                       <th style={{ padding: '12px', fontWeight: 700 }}>Employee Details</th>
@@ -1351,6 +1356,7 @@ export default function DashboardTab({ dashboardData, employees = [], onTabChang
                     })}
                   </tbody>
                 </table>
+                </div>
               )}
             </div>
 

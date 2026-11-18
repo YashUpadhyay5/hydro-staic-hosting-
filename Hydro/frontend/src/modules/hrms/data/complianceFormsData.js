@@ -1,4 +1,6 @@
 
+import { isEmpActiveOnDate } from '../utils/helpers.js';
+
 export const COMPLIANCE_FORMS_CONFIG = [
   {
     id: 'Form S',
@@ -211,7 +213,10 @@ export const getEmpAttendanceForMonth = (emp, attendanceList = [], selectedMonth
 /**
  * Get statutory attendance symbol (P, A, L, WO, H, OD, HD) for an employee on a date
  */
-export const getAttendanceSymbolFromPunches = (dateStr, empPunches = [], empLeaves = [], weeklyOffsSetting = 'Sunday') => {
+export const getAttendanceSymbolFromPunches = (dateStr, empPunches = [], empLeaves = [], weeklyOffsSetting = 'Sunday', emp = null) => {
+  if (emp && !isEmpActiveOnDate(emp, dateStr)) {
+    return '-';
+  }
   const hasApprovedLeave = empLeaves.some(l => {
     const sDate = l.startDate || l.start_date || '';
     const eDate = l.endDate || l.end_date || '';
@@ -303,23 +308,23 @@ export const getDynamicFormData = (formKey, selectedMonth = getCurrentMonthYYYYM
   const sundaysCount = getSundaysCount(selectedMonth);
 
   // Derive dynamic establishment and employer details strictly from DB
-  const companyName = employees[0]?.legalEntity || employees[0]?.legal_entity || employees[0]?.companyName || 'Hydromaterials Private Limited';
-  const companyAddress = employees[0]?.location || employees[0]?.address || 'Headquarters, Noida, Uttar Pradesh';
-  const adminEmp = employees.find(e => String(e.role || '').toUpperCase() === 'ADMIN');
-  const employerName = adminEmp?.name || employees[0]?.reportingManager || employees[0]?.reporting_manager || 'Director';
-  const managerName = adminEmp?.name || employees[0]?.reportingManager || employees[0]?.reporting_manager || 'Managing Director';
+  const companyName = DataMapper.COMPANY_NAME;
+  const companyAddress = DataMapper.COMPANY_CITY;
+  const employerName = DataMapper.employerNameOf(employees);
+  const managerName = employerName;
+  const activeEmployees = DataMapper.eligibleEmployeesForMonth(employees, selectedMonth, runItems, settings);
   const currentYear = new Date().getFullYear();
-  const regNo = employees[0]?.legalEntity ? `REG-${String(employees[0].legalEntity).toUpperCase().replace(/\s+/g, '')}-${currentYear}` : `REG-HMPL-${currentYear}`;
+  const regNo = `REG-HMPL-${currentYear}`;
 
-  const maleCount = employees.filter(e => {
+  const maleCount = activeEmployees.filter(e => {
     const g = String(e.gender || '').trim().toLowerCase();
     return g === 'male' || g === 'm';
   }).length;
-  const femaleCount = employees.filter(e => {
+  const femaleCount = activeEmployees.filter(e => {
     const g = String(e.gender || '').trim().toLowerCase();
     return g === 'female' || g === 'f';
   }).length;
-  const totalEmployees = employees.length;
+  const totalEmployees = activeEmployees.length;
 
   let dynamicPaymentDate = '';
   try {
@@ -333,7 +338,7 @@ export const getDynamicFormData = (formKey, selectedMonth = getCurrentMonthYYYYM
     dynamicPaymentDate = monthLabel;
   }
 
-  if (!employees || employees.length === 0) {
+  if (!activeEmployees || activeEmployees.length === 0) {
     return {
       meta: [
         [formKey, '', ''],
@@ -357,9 +362,9 @@ export const getDynamicFormData = (formKey, selectedMonth = getCurrentMonthYYYYM
       ['Period:', '', monthLabel]
     ];
     const headers = [
-      ['Serial Number', 'Name of the employee', 'Employee Identification No.', 'Gender', 'Father / Spouse Name', 'Date of Birth', 'Date of entry into service', 'Designation', 'EPF No.', 'ESIC No.', 'Date of completion of 480 days of service', 'Date on which made permanent', 'Department', 'Location / Address']
+      ['Serial Number', 'Name of the employee', 'Employee Identification No.', 'Gender', 'Father / Spouse Name', 'Date of Birth', 'Date of entry into service', 'Designation', 'EPF No.', 'ESIC No.', 'Date of completion of 480 days of service', 'Date on which made permanent', 'Department', 'Location / Address', 'Date of Exit', 'Reason for Exit', 'Remarks']
     ];
-    const body = employees.map((emp, idx) => {
+    const body = activeEmployees.map((emp, idx) => {
       let custom = {};
       try {
         if (typeof emp.custom_fields === 'string') custom = JSON.parse(emp.custom_fields);
@@ -395,6 +400,7 @@ export const getDynamicFormData = (formKey, selectedMonth = getCurrentMonthYYYYM
       const esic = emp.esi_number || emp.esiNumber || emp.esic_number || emp.esicNumber || custom.esiNumber || custom.esicNumber || '-';
       const dept = emp.department || 'Operations';
       const addr = emp.presentAddress || emp.address || emp.location || '-';
+      const exitInfo = DataMapper.formUExitFields(emp, selectedMonth);
 
       return [
         idx + 1,
@@ -410,7 +416,10 @@ export const getDynamicFormData = (formKey, selectedMonth = getCurrentMonthYYYYM
         date480Days,
         datePermanent,
         dept,
-        addr
+        addr,
+        exitInfo.exitDate,
+        exitInfo.exitReason,
+        exitInfo.remarks
       ];
     });
     return { meta, headers, body };
@@ -431,7 +440,7 @@ export const getDynamicFormData = (formKey, selectedMonth = getCurrentMonthYYYYM
     const headers = [
       ['Serial No.', 'Name of the person employed', 'Sex', 'Father/Husband’s Name', 'Designation', 'Employee number', 'Date of entry into service', 'Adult/Adolescent/Child', 'Shift Number', 'Time of commencement of work', 'Rest Interval', 'Time of cessation of work', 'Weekly Holiday', 'Class of workers', 'Rate of Wages (Max)', 'Rate of Wages (Min)']
     ];
-    const body = employees.map((emp, idx) => {
+    const body = activeEmployees.map((emp, idx) => {
       let custom = {};
       try {
         if (typeof emp.custom_fields === 'string') custom = JSON.parse(emp.custom_fields);
@@ -509,7 +518,7 @@ export const getDynamicFormData = (formKey, selectedMonth = getCurrentMonthYYYYM
 
     const [year, month] = selectedMonth.split('-');
 
-    const body = employees.map((emp, idx) => {
+    const body = activeEmployees.map((emp, idx) => {
       const name = emp.name || emp.fullName || `Employee ${idx + 1}`;
       const code = emp.empCode || emp.emp_code || emp.employeeId || emp.code || emp.id || `EMP${String(idx + 1).padStart(3, '0')}`;
       const father = emp.fatherName || emp.spouseName || `${name.split(' ')[0]} Ram`;
@@ -524,19 +533,19 @@ export const getDynamicFormData = (formKey, selectedMonth = getCurrentMonthYYYYM
       let presentDays = 0;
       let totalLeaveDays = 0;
       let weeklyOffs = 0;
+      let absentDays = 0;
 
       for (let day = 1; day <= totalDaysInMonth; day++) {
         const dayPad = String(day).padStart(2, '0');
         const dateStr = `${year}-${month}-${dayPad}`;
-        const symbol = getAttendanceSymbolFromPunches(dateStr, empPunches, empApprovedLeaves, emp.weekly_offs || emp.weeklyOffs);
+        const symbol = getAttendanceSymbolFromPunches(dateStr, empPunches, empApprovedLeaves, emp.weekly_offs || emp.weeklyOffs, emp);
         dailySymbols.push(symbol);
 
         if (symbol === 'P' || symbol === 'HD') presentDays++;
         else if (symbol === 'SL' || symbol === 'CL' || symbol === 'EL' || symbol === 'L') totalLeaveDays++;
         else if (symbol === 'WO') weeklyOffs++;
+        else if (symbol === 'A') absentDays++;
       }
-
-      const absentDays = Math.max(0, totalDaysInMonth - presentDays - totalLeaveDays - weeklyOffs);
 
       return [
         idx + 1,
@@ -570,7 +579,7 @@ export const getDynamicFormData = (formKey, selectedMonth = getCurrentMonthYYYYM
     const headers = [
       ['Serial Number', 'Name of the Employee', 'Employee Identification No.', 'Designation', 'Time at which work commences', 'Rest Interval', 'Time at which work ends', 'Daily Hours of work', 'Overtime Status']
     ];
-    const body = employees.map((emp, idx) => {
+    const body = activeEmployees.map((emp, idx) => {
       const name = emp.name || emp.fullName || `Employee ${idx + 1}`;
       const code = emp.empCode || emp.emp_code || emp.employeeId || emp.code || emp.id || `EMP${String(idx + 1).padStart(3, '0')}`;
       const designation = emp.jobTitle || emp.job_title || emp.designation || 'Field Staff';
@@ -606,13 +615,14 @@ export const getDynamicFormData = (formKey, selectedMonth = getCurrentMonthYYYYM
   }
 
   if (formKey === 'Form W') {
+    const paid = DataMapper.paidHeadCount(activeEmployees, runItems);
     const meta = [
       ['Form-W', '', ''],
       ['REGISTER OF WAGES [See sub-rule(1) of rule(16)]', '', ''],
       ['Name and Address of the Establishment :', '', `${companyName}, ${companyAddress}`],
       ['Name of Employer :', '', employerName],
       ['Name of Manager/Incharge :', '', managerName],
-      ['Total Number of persons employed :', '', `Total: ${totalEmployees} (Male: ${maleCount}, Female: ${femaleCount})`],
+      ['Total Number of persons employed :', '', `Total: ${paid.total} (Male: ${paid.male}, Female: ${paid.female})`],
       ['Wage Period :', '', monthLabel],
       ['Date of Payment of Wages :', '', dynamicPaymentDate]
     ];
@@ -665,7 +675,7 @@ export const getDynamicFormData = (formKey, selectedMonth = getCurrentMonthYYYYM
     }
 
     // Identical rows to the downloaded Excel Form W: figures read from the stored payroll items
-    const body = DataMapper.mapFormWRows(employees, attendance, runItems, selectedMonth);
+    const body = DataMapper.mapFormWRows(activeEmployees, attendance, runItems, selectedMonth);
 
     return { meta, headers, body };
   }
@@ -683,7 +693,7 @@ export const getDynamicFormData = (formKey, selectedMonth = getCurrentMonthYYYYM
     const headers = [
       ['Serial Number', 'Name of the employee', 'Employee Identification No.', 'Opening Earned Leave', 'Earned Leave Accrued (Month)', 'Earned Leave Availed (Month)', 'Closing Earned Leave Balance', 'Status']
     ];
-    const body = employees.map((emp, idx) => {
+    const body = activeEmployees.map((emp, idx) => {
       const name = emp.name || emp.fullName || `Employee ${idx + 1}`;
       const code = emp.empCode || emp.emp_code || emp.employeeId || emp.code || emp.id || `EMP${String(idx + 1).padStart(3, '0')}`;
 
@@ -718,7 +728,7 @@ export const getDynamicFormData = (formKey, selectedMonth = getCurrentMonthYYYYM
               ? emp.earnedLeaves
               : null)));
       const opening = (openingRaw !== null && !isNaN(Number(openingRaw))) ? Math.max(0, Number(openingRaw)) : 0;
-      const accruedInMonth = 1;
+      const accruedInMonth = DataMapper.earnedLeaveAccruedForMonth(emp, runItems);
       const closingBalance = Math.max(0, opening + accruedInMonth - elCount);
 
       return [
@@ -748,7 +758,7 @@ export const getDynamicFormData = (formKey, selectedMonth = getCurrentMonthYYYYM
     ];
     // One wage slip per employee paid in this run, figures as stored by payroll (same as the payslip)
     const body = [];
-    employees.forEach((emp) => {
+    activeEmployees.forEach((emp) => {
       const item = DataMapper.findRunItem(runItems, emp);
       if (!item) return;
       const f = DataMapper.mapPayrollFigures(item, emp, selectedMonth);

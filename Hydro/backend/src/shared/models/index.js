@@ -11,6 +11,7 @@ const Reimbursement = require('./Reimbursement');
 const TaxRecord = require('./TaxRecord');
 const Payslip = require('./Payslip');
 const Leave = require('./Leave');
+const LeaveCategory = require('./LeaveCategory');
 const Attendance = require('./Attendance');
 const Document = require('./Document');
 const DeviceToken = require('./DeviceToken');
@@ -28,6 +29,11 @@ const ProfessionalTaxState = require('./ProfessionalTaxState');
 const ProfessionalTaxRule = require('./ProfessionalTaxRule');
 const ProfessionalTaxAuditLog = require('./ProfessionalTaxAuditLog');
 const EmployeeGeofenceTrackingState = require('./EmployeeGeofenceTrackingState');
+const SpecialShiftVerification = require('./SpecialShiftVerification');
+const EmployeeActivity = require('./EmployeeActivity');
+const AttendanceRegularization = require('./AttendanceRegularization');
+const AttendanceRegisterEdit = require('./AttendanceRegisterEdit');
+const Geofence = require('./Geofence');
 
 // Chat Models
 const Chat = require('./Chat');
@@ -122,6 +128,7 @@ module.exports = {
   TaxRecord,
   Payslip,
   Leave,
+  LeaveCategory,
   Attendance,
   Document,
   DeviceToken,
@@ -145,5 +152,10 @@ module.exports = {
   ProfessionalTaxState,
   ProfessionalTaxRule,
   ProfessionalTaxAuditLog,
-  EmployeeGeofenceTrackingState
+  EmployeeGeofenceTrackingState,
+  SpecialShiftVerification,
+  EmployeeActivity,
+  AttendanceRegularization,
+  AttendanceRegisterEdit,
+  Geofence
 };

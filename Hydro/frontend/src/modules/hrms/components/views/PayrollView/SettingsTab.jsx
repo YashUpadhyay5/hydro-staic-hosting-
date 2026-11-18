@@ -139,7 +139,7 @@ export default function SettingsTab({ payslips = [], employees = [], onReload })
         </div>
 
         {/* Toolbar & Filters */}
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="payslips-toolbar" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
           
           <button 
             className="btn btn-secondary" 
@@ -280,6 +280,7 @@ export default function SettingsTab({ payslips = [], employees = [], onReload })
             )}
           </div>
         ) : (
+          <div className="payroll-table-wrap">
           <table className="table" style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border-glass)', fontSize: '0.75rem', color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.02)' }}>
@@ -366,6 +367,7 @@ export default function SettingsTab({ payslips = [], employees = [], onReload })
               })}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 

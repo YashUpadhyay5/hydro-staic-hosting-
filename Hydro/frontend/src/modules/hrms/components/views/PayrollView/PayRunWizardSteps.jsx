@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../../../services/api';
+import { lopForMonth } from './leaveLop';
 
 export default function PayRunWizardSteps({
   selectedRun,
@@ -733,23 +734,24 @@ export default function PayRunWizardSteps({
     return activeWorkforce.map(emp => {
       const runItem = selectedRunItems.find(item => item.employeeId === emp.id);
 
-      // Fetch approved leaves matching active cycle month (supports D/M/YYYY and YYYY-MM-DD formats)
-      const empLeaves = leaves.filter(l => {
+      const isEmpLeave = (l) => {
         const uId = String(l.userId || l.user_id || '').toLowerCase();
         const uName = String(l.userName || l.user_name || '').toLowerCase();
-        const sDate = l.startDate || l.start_date;
-        if (!sDate) return false;
-
         const empId = String(emp.id || '').toLowerCase();
         const empCode = String(emp.empCode || '').toLowerCase();
         const empName = String(emp.name || '').toLowerCase();
-
-        const isUserMatch = (
+        return (
           (empId && uId === empId) ||
           (empCode && (uId === empCode || uName === empCode)) ||
           (empName && (uId === empName || uName === empName))
         );
-        if (!isUserMatch) return false;
+      };
+
+      // Fetch approved leaves matching active cycle month (supports D/M/YYYY and YYYY-MM-DD formats)
+      const empLeaves = leaves.filter(l => {
+        const sDate = l.startDate || l.start_date;
+        if (!sDate) return false;
+        if (!isEmpLeave(l)) return false;
 
         const status = String(l.status || '').toLowerCase();
         if (status !== 'approved') return false;
@@ -785,10 +787,18 @@ export default function PayRunWizardSteps({
         const t = String(l.type || '').toLowerCase();
         return t.includes('sick') || t.includes('medical');
       }).reduce((sum, l) => sum + getLeaveDuration(l), 0);
-      const computedLopDays = empLeaves.filter(l => {
-        const t = String(l.type || '').toLowerCase();
-        return t.includes('lop') || t.includes('unpaid') || t.includes('loss of pay');
-      }).reduce((sum, l) => sum + getLeaveDuration(l), 0);
+      // LOP of approved leave falling in this month (the LOP part of EL/LOP requests and LOP leaves, by date).
+      // The server preview's figure is used once it arrives; this local count only fills the gap until then.
+      const serverPay = previewMap ? previewMap[String(emp.id)] || null : null;
+      const localLeaveLop = lopForMonth(leaves.filter(isEmpLeave), cycleYear, cycleMonth);
+      const leaveLopDays = serverPay && serverPay.leaveLopDays !== undefined ? Number(serverPay.leaveLopDays) : localLeaveLop.days;
+      const leaveLopDates = serverPay && Array.isArray(serverPay.leaveLop)
+        ? serverPay.leaveLop.flatMap(x => x.dates || []).sort()
+        : localLeaveLop.dates;
+      // Runs created since the monthly attendance register exist take LOP from it (server decides; see PayCalculator)
+      const registerLopDays = serverPay && serverPay.registerLopDays !== null && serverPay.registerLopDays !== undefined ? Number(serverPay.registerLopDays) : null;
+      const registerLopDates = serverPay && Array.isArray(serverPay.registerLopDates) ? serverPay.registerLopDates : [];
+      const registerLopNote = serverPay ? serverPay.registerLopNote || null : null;
 
       // Factor in local manual input edits for leaves
       const leavesSource = Object.keys(editedLeavesRef.current || {}).length > 0 ? editedLeavesRef.current : editedLeaves;
@@ -825,7 +835,7 @@ export default function PayRunWizardSteps({
       }
 
       // Factor in local manual input edits or DB overrides (matching by id, empCode, or name)
-      let lopDays = computedLopDays;
+      let lopDays = leaveLopDays;
       const lopSource = Object.keys(editedLopRef.current || {}).length > 0 ? editedLopRef.current : editedLop;
       const findLopVal = () => {
         if (lopSource[emp.id] !== undefined) return Number(lopSource[emp.id]);
@@ -843,9 +853,13 @@ export default function PayRunWizardSteps({
       const matchedLop = findLopVal();
       if (matchedLop !== undefined) {
         lopDays = matchedLop;
+      } else if (serverPay && serverPay.lopDays !== undefined) {
+        lopDays = Number(serverPay.lopDays); // what the server pays: leave LOP, or the stored figure of a paid run
       } else if (runItem && runItem.lopDays !== undefined) {
         lopDays = Number(runItem.lopDays);
       }
+      const lopFromRegister = matchedLop === undefined && !!serverPay && serverPay.lopSource === 'REGISTER';
+      const lopFromLeave = !lopFromRegister && matchedLop === undefined && leaveLopDays > 0 && lopDays === leaveLopDays;
 
       // Factor in edited working days if modified by user in wizard Step 1 or DB run item
       const wdSource = Object.keys(editedWorkingDaysRef.current || {}).length > 0 ? editedWorkingDaysRef.current : editedWorkingDays;
@@ -947,9 +961,7 @@ export default function PayRunWizardSteps({
       // Estimated net after post-gross deductions (Advance Salary recovery)
       const netAfterAdhoc = Math.max(0, earnedGross - totalDeductions);
 
-      // Server-calculated pay for this employee (identical to what Lock & Freeze stores)
-      const serverPay = previewMap ? previewMap[String(emp.id)] || null : null;
-
+      // serverPay (declared above): server-calculated pay for this employee, identical to what Lock & Freeze stores
       return {
         ...emp,
         serverPay,
@@ -966,6 +978,13 @@ export default function PayRunWizardSteps({
         slUsed: finalSl,
         customLeaves: finalCustomLeaves,
         lopDays,
+        leaveLopDays,
+        leaveLopDates,
+        lopFromLeave,
+        registerLopDays,
+        registerLopDates,
+        registerLopNote,
+        lopFromRegister,
         payableDays,
         earnedGross: serverPay ? Number(serverPay.grossEarned) || 0 : earnedGross,
         totalPayments,
@@ -1712,7 +1731,7 @@ export default function PayRunWizardSteps({
       <div className="card glass" style={{ padding: '20px 24px', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
         
         {/* Step Metadata Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div className="wizard-step-meta-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)' }}>
             Step {currentStep} of {totalSteps}: {stepsMeta[currentStep - 1].label}
           </span>
@@ -1737,7 +1756,8 @@ export default function PayRunWizardSteps({
         </div>
 
         {/* Horizontal Line Stepper */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', position: 'relative', margin: '10px 0' }}>
+        <div className="wizard-stepper-wrap">
+          <div className="wizard-stepper-inner" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', position: 'relative', margin: '10px 0', minWidth: '600px' }}>
           {/* Background Connecting Line */}
           <div style={{ position: 'absolute', top: '16px', left: '20px', right: '20px', height: '2px', background: 'rgba(255,255,255,0.06)', zIndex: 0 }}></div>
           {/* Active Progress Connecting Line */}
@@ -1775,6 +1795,7 @@ export default function PayRunWizardSteps({
               </div>
             );
           })}
+          </div>
         </div>
       </div>
 
@@ -1863,7 +1884,8 @@ export default function PayRunWizardSteps({
                 </div>
               </div>
 
-              <table className="table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <div className="payroll-table-wrap">
+                <table className="table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border-glass)', textAlign: 'left', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
                     <th style={{ padding: '10px' }}>EMPLOYEE</th>
@@ -2039,6 +2061,31 @@ export default function PayRunWizardSteps({
                           >
                             <i className="fa-solid fa-floppy-disk"></i> Save
                           </button>
+                          {p.lopFromLeave && (
+                            <span tabIndex={0} title={`LOP from approved leave: ${p.leaveLopDates.join(', ')}`} style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                              <i className="fa-solid fa-calendar-xmark" style={{ marginRight: '3px' }}></i>from leave
+                            </span>
+                          )}
+                          {p.lopFromRegister && (
+                            <span tabIndex={0} title={p.registerLopDates.length ? `LOP from the monthly attendance register (no clock-in and no EL, or LOP leave): ${p.registerLopDates.join(', ')}` : 'No LOP days in the monthly attendance register'} style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                              <i className="fa-solid fa-table-cells" style={{ marginRight: '3px' }}></i>from register
+                            </span>
+                          )}
+                          {!p.lopFromRegister && p.registerLopDays !== null && Number(p.lopDays) !== p.registerLopDays && (
+                            <span tabIndex={0} title={`The monthly attendance register has ${p.registerLopDays} LOP day(s): ${p.registerLopDates.join(', ')}. The value entered here is used instead.`} style={{ fontSize: '0.68rem', color: '#d97706', whiteSpace: 'nowrap' }}>
+                              register: {p.registerLopDays}
+                            </span>
+                          )}
+                          {p.registerLopNote === 'NO_ATTENDANCE' && (
+                            <span tabIndex={0} title="No clock-in at all this month, so LOP comes from approved leave instead of the register. Check the Monthly Register." style={{ fontSize: '0.68rem', color: '#d97706', whiteSpace: 'nowrap' }}>
+                              <i className="fa-solid fa-triangle-exclamation" style={{ marginRight: '3px' }}></i>no clock-ins
+                            </span>
+                          )}
+                          {!p.lopFromLeave && p.registerLopDays === null && p.leaveLopDays > 0 && Number(p.lopDays) !== p.leaveLopDays && (
+                            <span tabIndex={0} title={`Approved leave has ${p.leaveLopDays} LOP day(s) this month: ${p.leaveLopDates.join(', ')}. The value entered here is used instead.`} style={{ fontSize: '0.68rem', color: '#d97706', whiteSpace: 'nowrap' }}>
+                              leave: {p.leaveLopDays}
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td style={{ padding: '10px', fontWeight: 600 }}>{p.payableDays}</td>
@@ -2047,6 +2094,7 @@ export default function PayRunWizardSteps({
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
 
@@ -2054,7 +2102,8 @@ export default function PayRunWizardSteps({
           {currentStep === 2 && (
             <div>
               <h3 style={{ margin: '0 0 16px 0', fontSize: '1rem' }}>Active Joinees & Settlement List</h3>
-              <table className="table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <div className="payroll-table-wrap">
+                <table className="table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border-glass)', textAlign: 'left', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
                     <th style={{ padding: '10px' }}>EMPLOYEE</th>
@@ -2084,6 +2133,7 @@ export default function PayRunWizardSteps({
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
 
@@ -2116,7 +2166,8 @@ export default function PayRunWizardSteps({
               {Object.keys(appliedAdjustments).length > 0 && (
                 <div style={{ marginTop: '20px' }}>
                   <h4 style={{ fontSize: '0.9rem', marginBottom: '10px' }}>Applied Revisions & Bonuses</h4>
-                  <table className="table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <div className="payroll-table-wrap">
+                <table className="table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
                       <tr style={{ borderBottom: '1px solid var(--border-glass)', textAlign: 'left', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
                         <th style={{ padding: '10px' }}>EMPLOYEE</th>
@@ -2150,6 +2201,7 @@ export default function PayRunWizardSteps({
                       })}
                     </tbody>
                   </table>
+                  </div>
                 </div>
               )}
             </div>
@@ -2257,7 +2309,8 @@ export default function PayRunWizardSteps({
 
               {/* Applied Ledger Table */}
               <h4 style={{ fontSize: '0.9rem', marginBottom: '10px' }}>Applied Ad-hoc Adjustments</h4>
-              <table className="table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <div className="payroll-table-wrap">
+                <table className="table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border-glass)', textAlign: 'left', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
                     <th style={{ padding: '10px' }}>EMPLOYEE</th>
@@ -2303,6 +2356,7 @@ export default function PayRunWizardSteps({
                   )}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
 
@@ -2386,7 +2440,8 @@ export default function PayRunWizardSteps({
               </div>
 
               {/* Full Employee Table */}
-              <table className="table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <div className="payroll-table-wrap">
+                <table className="table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border-glass)', textAlign: 'left', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
                     <th style={{ padding: '10px' }}>EMPLOYEE</th>
@@ -2457,6 +2512,7 @@ export default function PayRunWizardSteps({
                   })}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
 
@@ -2466,7 +2522,7 @@ export default function PayRunWizardSteps({
               <h3 style={{ margin: '0 0 16px 0', fontSize: '1rem' }}>Configure Custom Statutory Overrides</h3>
               
               <form onSubmit={handleAddOverride} style={{ display: 'flex', flexDirection: 'column', gap: '12px', background: 'rgba(255,255,255,0.02)', padding: '20px', borderRadius: '12px', border: '1px solid var(--border-glass)', opacity: isLocked ? 0.65 : 1 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px' }}>
+                <div className="wizard-override-form-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
                   <div>
                     <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>Select Employee</label>
                     <select disabled={isLocked} required value={overrideEmp} onChange={e => setOverrideEmp(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--border-glass)', background: 'var(--bg-input)', color: 'var(--text-primary)' }}>
@@ -2522,41 +2578,43 @@ export default function PayRunWizardSteps({
                     No custom statutory overrides applied for this run cycle yet.
                   </div>
                 ) : (
-                  <table className="table" style={{ width: '100%', borderCollapse: 'collapse', borderRadius: '8px', overflow: 'hidden' }}>
-                    <thead>
-                      <tr style={{ borderBottom: '1px solid var(--border-glass)', textAlign: 'left', fontSize: '0.75rem', color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.03)' }}>
-                        <th style={{ padding: '10px 14px' }}>Employee</th>
-                        <th style={{ padding: '10px 14px' }}>Override Type</th>
-                        <th style={{ padding: '10px 14px' }}>Custom Amount</th>
-                        <th style={{ padding: '10px 14px' }}>Audit Rationale</th>
-                        <th style={{ padding: '10px 14px' }}>Applied At</th>
-                        <th style={{ padding: '10px 14px', textAlign: 'right' }}>Action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {appliedOverrides.map(item => (
-                        <tr key={item.id} style={{ borderBottom: '1px solid var(--border-glass)', fontSize: '0.85rem' }}>
-                          <td style={{ padding: '12px 14px', fontWeight: 600, color: 'var(--text-primary)' }}>{item.employeeName}</td>
-                          <td style={{ padding: '12px 14px' }}>
-                            <span style={{ background: 'rgba(79, 70, 229, 0.15)', color: 'var(--accent-primary)', padding: '3px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 600 }}>
-                              {item.overrideType}
-                            </span>
-                          </td>
-                          <td style={{ padding: '12px 14px', fontWeight: 700, color: 'var(--text-primary)' }}>₹{item.amount.toLocaleString()}</td>
-                          <td style={{ padding: '12px 14px', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>{item.reason}</td>
-                          <td style={{ padding: '12px 14px', color: 'var(--text-muted)', fontSize: '0.75rem' }}>{item.createdAt}</td>
-                          <td style={{ padding: '12px 14px', textAlign: 'right' }}>
-                            <button 
-                              onClick={() => handleRemoveOverride(item.id)} 
-                              style={{ background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.2)', padding: '4px 10px', borderRadius: '6px', fontSize: '0.75rem', cursor: 'pointer', fontWeight: 600 }}
-                            >
-                              <i className="fa-solid fa-trash" style={{ marginRight: '4px' }}></i> Remove
-                            </button>
-                          </td>
+                  <div className="payroll-table-wrap">
+                    <table className="table" style={{ width: '100%', borderCollapse: 'collapse', borderRadius: '8px', overflow: 'hidden' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid var(--border-glass)', textAlign: 'left', fontSize: '0.75rem', color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.03)' }}>
+                          <th style={{ padding: '10px 14px' }}>Employee</th>
+                          <th style={{ padding: '10px 14px' }}>Override Type</th>
+                          <th style={{ padding: '10px 14px' }}>Custom Amount</th>
+                          <th style={{ padding: '10px 14px' }}>Audit Rationale</th>
+                          <th style={{ padding: '10px 14px' }}>Applied At</th>
+                          <th style={{ padding: '10px 14px', textAlign: 'right' }}>Action</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {appliedOverrides.map(item => (
+                          <tr key={item.id} style={{ borderBottom: '1px solid var(--border-glass)', fontSize: '0.85rem' }}>
+                            <td style={{ padding: '12px 14px', fontWeight: 600, color: 'var(--text-primary)' }}>{item.employeeName}</td>
+                            <td style={{ padding: '12px 14px' }}>
+                              <span style={{ background: 'rgba(79, 70, 229, 0.15)', color: 'var(--accent-primary)', padding: '3px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 600 }}>
+                                {item.overrideType}
+                              </span>
+                            </td>
+                            <td style={{ padding: '12px 14px', fontWeight: 700, color: 'var(--text-primary)' }}>₹{item.amount.toLocaleString()}</td>
+                            <td style={{ padding: '12px 14px', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>{item.reason}</td>
+                            <td style={{ padding: '12px 14px', color: 'var(--text-muted)', fontSize: '0.75rem' }}>{item.createdAt}</td>
+                            <td style={{ padding: '12px 14px', textAlign: 'right' }}>
+                              <button 
+                                onClick={() => handleRemoveOverride(item.id)} 
+                                style={{ background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.2)', padding: '4px 10px', borderRadius: '6px', fontSize: '0.75rem', cursor: 'pointer', fontWeight: 600 }}
+                              >
+                                <i className="fa-solid fa-trash" style={{ marginRight: '4px' }}></i> Remove
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </div>
             </div>
@@ -2568,7 +2626,7 @@ export default function PayRunWizardSteps({
               <h3 style={{ margin: '0 0 16px 0', fontSize: '1rem' }}>Payroll Validation & Preview Engine</h3>
               
               {/* Warnings & Errors */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '24px' }}>
+              <div className="wizard-validation-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', marginBottom: '24px' }}>
                 <div style={{ background: 'rgba(239, 68, 68, 0.08)', padding: '16px', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
                   <h4 style={{ color: '#ef4444', margin: '0 0 10px 0', fontSize: '0.85rem' }}>
                     <i className="fa-solid fa-circle-xmark"></i> Blocking Errors ({validation.errors.length})
@@ -2636,7 +2694,8 @@ export default function PayRunWizardSteps({
 
               {/* Preview Table */}
               <h4 style={{ fontSize: '0.9rem', marginBottom: '10px' }}>Grand Ledger Preview</h4>
-              <table className="table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <div className="payroll-table-wrap">
+                <table className="table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border-glass)', textAlign: 'left', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
                     <th style={{ padding: '10px' }}>EMPLOYEE</th>
@@ -2740,6 +2799,7 @@ export default function PayRunWizardSteps({
                   </tr>
                 </tfoot>
               </table>
+              </div>
             </div>
           )}
 
@@ -2796,7 +2856,7 @@ export default function PayRunWizardSteps({
                   </div>
 
                   {/* Keka-Style All-Fields Detailed Salary Register Preview Table */}
-                  <div style={{ overflowX: 'auto' }}>
+                  <div className="payroll-table-wrap" style={{ overflowX: 'auto' }}>
                     <table className="table" style={{ width: '100%', borderCollapse: 'collapse', borderRadius: '8px', overflow: 'hidden', fontSize: '0.78rem' }}>
                       <thead>
                         <tr style={{ borderBottom: '1px solid var(--border-glass)', textAlign: 'left', background: 'rgba(255,255,255,0.04)', color: 'var(--text-secondary)' }}>
@@ -2966,8 +3026,8 @@ export default function PayRunWizardSteps({
 
         {/* UNIVERSAL EMPLOYEE COMPLIANCE & PAYOUT QUICK FIX MODAL WITH REACTOR PULSE GLOW */}
         {fixModalEmp && (
-          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(5px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
-            <div className="card glass reactor-glow-highlight" style={{ width: '540px', padding: '24px', borderRadius: '12px', background: 'var(--bg-dark)', border: '2px solid var(--accent-primary)', display: 'flex', flexDirection: 'column', gap: '16px', boxShadow: '0 12px 40px rgba(0,0,0,0.5)' }}>
+          <div className="payroll-modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(5px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+            <div className="card glass reactor-glow-highlight payroll-modal-content" style={{ width: '540px', padding: '24px', borderRadius: '12px', background: 'var(--bg-dark)', border: '2px solid var(--accent-primary)', display: 'flex', flexDirection: 'column', gap: '16px', boxShadow: '0 12px 40px rgba(0,0,0,0.5)' }}>
               
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-glass)', paddingBottom: '12px' }}>
                 <h3 style={{ margin: 0, fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-primary)' }}>
@@ -3083,8 +3143,8 @@ export default function PayRunWizardSteps({
 
         {/* STEP 7: DEDUCTIONS BREAKDOWN & EDITABLE OVERRIDE MODAL */}
         {deductionModalEmp && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, padding: '20px' }}>
-            <div style={{ background: '#1e293b', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.15)', padding: '24px', width: '100%', maxWidth: '650px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.7)', color: '#ffffff' }}>
+          <div className="payroll-modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, padding: '20px' }}>
+            <div className="payroll-modal-content" style={{ background: '#1e293b', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.15)', padding: '24px', width: '100%', maxWidth: '650px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.7)', color: '#ffffff' }}>
               
               {/* Header */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', borderBottom: '1px solid rgba(255,255,255,0.12)', paddingBottom: '14px' }}>
@@ -3349,8 +3409,8 @@ export default function PayRunWizardSteps({
 
         {/* STEP 7: CONFIRMATION POPUP MODAL BEFORE APPLYING OVERRIDE */}
         {showOverrideConfirm && deductionModalEmp && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 11000, padding: '20px' }}>
-            <div style={{ background: '#1e293b', borderRadius: '16px', border: '1px solid rgba(245, 158, 11, 0.5)', padding: '24px', width: '100%', maxWidth: '480px', boxShadow: '0 25px 50px rgba(0,0,0,0.7)', color: '#ffffff', textAlign: 'center' }}>
+          <div className="payroll-modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 11000, padding: '20px' }}>
+            <div className="payroll-modal-content" style={{ background: '#1e293b', borderRadius: '16px', border: '1px solid rgba(245, 158, 11, 0.5)', padding: '24px', width: '100%', maxWidth: '480px', boxShadow: '0 25px 50px rgba(0,0,0,0.7)', color: '#ffffff', textAlign: 'center' }}>
               
               <div style={{ fontSize: '2.8rem', color: '#f59e0b', marginBottom: '12px' }}>
                 <i className="fa-solid fa-triangle-exclamation"></i>

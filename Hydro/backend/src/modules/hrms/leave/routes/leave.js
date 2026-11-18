@@ -8,10 +8,27 @@ const { calculateEarnedLeaves } = require('../../../../core/utils/leaveCalculato
 const { getCachedEmployees, invalidateEmployeeCache } = require('../../../../core/utils/employeeCache');
 const LeaveAdjustment = require('../../../../shared/models/LeaveAdjustment');
 const LeaveBalanceService = require('../services/LeaveBalanceService');
+const SpecialLeaveService = require('../services/SpecialLeaveService');
+const WorkingDays = require('../services/WorkingDays');
+const { getEmployeeHolidayMap } = require('../../../../shared/services/EmployeeHolidayCalendar');
 
-// Helper to reliably find an employee by id, emp_code, or name
+// Helper to reliably find an employee by id, emp_code, or name, including legacy aliases
 async function findEmployee(identifier, name) {
   if (!identifier && !name) return null;
+  try {
+    const { resolveCanonicalEmployee } = require('../../../../core/utils/employeeCache');
+    const canonical = await resolveCanonicalEmployee(identifier || name);
+    const targetPk = canonical?.employee?.id || canonical?.canonicalId;
+    if (targetPk) {
+      const emp = await Employee.findByPk(targetPk);
+      if (emp) return emp;
+    }
+    if (canonical?.canonicalId) {
+      const emp = await Employee.findOne({ where: { empCode: canonical.canonicalId } });
+      if (emp) return emp;
+    }
+  } catch (e) {}
+
   let emp = null;
   if (identifier) {
     emp = await Employee.findOne({
@@ -30,6 +47,38 @@ async function findEmployee(identifier, name) {
   }
   return emp;
 }
+
+// "Marriage Leave" for a special leave, "Earned Leave leave" (unchanged wording) otherwise
+const requestLabel = (leave) => (leave.leaveCategory ? leave.type : `${leave.type} leave`);
+
+async function notifyAdminsOfLeaveRequest(newLeave, userName, startDate, endDate) {
+  try {
+    const admins = await Employee.findAll({ where: { role: 'ADMIN', status: 'ACTIVE' } });
+    const HeartbeatMonitorService = require('../../../../shared/services/HeartbeatMonitorService');
+    for (const admin of admins) {
+      if (admin.fcmToken) {
+        await HeartbeatMonitorService.sendPush(
+          admin.fcmToken,
+          'New Leave Request',
+          `${userName} applied for ${requestLabel(newLeave)} (${startDate} to ${endDate}).`,
+          { type: 'leave_request', leaveId: newLeave.id }
+        );
+      }
+    }
+  } catch (notifErr) {
+    console.warn("Admin leave notification failed:", notifErr.message);
+  }
+}
+
+// GET /categories - active special leave categories for the app's "Leave category" dropdown
+router.get('/categories', async (req, res) => {
+  try {
+    return res.status(200).json(await SpecialLeaveService.listActiveCategories());
+  } catch (error) {
+    console.error('Error fetching leave categories:', error);
+    return res.status(500).json({ error: 'Failed to load leave categories.' });
+  }
+});
 
 // GET all leaves (Admin) or leaves for a specific user
 router.get('/', async (req, res) => {
@@ -89,6 +138,7 @@ router.get('/', async (req, res) => {
         leaveObj.leavesRemaining = 15;
       }
       leaveObj.actionBy = leave.actionBy || leaveObj.action_by || null;
+      leaveObj.category = leaveObj.leaveCategory || null; // special leave code, null for ordinary EL/LOP leave
       return leaveObj;
     });
 
@@ -102,23 +152,45 @@ router.get('/', async (req, res) => {
 // POST Apply for a leave
 router.post('/', async (req, res) => {
   try {
-    const { userId, userName, startDate, endDate, reason } = req.body;
-    
+    const { userId, userName, startDate, endDate, reason, category } = req.body;
+
     if (!userId || !userName || !startDate || !endDate || !reason) {
       return res.status(400).json({ error: 'Missing required leave fields.' });
     }
 
-    // Calculate duration in days (inclusive)
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    const timeDiff = end.getTime() - start.getTime();
-    const calculatedDays = Math.round(timeDiff / (1000 * 3600 * 24)) + 1;
-    const finalTotalDays = Math.max(1, calculatedDays);
+    // Special leave (Marriage / Paternity / Maternity): its own allowance, so no EL balance, EL or LOP.
+    if (SpecialLeaveService.hasCategory(category)) {
+      const fields = await SpecialLeaveService.buildSpecialLeave({ category, startDate, endDate });
+      const emp = await findEmployee(userId, userName);
+      if (!emp) {
+        return res.status(404).json({ error: 'Employee not found.' });
+      }
+      const specialLeave = await Leave.create({
+        ...fields,
+        userId: emp.empCode || emp.id,
+        userName: emp.name || userName,
+        reason,
+        status: 'pending',
+        appliedAt: Date.now()
+      });
+      await notifyAdminsOfLeaveRequest(specialLeave, specialLeave.userName, specialLeave.startDate, specialLeave.endDate);
+      return res.status(201).json({ ...specialLeave.toJSON(), category: specialLeave.leaveCategory });
+    }
 
     const emp = await findEmployee(userId, userName);
     if (!emp) {
       return res.status(404).json({ error: 'Employee not found.' });
     }
+
+    // Only working days count: Sundays and holidays in this employee's own calendar use no EL or LOP.
+    const days = WorkingDays.splitLeaveDays(startDate, endDate, await getEmployeeHolidayMap(emp));
+    if (!days.all.length) {
+      return res.status(400).json({ error: 'Invalid leave dates.' });
+    }
+    if (!days.working.length) {
+      return res.status(400).json({ error: 'The selected dates are all Sundays or holidays, so no leave is needed.' });
+    }
+    const finalTotalDays = days.working.length;
 
     const dynamicLeaves = calculateEarnedLeaves(emp.joiningDate || emp.createdAt);
     const rawAllowed = emp.allowed_leaves !== undefined ? emp.allowed_leaves : emp.allowedLeaves;
@@ -136,6 +208,7 @@ router.post('/', async (req, res) => {
     const pendingEl = await Leave.sum('elDays', {
       where: {
         status: 'pending',
+        leaveCategory: null,
         [Op.or]: [
           sequelize.where(sequelize.fn('lower', sequelize.col('user_id')), String(emp.empCode || emp.id).toLowerCase()),
           sequelize.where(sequelize.fn('lower', sequelize.col('user_id')), String(emp.id).toLowerCase())
@@ -171,29 +244,18 @@ router.post('/', async (req, res) => {
       appliedAt: Date.now(),
       elDays: finalElDays,
       lopDays: finalLopDays,
-      totalDays: finalTotalDays
+      totalDays: finalTotalDays,
+      workingDates: days.working
     });
 
     // --- PUSH NOTIFICATION LOGIC FOR ADMIN ---
-    try {
-      const admins = await Employee.findAll({ where: { role: 'ADMIN', status: 'ACTIVE' } });
-      const HeartbeatMonitorService = require('../../../../shared/services/HeartbeatMonitorService');
-      for (const admin of admins) {
-        if (admin.fcmToken) {
-          await HeartbeatMonitorService.sendPush(
-            admin.fcmToken,
-            'New Leave Request',
-            `${finalUserName} applied for ${newLeave.type} leave (${startDate} to ${endDate}).`,
-            { type: 'leave_request', leaveId: newLeave.id }
-          );
-        }
-      }
-    } catch (notifErr) {
-      console.warn("Admin leave notification failed:", notifErr.message);
-    }
-    
+    await notifyAdminsOfLeaveRequest(newLeave, finalUserName, startDate, endDate);
+
     return res.status(201).json(newLeave);
   } catch (error) {
+    if (error instanceof SpecialLeaveService.SpecialLeaveError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('Error creating leave application:', error);
     return res.status(500).json({ error: error.message });
   }
@@ -217,14 +279,16 @@ router.patch('/:id/status', requireRole(['ADMIN']), async (req, res) => {
     }
 
     const emp = await findEmployee(leave.userId, leave.userName);
-    
+    // Special leave has its own allowance: approving or revoking it only changes the status.
+    const usesEl = !leave.leaveCategory;
+
     // If the status is changing to approved, we increment consumedLeaves for that employee by only their applied EL days
-    if (status === 'approved' && leave.status !== 'approved') {
+    if (usesEl && status === 'approved' && leave.status !== 'approved') {
       if (emp) {
         emp.consumedLeaves = (emp.consumedLeaves || 0) + (leave.elDays || 0);
         await emp.save();
       }
-    } else if (status !== 'approved' && leave.status === 'approved') {
+    } else if (usesEl && status !== 'approved' && leave.status === 'approved') {
       // If we revoke approval, decrement consumedLeaves by the same EL days amount
       if (emp) {
         emp.consumedLeaves = Math.max(0, (emp.consumedLeaves || 0) - (leave.elDays || 0));
@@ -247,7 +311,7 @@ router.patch('/:id/status', requireRole(['ADMIN']), async (req, res) => {
         await HeartbeatMonitorService.sendPush(
           emp.fcmToken,
           `Leave ${status}`,
-          `Your ${leave.type} leave request from ${leave.startDate} has been ${status.toLowerCase()}.`,
+          `Your ${requestLabel(leave)} request from ${leave.startDate} has been ${status.toLowerCase()}.`,
           { type: 'leave_status_update', leaveId: leave.id, status }
         );
       }
@@ -480,7 +544,8 @@ router.get('/balances', async (req, res) => {
     // Pending leave requests (not yet counted in any balance) for the filtered employees in this year.
     const idSet = new Set();
     for (const e of employees) { idSet.add(String(e.id).toLowerCase()); if (e.empCode) idSet.add(String(e.empCode).toLowerCase()); }
-    const pending = await Leave.findAll({ attributes: ['userId', 'startDate'], where: { status: 'pending' }, raw: true });
+    // Special leave is never deducted, so it is not counted here.
+    const pending = await Leave.findAll({ attributes: ['userId', 'startDate'], where: { status: 'pending', leaveCategory: null }, raw: true });
     const pendingLeaveRequests = pending.filter((l) => idSet.has(String(l.userId || '').toLowerCase()) && String(l.startDate || '').startsWith(String(targetYear))).length;
 
     const total = ledgers.length;

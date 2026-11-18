@@ -139,7 +139,9 @@ router.post('/', (req, res, next) => {
     const siteId = matchedSite ? matchedSite.id : null;
 
     // 2. Dynamic Cluster classification
+    // Grouping into a cluster is a convenience: if it fails the photo is still saved, just without a cluster
     let clusterId = null;
+    try {
     if (latitude && longitude) {
       const Cluster = require('../../../../shared/models/Cluster');
       const ClusterSetting = require('../../../../shared/models/ClusterSetting');
@@ -203,6 +205,10 @@ router.post('/', (req, res, next) => {
         });
         clusterId = newCluster.id;
       }
+    }
+    } catch (clusterError) {
+      console.error('Cluster classification failed, saving the photo without a cluster:', clusterError.message);
+      clusterId = null;
     }
 
     const newMedia = await Media.create({

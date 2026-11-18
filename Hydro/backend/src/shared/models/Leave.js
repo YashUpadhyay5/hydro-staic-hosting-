@@ -67,6 +67,26 @@ const Leave = sequelize.define('Leave', {
     type: DataTypes.STRING,
     field: 'action_by',
     allowNull: true,
+  },
+  leaveCategory: {
+    type: DataTypes.STRING,
+    field: 'leave_category',
+    allowNull: true, // NULL = ordinary EL/LOP leave; otherwise a location_leave_categories code (never uses EL)
+  },
+  // The request's working dates (Sundays and the employee's holidays skipped), fixed when it was applied.
+  // EL is charged to the first elDays of them. NULL on older requests, which keep calendar days.
+  workingDates: {
+    type: DataTypes.TEXT,
+    field: 'working_dates',
+    allowNull: true,
+    get() {
+      const raw = this.getDataValue('workingDates');
+      if (raw === null || raw === undefined) return null;
+      try { return JSON.parse(raw); } catch { return null; }
+    },
+    set(value) {
+      this.setDataValue('workingDates', Array.isArray(value) ? JSON.stringify(value) : null);
+    }
   }
 }, {
   tableName: 'location_leaves',

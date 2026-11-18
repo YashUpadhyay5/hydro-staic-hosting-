@@ -1,9 +1,144 @@
 import { AttendanceColumnGenerator } from './AttendanceColumnGenerator.js';
+import { parseDateOnly } from '../../utils/helpers.js';
 
 export class DataMapper {
+  // Every employee the Reports tab loaded, so the employer (the Managing Director) is found
+  // even when a location or status filter leaves them out of the form's employee list.
+  static directory = [];
+
+  // Establishment name printed on the statutory forms (employee legal-entity fields are inconsistent)
+  static COMPANY_NAME = 'HYDROMATERIALS-PRIVATE-LIMITED';
+  static COMPANY_CITY = 'Chennai';
+
+  static setDirectory(list) {
+    this.directory = Array.isArray(list) ? list : [];
+  }
+
+  /**
+   * The employee whose job title or designation is Managing Director, active ones first.
+   */
+  static managingDirectorOf(employees = []) {
+    const isMd = (e) => /managing\s+director/i.test(`${e.jobTitle || e.job_title || ''} ${e.designation || ''}`);
+    const isActive = (e) => String(e.status || 'ACTIVE').toUpperCase() === 'ACTIVE';
+    const pool = [...(employees || []), ...this.directory];
+    return pool.find(e => e && isMd(e) && isActive(e)) || pool.find(e => e && isMd(e)) || null;
+  }
+
+  /**
+   * Name of the employer printed on the statutory forms: the Managing Director.
+   */
+  static employerNameOf(employees = []) {
+    const md = this.managingDirectorOf(employees);
+    if (md && md.name) return md.name;
+    const emp0 = employees[0] || {};
+    const adminEmp = employees.find(e => String(e.role || '').toUpperCase() === 'ADMIN');
+    return adminEmp?.name || emp0.reportingManager || emp0.reporting_manager || 'Director';
+  }
+
+  /**
+   * Head count of the employees paid in the pay run - the ones Form W lists.
+   */
+  static paidHeadCount(employees = [], payslips = []) {
+    const paid = (employees || []).filter(emp => this.findRunItem(payslips, emp));
+    const genderOf = (e) => String(e.gender || '').trim().toLowerCase();
+    return {
+      total: paid.length,
+      male: paid.filter(e => ['male', 'm'].includes(genderOf(e))).length,
+      female: paid.filter(e => ['female', 'f'].includes(genderOf(e))).length
+    };
+  }
+
   /**
    * Universal entity matcher across DB tables
    */
+  static INACTIVE_STATUSES = new Set(['PAST', 'INACTIVE', 'DEACTIVATED']);
+
+  static monthBounds(selectedMonth) {
+    const match = String(selectedMonth || '').trim().match(/^(\d{4})-(\d{1,2})/);
+    const now = new Date();
+    const year = match ? parseInt(match[1], 10) : now.getFullYear();
+    const month = match ? parseInt(match[2], 10) : (now.getMonth() + 1);
+    return {
+      monthStart: new Date(year, month - 1, 1, 0, 0, 0, 0),
+      monthEnd: new Date(year, month, 0, 23, 59, 59, 999)
+    };
+  }
+
+  static isInactiveStatus(emp) {
+    const st = String(emp?.status || 'ACTIVE').trim().toUpperCase();
+    return this.INACTIVE_STATUSES.has(st);
+  }
+
+  /**
+   * Filters employees eligible to appear in statutory compliance forms for selectedMonth.
+   * Aligns Form S, U, V Muster, V Register, and X with Form W and Form T pay-run rules.
+   */
+  static eligibleEmployeesForMonth(employees = [], selectedMonth = new Date().toISOString().slice(0, 7), payslips = [], options = {}) {
+    const list = Array.isArray(employees) ? employees.filter(Boolean) : [];
+    if (options?.includeInactive === true) {
+      return list;
+    }
+
+    const hasRun = Array.isArray(payslips) && payslips.some(it => it && (it.employeeId != null || it.employee_id != null));
+    const { monthStart, monthEnd } = this.monthBounds(selectedMonth);
+
+    return list.filter(emp => {
+      if (hasRun && this.findRunItem(payslips, emp)) {
+        return true;
+      }
+
+      const inactive = this.isInactiveStatus(emp);
+      if (hasRun && (inactive || this.isSkippedExitInRun(payslips, emp))) {
+        return false;
+      }
+
+      const joinRaw = emp.joiningDate || emp.joining_date || emp.doj;
+      const joinDate = joinRaw ? parseDateOnly(joinRaw, false) : null;
+      if (joinDate && joinDate > monthEnd) {
+        return false;
+      }
+
+      const exitRaw = emp.exitDate || emp.exit_date;
+      const exitDate = exitRaw ? parseDateOnly(exitRaw, true) : null;
+      if (exitDate && exitDate < monthStart) {
+        return false;
+      }
+
+      if (inactive && !exitDate) {
+        return false;
+      }
+
+      return true;
+    });
+  }
+
+  /**
+   * Derives Form U exit columns from the employee record for selectedMonth.
+   */
+  static formUExitFields(emp, selectedMonth) {
+    const { monthEnd } = this.monthBounds(selectedMonth);
+    const rawExit = emp?.exitDate || emp?.exit_date || null;
+    const parsedExit = rawExit ? parseDateOnly(rawExit, false) : null;
+    const showExit = Boolean(parsedExit && (!monthEnd || parsedExit <= monthEnd));
+    const exitReason = emp?.exitReason || emp?.exit_reason || emp?.exitTerminationReason || emp?.exit_termination_reason || emp?.exitComments || '';
+    const isExited = showExit || (!parsedExit && this.isInactiveStatus(emp));
+    return {
+      exitDate: showExit ? this.formatDate(rawExit) : '-',
+      exitReason: showExit && exitReason ? exitReason : '-',
+      remarks: isExited ? (exitReason ? `Exited (${exitReason})` : 'Exited / Inactive') : 'Active'
+    };
+  }
+
+  /**
+   * Earned leave monthly accrual (0 for unpaid inactive employees, 1 otherwise).
+   */
+  static earnedLeaveAccruedForMonth(emp, payslips = []) {
+    if (this.isInactiveStatus(emp) && !this.findRunItem(payslips, emp)) {
+      return 0;
+    }
+    return 1;
+  }
+
   static matchesEmp(record, emp) {
     if (!record || !emp) return false;
     const rUser = String(record.userId || record.user_id || record.userName || record.user_name || record.employeeId || record.employee_id || '').trim().toLowerCase();
@@ -59,14 +194,13 @@ export class DataMapper {
    */
   static mapMetadata(employees = [], selectedMonth = new Date().toISOString().slice(0, 7)) {
     const emp0 = employees[0] || {};
-    const companyName = emp0.legalEntity || emp0.legal_entity || emp0.companyName || 'Hydromaterials Pvt Ltd';
-    const companyAddress = emp0.location || emp0.address || '34, Third Floor, Block-2, SIDCO Electronic Complex, Guindy Industrial Estate, Chennai Tamil Nadu 600032';
+    const companyName = DataMapper.COMPANY_NAME;
+    const companyAddress = DataMapper.COMPANY_CITY;
 
-    const adminEmp = employees.find(e => String(e.role || '').toUpperCase() === 'ADMIN');
-    const employerName = adminEmp?.name || emp0.reportingManager || emp0.reporting_manager || 'Director';
-    const managerName = adminEmp?.name || emp0.reportingManager || emp0.reporting_manager || 'Managing Director';
+    const employerName = this.employerNameOf(employees);
+    const managerName = employerName;
     const currentYear = new Date().getFullYear();
-    const regNo = emp0.legalEntity ? `REG-${String(emp0.legalEntity).toUpperCase().replace(/\s+/g, '')}-${currentYear}` : `REG-HMPL-${currentYear}`;
+    const regNo = `REG-HMPL-${currentYear}`;
 
     const maleCount = employees.filter(e => {
       const g = String(e.gender || '').trim().toLowerCase();
@@ -170,6 +304,7 @@ export class DataMapper {
       ].filter(Boolean).join(', ') || '-';
       const phone = emp.phone_no || emp.phoneNo || emp.mobile || '-';
       const email = emp.email || '-';
+      const exitInfo = this.formUExitFields(emp, selectedMonth);
 
       return [
         idx + 1,          // Col 1: Serial Number
@@ -193,9 +328,9 @@ export class DataMapper {
         phone,            // Col 19: Mobile Number
         email,            // Col 20: e-mail I.D
         '-',              // Col 21: Specimen Signature / Thump Impression
-        '-',              // Col 22: Date of Exit
-        '-',              // Col 23: Reason for Exit
-        'Active'          // Col 24: Remarks
+        exitInfo.exitDate,   // Col 22: Date of Exit
+        exitInfo.exitReason, // Col 23: Reason for Exit
+        exitInfo.remarks     // Col 24: Remarks
       ];
     });
   }
@@ -272,7 +407,7 @@ export class DataMapper {
       for (let day = 1; day <= daysCount; day++) {
         const dayPad = String(day).padStart(2, '0');
         const dateStr = `${year}-${month}-${dayPad}`;
-        const symbol = AttendanceColumnGenerator.getAttendanceSymbol(dateStr, empPunches, empLeaves, emp.weekly_offs || emp.weeklyOffs);
+        const symbol = AttendanceColumnGenerator.getAttendanceSymbol(dateStr, empPunches, empLeaves, emp.weekly_offs || emp.weeklyOffs, emp);
         dailySymbols.push(symbol);
       }
 
@@ -292,14 +427,22 @@ export class DataMapper {
    * Finds an employee's stored payroll item: exact employee id, else the employee code
    * (no fuzzy name matching - a wrong match would print someone else's wages).
    */
-  static findRunItem(items = [], emp) {
-    const usable = (items || []).filter(it => it && it.status !== 'SKIPPED_EXIT');
-    const empId = String(emp.id || '').trim().toLowerCase();
-    const empCode = String(emp.empCode || emp.emp_code || '').trim().toLowerCase();
+  static matchRunItem(items = [], emp, predicate) {
+    const empId = String(emp?.id || '').trim().toLowerCase();
+    const empCode = String(emp?.empCode || emp?.emp_code || '').trim().toLowerCase();
     const itemEmpId = (it) => String(it.employeeId ?? it.employee_id ?? '').trim().toLowerCase();
-    return usable.find(it => empId && itemEmpId(it) === empId)
-      || usable.find(it => empCode && itemEmpId(it) === empCode)
+    const filtered = (items || []).filter(it => it && (!predicate || predicate(it)));
+    return filtered.find(it => empId && itemEmpId(it) === empId)
+      || filtered.find(it => empCode && itemEmpId(it) === empCode)
       || null;
+  }
+
+  static isSkippedExitInRun(items = [], emp) {
+    return Boolean(this.matchRunItem(items, emp, it => it.status === 'SKIPPED_EXIT'));
+  }
+
+  static findRunItem(items = [], emp) {
+    return this.matchRunItem(items, emp, it => it.status !== 'SKIPPED_EXIT');
   }
 
   /**

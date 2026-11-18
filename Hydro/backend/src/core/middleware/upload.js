@@ -99,6 +99,7 @@ defaultUpload.imagesUpload = defaultUpload;
 defaultUpload.documentsUpload = createUploadMiddleware('documents', null, 25 * 1024 * 1024);
 defaultUpload.invoicesUpload = createUploadMiddleware('invoices', ['image/*', 'application/pdf'], 10 * 1024 * 1024);
 defaultUpload.attendanceUpload = createUploadMiddleware('attendance', ['image/*'], 5 * 1024 * 1024);
+defaultUpload.regularizationUpload = createUploadMiddleware('regularization', ['image/*', 'application/pdf'], 10 * 1024 * 1024);
 defaultUpload.profileUpload = createUploadMiddleware('profile', ['image/*'], 5 * 1024 * 1024);
 
 module.exports = defaultUpload;

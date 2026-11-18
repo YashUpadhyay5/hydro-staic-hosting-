@@ -15,7 +15,7 @@ export default function BenefitsTab({
   handleUpdateClaim
 }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 2.5fr', gap: '20px' }}>
+    <div className="payroll-split-2col" style={{ display: 'grid', gridTemplateColumns: '1fr 2.5fr', gap: '20px' }}>
       <div className="card glass" style={{ padding: '20px', borderRadius: '12px', height: 'fit-content' }}>
         <h3 style={{ margin: '0 0 16px 0', fontSize: '1rem' }}>Log Out-of-Pocket Claim</h3>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -70,47 +70,49 @@ export default function BenefitsTab({
 
       <div className="card glass" style={{ padding: '24px', borderRadius: '12px' }}>
         <h3 style={{ margin: '0 0 16px 0', fontSize: '1.1rem' }}>Pending Claims & Reimbursements</h3>
-        <table className="table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid var(--border-glass)', textAlign: 'left' }}>
-              <th style={{ padding: '12px', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>EMPLOYEE</th>
-              <th style={{ padding: '12px', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>CLAIM TITLE</th>
-              <th style={{ padding: '12px', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>CATEGORY</th>
-              <th style={{ padding: '12px', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>AMOUNT</th>
-              <th style={{ padding: '12px', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>STATUS</th>
-              <th style={{ padding: '12px', fontSize: '0.8rem', color: 'var(--text-secondary)', textAlign: 'right' }}>ACTION</th>
-            </tr>
-          </thead>
-          <tbody>
-            {reimbursements.map(claim => (
-              <tr key={claim.id} style={{ borderBottom: '1px solid rgba(0,0,0,0.03)' }}>
-                <td style={{ padding: '12px', fontWeight: 600 }}>{claim.employee ? claim.employee.name : claim.employeeId}</td>
-                <td style={{ padding: '12px' }}>{claim.title}</td>
-                <td style={{ padding: '12px', fontSize: '0.8rem' }}>{claim.category}</td>
-                <td style={{ padding: '12px', fontWeight: 600 }}>₹{claim.amount.toLocaleString()}</td>
-                <td style={{ padding: '12px' }}>
-                  <span style={{
-                    padding: '4px 8px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 600,
-                    background: claim.status === 'APPROVED' ? 'rgba(16, 185, 129, 0.1)' : claim.status === 'REJECTED' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(245, 158, 11, 0.1)',
-                    color: claim.status === 'APPROVED' ? '#10b981' : claim.status === 'REJECTED' ? '#ef4444' : '#f59e0b'
-                  }}>{claim.status}</span>
-                </td>
-                <td style={{ padding: '12px', textAlign: 'right' }}>
-                  {claim.status === 'PENDING' && (
-                    <div style={{ display: 'flex', gap: '4px', justifyContent: 'flex-end' }}>
-                      <button className="btn btn-primary" style={{ padding: '4px 8px', fontSize: '0.7rem', background: '#10b981' }} onClick={() => handleUpdateClaim(claim.id, 'APPROVED')}>
-                        Approve
-                      </button>
-                      <button className="btn btn-outline" style={{ padding: '4px 8px', fontSize: '0.7rem', color: '#ef4444', borderColor: '#ef4444' }} onClick={() => handleUpdateClaim(claim.id, 'REJECTED')}>
-                        Reject
-                      </button>
-                    </div>
-                  )}
-                </td>
+        <div className="payroll-table-wrap">
+          <table className="table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid var(--border-glass)', textAlign: 'left' }}>
+                <th style={{ padding: '12px', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>EMPLOYEE</th>
+                <th style={{ padding: '12px', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>CLAIM TITLE</th>
+                <th style={{ padding: '12px', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>CATEGORY</th>
+                <th style={{ padding: '12px', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>AMOUNT</th>
+                <th style={{ padding: '12px', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>STATUS</th>
+                <th style={{ padding: '12px', fontSize: '0.8rem', color: 'var(--text-secondary)', textAlign: 'right' }}>ACTION</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {reimbursements.map(claim => (
+                <tr key={claim.id} style={{ borderBottom: '1px solid rgba(0,0,0,0.03)' }}>
+                  <td style={{ padding: '12px', fontWeight: 600 }}>{claim.employee ? claim.employee.name : claim.employeeId}</td>
+                  <td style={{ padding: '12px' }}>{claim.title}</td>
+                  <td style={{ padding: '12px', fontSize: '0.8rem' }}>{claim.category}</td>
+                  <td style={{ padding: '12px', fontWeight: 600 }}>₹{claim.amount.toLocaleString()}</td>
+                  <td style={{ padding: '12px' }}>
+                    <span style={{
+                      padding: '4px 8px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 600,
+                      background: claim.status === 'APPROVED' ? 'rgba(16, 185, 129, 0.1)' : claim.status === 'REJECTED' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(245, 158, 11, 0.1)',
+                      color: claim.status === 'APPROVED' ? '#10b981' : claim.status === 'REJECTED' ? '#ef4444' : '#f59e0b'
+                    }}>{claim.status}</span>
+                  </td>
+                  <td style={{ padding: '12px', textAlign: 'right' }}>
+                    {claim.status === 'PENDING' && (
+                      <div style={{ display: 'flex', gap: '4px', justifyContent: 'flex-end' }}>
+                        <button className="btn btn-primary" style={{ padding: '4px 8px', fontSize: '0.7rem', background: '#10b981' }} onClick={() => handleUpdateClaim(claim.id, 'APPROVED')}>
+                          Approve
+                        </button>
+                        <button className="btn btn-outline" style={{ padding: '4px 8px', fontSize: '0.7rem', color: '#ef4444', borderColor: '#ef4444' }} onClick={() => handleUpdateClaim(claim.id, 'REJECTED')}>
+                          Reject
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
