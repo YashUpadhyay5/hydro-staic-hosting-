@@ -351,18 +351,19 @@ class EmailService {
       ? Number(netPay).toLocaleString('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 })
       : null;
 
-    const subject = `[Hydro HRMS] Salary Payslip for ${monthDisplay} - ${cleanName}`;
+    const subject = `Payslip for ${monthDisplay} - ${cleanName}`;
 
     // Resolve and attach PDF
     const attachments = [];
     const resolvedPdf = this.resolvePayslipPdf(pdfPath);
+    let attachedFileName = `Payslip_${cleanMonth}.pdf`;
 
     if (resolvedPdf) {
       try {
         const fileBuffer = fs.readFileSync(resolvedPdf);
-        const safeFileName = `Payslip_${cleanMonth}_${(empCode || cleanName).replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`;
+        attachedFileName = `Payslip_${cleanMonth}_${(empCode || cleanName).replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`;
         attachments.push({
-          filename: safeFileName,
+          filename: attachedFileName,
           content: fileBuffer,
           path: resolvedPdf
         });
@@ -375,106 +376,160 @@ class EmailService {
 
     const html = `
     <!DOCTYPE html>
-    <html>
+    <html lang="en">
     <head>
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Salary Payslip Receipt</title>
-      <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f1f5f9; margin: 0; padding: 24px; color: #1e293b; }
-        .card { max-width: 540px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.06); border: 1px solid #e2e8f0; }
-        .header { background: linear-gradient(135deg, #1e40af, #3b82f6); padding: 32px 28px; text-align: center; color: #ffffff; }
-        .header h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
-        .header p { margin: 6px 0 0; font-size: 13.5px; opacity: 0.92; }
-        .content { padding: 32px 28px; }
-        .greeting { font-size: 16px; font-weight: 600; margin-bottom: 14px; color: #0f172a; }
-        .text { font-size: 14px; line-height: 1.6; color: #475569; margin-bottom: 24px; }
-        .summary-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; text-align: center; margin: 24px 0; }
-        .summary-label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; }
-        .summary-amount { font-size: 32px; font-weight: 800; color: #059669; margin: 6px 0; }
-        .summary-sub { font-size: 12.5px; color: #64748b; }
-        .detail-table { width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 13.5px; }
-        .detail-table td { padding: 10px 12px; border-bottom: 1px solid #f1f5f9; }
-        .detail-table td.label { color: #64748b; font-weight: 500; width: 42%; }
-        .detail-table td.value { color: #0f172a; font-weight: 600; }
-        .pdf-note { background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 10px; padding: 14px 18px; font-size: 13px; color: #065f46; margin-bottom: 24px; display: flex; align-items: center; gap: 10px; }
-        .security-note { background: #fffbeb; border-left: 4px solid #f59e0b; padding: 12px 16px; border-radius: 6px; font-size: 12px; color: #92400e; line-height: 1.5; margin-bottom: 24px; }
-        .footer { background: #f8fafc; padding: 20px 28px; text-align: center; font-size: 11.5px; color: #94a3b8; border-top: 1px solid #f1f5f9; }
-      </style>
+      <title>Payslip for ${monthDisplay}</title>
     </head>
-    <body>
-      <div class="card">
-        <div class="header">
-          <h1>Hydro HRMS • Payroll Disbursal</h1>
-          <p>Official Salary Slip & Payment Confirmation</p>
-        </div>
-        <div class="content">
-          <div class="greeting">Dear ${cleanName}${cleanCode},</div>
-          <div class="text">
-            Your salary for the pay period <strong>${monthDisplay}</strong> has been calculated and processed by Hydro Materials Management.
-          </div>
+    <body style="margin: 0; padding: 0; background-color: #f4f6f8; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; -webkit-font-smoothing: antialiased; color: #1e293b;">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f4f6f8; padding: 32px 16px;">
+        <tr>
+          <td align="center">
+            <!-- Main Email Container -->
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 560px; background-color: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.04);">
+              
+              <!-- Company Header -->
+              <tr>
+                <td style="padding: 24px 32px; border-bottom: 1px solid #edf2f7;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                      <td valign="middle">
+                        <div style="font-size: 15px; font-weight: 700; color: #0f172a; letter-spacing: -0.2px; text-transform: uppercase;">
+                          Hydro Materials Management
+                        </div>
+                        <div style="font-size: 11.5px; color: #64748b; margin-top: 2px;">
+                          HR & Payroll Services
+                        </div>
+                      </td>
+                      <td align="right" valign="middle">
+                        <span style="display: inline-block; padding: 4px 10px; background-color: #f1f5f9; color: #475569; font-size: 11px; font-weight: 600; border-radius: 4px; letter-spacing: 0.5px;">
+                          PAYSLIP
+                        </span>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
 
-          ${formattedNetPay ? `
-          <div class="summary-box">
-            <div class="summary-label">Net Salary Disbursed</div>
-            <div class="summary-amount">${formattedNetPay}</div>
-            <div class="summary-sub">Pay Cycle: ${monthDisplay}</div>
-          </div>
-          ` : ''}
+              <!-- Greeting & Body -->
+              <tr>
+                <td style="padding: 28px 32px 16px 32px;">
+                  <div style="font-size: 15px; font-weight: 600; color: #0f172a; margin-bottom: 10px;">
+                    Hi ${cleanName},
+                  </div>
+                  <div style="font-size: 13.5px; line-height: 1.6; color: #475569;">
+                    Your payslip for the month of <strong>${monthDisplay}</strong> has been generated and is attached to this email. A brief summary of your compensation is detailed below.
+                  </div>
+                </td>
+              </tr>
 
-          <table class="detail-table">
-            <tr>
-              <td class="label">Employee Name:</td>
-              <td class="value">${cleanName}</td>
-            </tr>
-            ${empCode ? `
-            <tr>
-              <td class="label">Employee Code:</td>
-              <td class="value">${empCode}</td>
-            </tr>
-            ` : ''}
-            ${designation ? `
-            <tr>
-              <td class="label">Designation:</td>
-              <td class="value">${designation}</td>
-            </tr>
-            ` : ''}
-            <tr>
-              <td class="label">Pay Period:</td>
-              <td class="value">${monthDisplay} (${cleanMonth})</td>
-            </tr>
-            <tr>
-              <td class="label">Status:</td>
-              <td class="value" style="color: #059669;">✔ Processed & Dispatched</td>
-            </tr>
-          </table>
+              <!-- Salary Summary Card (Keka / Zoho Payroll style) -->
+              ${formattedNetPay ? `
+              <tr>
+                <td style="padding: 0 32px 16px 32px;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 18px 20px;">
+                    <tr>
+                      <td>
+                        <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; color: #64748b;">
+                          Net Amount Disbursed
+                        </div>
+                        <div style="font-size: 26px; font-weight: 700; color: #0f172a; margin-top: 4px; letter-spacing: -0.5px;">
+                          ${formattedNetPay}
+                        </div>
+                      </td>
+                      <td align="right" valign="bottom">
+                        <span style="display: inline-block; padding: 3px 8px; background-color: #ecfdf5; color: #047857; font-size: 11px; font-weight: 600; border-radius: 4px; border: 1px solid #a7f3d0;">
+                          ✓ Disbursed
+                        </span>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+              ` : ''}
 
-          ${attachments.length > 0 ? `
-          <div class="pdf-note">
-            <span>📄</span>
-            <span><strong>Attached PDF:</strong> Your complete salary slip with itemized allowances, deductions, and attendance days is attached to this email.</span>
-          </div>
-          ` : `
-          <div class="security-note">
-            Your payslip PDF is available for instant download in your Hydro HRMS Employee Portal.
-          </div>
-          `}
+              <!-- Employee Details Table -->
+              <tr>
+                <td style="padding: 0 32px 20px 32px;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size: 13px; border-top: 1px solid #f1f5f9;">
+                    ${empCode ? `
+                    <tr>
+                      <td style="padding: 9px 0; color: #64748b; border-bottom: 1px solid #f1f5f9; width: 40%;">Employee ID</td>
+                      <td style="padding: 9px 0; color: #0f172a; font-weight: 600; border-bottom: 1px solid #f1f5f9;">${empCode}</td>
+                    </tr>` : ''}
+                    ${designation ? `
+                    <tr>
+                      <td style="padding: 9px 0; color: #64748b; border-bottom: 1px solid #f1f5f9;">Designation</td>
+                      <td style="padding: 9px 0; color: #0f172a; font-weight: 600; border-bottom: 1px solid #f1f5f9;">${designation}</td>
+                    </tr>` : ''}
+                    <tr>
+                      <td style="padding: 9px 0; color: #64748b; border-bottom: 1px solid #f1f5f9;">Pay Period</td>
+                      <td style="padding: 9px 0; color: #0f172a; font-weight: 600; border-bottom: 1px solid #f1f5f9;">${monthDisplay}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 9px 0; color: #64748b; border-bottom: 1px solid #f1f5f9;">Disbursal Status</td>
+                      <td style="padding: 9px 0; color: #0f172a; font-weight: 600; border-bottom: 1px solid #f1f5f9;">Processed &amp; Dispatched</td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
 
-          <div class="security-note">
-            <strong>Confidentiality Notice:</strong> This document contains private compensation data intended solely for the designated recipient. If you received this in error, please alert HR immediately.
-          </div>
+              <!-- PDF Attachment Note -->
+              ${attachments.length > 0 ? `
+              <tr>
+                <td style="padding: 0 32px 24px 32px;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 16px;">
+                    <tr>
+                      <td width="36" valign="middle">
+                        <div style="width: 28px; height: 32px; background-color: #fee2e2; border-radius: 4px; font-size: 10px; font-weight: 800; color: #dc2626; text-align: center; line-height: 32px;">
+                          PDF
+                        </div>
+                      </td>
+                      <td valign="middle" style="padding-left: 12px;">
+                        <div style="font-size: 13px; font-weight: 600; color: #0f172a;">
+                          ${attachedFileName}
+                        </div>
+                        <div style="font-size: 11.5px; color: #64748b; margin-top: 1px;">
+                          Itemized salary slip attached to this email
+                        </div>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+              ` : `
+              <tr>
+                <td style="padding: 0 32px 24px 32px;">
+                  <div style="font-size: 12.5px; color: #64748b; background-color: #f8fafc; padding: 12px 16px; border-radius: 6px; border: 1px solid #e2e8f0;">
+                    Your detailed payslip PDF is available for download in the Hydro HRMS employee portal.
+                  </div>
+                </td>
+              </tr>
+              `}
 
-          <div class="text" style="font-size: 12.5px; color: #64748b; margin-bottom: 0;">
-            Warm regards,<br>
-            <strong>Payroll Department</strong><br>
-            Hydro Materials Management
-          </div>
-        </div>
-        <div class="footer">
-          This is an automated system email generated by Hydro HRMS.<br>
-          For payroll queries, please contact your HR representative.
-        </div>
-      </div>
+              <!-- Sign-off -->
+              <tr>
+                <td style="padding: 0 32px 28px 32px; font-size: 13px; color: #475569; line-height: 1.6;">
+                  Regards,<br>
+                  <strong style="color: #0f172a;">Payroll &amp; HR Department</strong><br>
+                  Hydro Materials Management Pvt. Ltd.
+                </td>
+              </tr>
+
+              <!-- Minimal Professional Footer -->
+              <tr>
+                <td style="background-color: #f8fafc; padding: 20px 32px; border-top: 1px solid #edf2f7; font-size: 11.5px; color: #94a3b8; line-height: 1.6; text-align: center;">
+                  This is an automated system email. Please do not reply directly.<br>
+                  For questions regarding your salary, allowances, or deductions, please contact HR.<br><br>
+                  <span style="color: #cbd5e1; font-size: 10.5px;">Confidentiality: This email and any attachments contain confidential compensation information intended solely for the designated recipient.</span>
+                </td>
+              </tr>
+
+            </table>
+          </td>
+        </tr>
+      </table>
     </body>
     </html>
     `;
@@ -492,58 +547,101 @@ class EmailService {
    */
   async sendPasswordOtp({ to, name, otp, purpose = 'PASSWORD_RESET' }) {
     const greetingName = name || 'Employee';
-    const subject = `[Hydro HRMS] Your Password Reset OTP: ${otp}`;
+    const subject = `Your Verification Code: ${otp} - Hydro HRMS`;
 
     const html = `
     <!DOCTYPE html>
-    <html>
+    <html lang="en">
     <head>
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Password Reset OTP</title>
-      <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f1f5f9; margin: 0; padding: 20px; color: #1e293b; }
-        .card { max-width: 520px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.06); border: 1px solid #e2e8f0; }
-        .header { background: linear-gradient(135deg, #2563eb, #1d4ed8); padding: 32px 24px; text-align: center; color: #ffffff; }
-        .header h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
-        .header p { margin: 6px 0 0; font-size: 13px; opacity: 0.9; }
-        .content { padding: 32px 28px; }
-        .greeting { font-size: 16px; font-weight: 600; margin-bottom: 12px; color: #0f172a; }
-        .text { font-size: 14px; line-height: 1.6; color: #475569; margin-bottom: 24px; }
-        .otp-box { background: #f8fafc; border: 2px dashed #cbd5e1; border-radius: 12px; padding: 18px 24px; text-align: center; margin: 24px 0; }
-        .otp-code { font-size: 36px; font-weight: 800; letter-spacing: 8px; color: #1e40af; font-family: 'Courier New', Courier, monospace; display: inline-block; padding-left: 8px; }
-        .expiry-note { font-size: 12px; color: #94a3b8; margin-top: 8px; }
-        .warning-box { background: #fffbeb; border-left: 4px solid #f59e0b; padding: 12px 16px; border-radius: 6px; font-size: 12.5px; color: #92400e; line-height: 1.5; margin-bottom: 24px; }
-        .footer { background: #f8fafc; padding: 20px 28px; text-align: center; font-size: 11.5px; color: #94a3b8; border-top: 1px solid #f1f5f9; }
-      </style>
+      <title>Verification Code</title>
     </head>
-    <body>
-      <div class="card">
-        <div class="header">
-          <h1>Hydro HRMS Security</h1>
-          <p>Official Verification Service</p>
-        </div>
-        <div class="content">
-          <div class="greeting">Hello ${greetingName},</div>
-          <div class="text">
-            We received a request to reset your password for your Hydro HRMS account. Use the one-time verification code below to complete your password update:
-          </div>
-          <div class="otp-box">
-            <div class="otp-code">${otp}</div>
-            <div class="expiry-note">Valid for 10 minutes (Single use only)</div>
-          </div>
-          <div class="warning-box">
-            <strong>Security Notice:</strong> Never share this OTP with anyone. Hydro HRMS administrators will never ask for your password or OTP code. If you did not make this request, your account may be compromised—please notify HR immediately.
-          </div>
-          <div class="text" style="font-size: 12px; color: #64748b; margin-bottom: 0;">
-            Thank you,<br>
-            <strong>Hydro HRMS Security Team</strong>
-          </div>
-        </div>
-        <div class="footer">
-          This is an automated system notification. Please do not reply directly to this email.
-        </div>
-      </div>
+    <body style="margin: 0; padding: 0; background-color: #f4f6f8; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; -webkit-font-smoothing: antialiased; color: #1e293b;">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f4f6f8; padding: 32px 16px;">
+        <tr>
+          <td align="center">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 520px; background-color: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.04);">
+              
+              <!-- Company Header -->
+              <tr>
+                <td style="padding: 24px 32px; border-bottom: 1px solid #edf2f7;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                      <td valign="middle">
+                        <div style="font-size: 15px; font-weight: 700; color: #0f172a; letter-spacing: -0.2px; text-transform: uppercase;">
+                          Hydro Materials Management
+                        </div>
+                        <div style="font-size: 11.5px; color: #64748b; margin-top: 2px;">
+                          Account Security &amp; Identity
+                        </div>
+                      </td>
+                      <td align="right" valign="middle">
+                        <span style="display: inline-block; padding: 4px 10px; background-color: #f1f5f9; color: #475569; font-size: 11px; font-weight: 600; border-radius: 4px; letter-spacing: 0.5px;">
+                          VERIFICATION
+                        </span>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+
+              <!-- Greeting & Instructions -->
+              <tr>
+                <td style="padding: 28px 32px 16px 32px;">
+                  <div style="font-size: 15px; font-weight: 600; color: #0f172a; margin-bottom: 10px;">
+                    Hi ${greetingName},
+                  </div>
+                  <div style="font-size: 13.5px; line-height: 1.6; color: #475569;">
+                    We received a request to access or reset the password for your Hydro HRMS account. Enter the verification code below to verify your identity:
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Clean Monospace OTP Box -->
+              <tr>
+                <td style="padding: 0 32px 16px 32px;">
+                  <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; text-align: center; margin: 8px 0;">
+                    <div style="font-size: 34px; font-weight: 700; letter-spacing: 10px; color: #0f172a; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; padding-left: 10px;">
+                      ${otp}
+                    </div>
+                    <div style="font-size: 11.5px; color: #64748b; margin-top: 8px;">
+                      This code is valid for 10 minutes and can only be used once.
+                    </div>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Security Information Note -->
+              <tr>
+                <td style="padding: 0 32px 24px 32px;">
+                  <div style="font-size: 12px; color: #64748b; line-height: 1.5; border-top: 1px solid #f1f5f9; padding-top: 16px;">
+                    If you did not initiate this request, you can safely ignore this email. No changes will be made to your account without this verification code.
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Sign-off -->
+              <tr>
+                <td style="padding: 0 32px 28px 32px; font-size: 13px; color: #475569; line-height: 1.6;">
+                  Regards,<br>
+                  <strong style="color: #0f172a;">IT Security &amp; Operations</strong><br>
+                  Hydro Materials Management Pvt. Ltd.
+                </td>
+              </tr>
+
+              <!-- Minimal Footer -->
+              <tr>
+                <td style="background-color: #f8fafc; padding: 20px 32px; border-top: 1px solid #edf2f7; font-size: 11.5px; color: #94a3b8; line-height: 1.6; text-align: center;">
+                  This is an automated system email. Please do not reply directly.<br>
+                  Hydro HRMS Security Service
+                </td>
+              </tr>
+
+            </table>
+          </td>
+        </tr>
+      </table>
     </body>
     </html>
     `;
