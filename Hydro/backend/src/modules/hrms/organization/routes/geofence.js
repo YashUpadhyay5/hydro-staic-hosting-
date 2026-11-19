@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Geofence = require('../../../../shared/models/Geofence');
+const GeofenceMediaSyncService = require('../services/GeofenceMediaSyncService');
 
 // GET all active geofence settings
 router.get('/', async (req, res) => {
@@ -41,6 +42,12 @@ router.post('/', async (req, res) => {
       radius: Number(radius)
     });
 
+    // Retroactively synchronize all past and future photos with this new site
+    setImmediate(() => {
+      const io = req.app.get('io');
+      GeofenceMediaSyncService.onGeofenceAddedOrUpdated(newGf, io).catch(e => console.error('[GeofenceSync Error]:', e.message));
+    });
+
     return res.status(201).json(newGf);
   } catch (error) {
     console.error('Error creating geofence:', error);
@@ -70,6 +77,12 @@ router.post('/bulk', async (req, res) => {
       }
     }
 
+    // Retroactively synchronize all historical photos against the newly imported geofence sites
+    setImmediate(() => {
+      const io = req.app.get('io');
+      GeofenceMediaSyncService.reclassifyAllMedia(io).catch(e => console.error('[GeofenceSync Error]:', e.message));
+    });
+
     return res.status(201).json({ success: true, count: createdSites.length, data: createdSites });
   } catch (error) {
     console.error('Error bulk creating geofences:', error);
@@ -88,12 +101,24 @@ router.put('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Geofence not found.' });
     }
 
+    const coordsOrRadiusChanged = (latitude !== undefined && Number(latitude) !== gf.latitude) ||
+                                  (longitude !== undefined && Number(longitude) !== gf.longitude) ||
+                                  (radius !== undefined && Number(radius) !== gf.radius);
+
     if (name !== undefined) gf.name = name;
     if (latitude !== undefined) gf.latitude = Number(latitude);
     if (longitude !== undefined) gf.longitude = Number(longitude);
     if (radius !== undefined) gf.radius = Number(radius);
 
     await gf.save();
+
+    if (coordsOrRadiusChanged) {
+      setImmediate(() => {
+        const io = req.app.get('io');
+        GeofenceMediaSyncService.onGeofenceAddedOrUpdated(gf, io).catch(e => console.error('[GeofenceSync Error]:', e.message));
+      });
+    }
+
     return res.status(200).json(gf);
   } catch (error) {
     console.error('Error updating geofence:', error);
@@ -112,6 +137,13 @@ router.delete('/:id', async (req, res) => {
     if (deletedCount === 0) {
       return res.status(404).json({ error: 'Geofence not found.' });
     }
+
+    // Detach and re-evaluate past photos linked to this deleted geofence
+    setImmediate(() => {
+      const io = req.app.get('io');
+      GeofenceMediaSyncService.onGeofenceDeleted(Number(id), io).catch(e => console.error('[GeofenceSync Error]:', e.message));
+    });
+
     return res.status(200).json({ message: 'Geofence deleted successfully.' });
   } catch (error) {
     console.error('Error deleting geofence:', error);
