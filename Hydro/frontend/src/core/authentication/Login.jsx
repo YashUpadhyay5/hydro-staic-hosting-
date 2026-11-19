@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import AdminForgotPasswordModal from './AdminForgotPasswordModal';
 
 export default function Login() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+    const [isForgotModalOpen, setIsForgotModalOpen] = useState(false);
     const navigate = useNavigate();
 
     React.useEffect(() => {
@@ -77,11 +79,43 @@ export default function Login() {
                             onChange={(e) => setPassword(e.target.value)}
                         />
                     </div>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '-6px', marginBottom: '14px' }}>
+                        <button
+                            type="button"
+                            onClick={() => setIsForgotModalOpen(true)}
+                            style={{
+                                background: 'none',
+                                border: 'none',
+                                color: 'var(--primary, #3b82f6)',
+                                fontSize: '12.5px',
+                                fontWeight: '600',
+                                cursor: 'pointer',
+                                padding: '2px 4px',
+                                textDecoration: 'none',
+                                opacity: 0.9,
+                                transition: 'opacity 0.15s ease'
+                            }}
+                            onMouseEnter={(e) => e.target.style.opacity = '1'}
+                            onMouseLeave={(e) => e.target.style.opacity = '0.9'}
+                        >
+                            Forgot Password?
+                        </button>
+                    </div>
                     <button type="submit" className="login-submit-btn" disabled={loading}>
                         {loading ? 'Signing in...' : 'Sign In'}
                     </button>
                     {error && <div className="login-error-text">{error}</div>}
                 </form>
+
+                <AdminForgotPasswordModal
+                    isOpen={isForgotModalOpen}
+                    onClose={() => setIsForgotModalOpen(false)}
+                    onPasswordResetSuccess={(resetEmail) => {
+                        if (resetEmail) setEmail(resetEmail);
+                        setPassword('');
+                        setIsForgotModalOpen(false);
+                    }}
+                />
             </div>
         </div>
     );

@@ -1182,3 +1182,10 @@ body.dark-theme .skeleton {
   }
 
 }
+
+/* Custom Geofence & Cluster Map Pins (prevent default Leaflet white box) */
+.custom-geofence-pin-icon,
+.custom-cluster-pin-icon {
+    background: transparent !important;
+    border: none !important;
+}

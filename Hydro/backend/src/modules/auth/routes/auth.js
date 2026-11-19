@@ -6,6 +6,17 @@ const { calculateEarnedLeaves } = require('../../../core/utils/leaveCalculator')
 const { comparePassword, hashPassword, validatePasswordStrength } = require('../services/authService');
 const { loginRateLimiter } = require('../../../core/middleware/rateLimiter');
 const verifyToken = require('../../../core/middleware/verifyToken');
+const crypto = require('crypto');
+const OtpVerification = require('../../../shared/models/OtpVerification');
+const EmailService = require('../../../core/services/EmailService');
+const { Op } = require('sequelize');
+
+function maskEmail(email) {
+  if (!email || !email.includes('@')) return email;
+  const [userPart, domain] = email.split('@');
+  if (userPart.length <= 2) return `${userPart[0]}*@${domain}`;
+  return `${userPart[0]}${'*'.repeat(Math.max(1, userPart.length - 2))}${userPart[userPart.length - 1]}@${domain}`;
+}
 
 // POST /api/auth/login (With Rate Limiter & bcrypt validation)
 router.post('/login', loginRateLimiter, async (req, res) => {
@@ -143,6 +154,236 @@ router.post('/change-password', verifyToken, async (req, res) => {
   } catch (error) {
     console.error('Change password error:', error);
     return res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/auth/otp/request - Request 6-digit verification code for password reset
+router.post('/otp/request', async (req, res) => {
+  try {
+    const { identifier } = req.body;
+    if (!identifier) {
+      return res.status(400).json({ error: 'Email or Employee ID is required.' });
+    }
+
+    const cleanInput = String(identifier).trim().toLowerCase();
+
+    // Find employee by email or employee id / code
+    const user = await Employee.findOne({
+      where: {
+        [Op.or]: [
+          { email: cleanInput },
+          { id: identifier.trim() },
+          { empCode: identifier.trim() }
+        ]
+      }
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'No account found matching the provided details.' });
+    }
+
+    if (user.status === 'PAST') {
+      return res.status(403).json({ error: 'This account has been deactivated. Please contact HR.' });
+    }
+
+    if (!user.email || !user.email.includes('@')) {
+      return res.status(400).json({ error: 'No valid Gmail/Email registered for this account. Please contact an Administrator.' });
+    }
+
+    const userEmail = user.email.toLowerCase().trim();
+
+    // Rate Limiting: 1 request per 60 seconds
+    const recentOtp = await OtpVerification.findOne({
+      where: {
+        email: userEmail,
+        purpose: 'PASSWORD_RESET',
+        createdAt: { [Op.gt]: new Date(Date.now() - 60 * 1000) }
+      },
+      order: [['createdAt', 'DESC']]
+    });
+
+    if (recentOtp) {
+      const waitSeconds = Math.max(1, 60 - Math.floor((Date.now() - new Date(recentOtp.createdAt).getTime()) / 1000));
+      return res.status(429).json({ 
+        error: `Please wait ${waitSeconds} seconds before requesting a new code.` 
+      });
+    }
+
+    // Rate Limiting: Max 5 requests in last 15 minutes
+    const recentCount = await OtpVerification.count({
+      where: {
+        email: userEmail,
+        purpose: 'PASSWORD_RESET',
+        createdAt: { [Op.gt]: new Date(Date.now() - 15 * 60 * 1000) }
+      }
+    });
+
+    if (recentCount >= 5) {
+      return res.status(429).json({ 
+        error: 'Too many password reset requests. Please try again in 15 minutes.' 
+      });
+    }
+
+    // Invalidate any existing unused OTPs for this email
+    await OtpVerification.update(
+      { isUsed: true },
+      { where: { email: userEmail, isUsed: false } }
+    );
+
+    // Generate 6-digit cryptographic OTP
+    const rawOtp = String(crypto.randomInt(100000, 1000000));
+    const hashedOtp = await hashPassword(rawOtp);
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+    await OtpVerification.create({
+      employeeId: user.id,
+      email: userEmail,
+      otpHash: hashedOtp,
+      purpose: 'PASSWORD_RESET',
+      expiresAt
+    });
+
+    // Send email via EmailService
+    const emailRes = await EmailService.sendPasswordOtp({
+      to: userEmail,
+      name: user.name,
+      otp: rawOtp,
+      purpose: 'PASSWORD_RESET'
+    });
+
+    if (!emailRes.success) {
+      console.warn('⚠️ [Auth OTP] Email dispatch warning:', emailRes.error);
+    }
+
+    return res.status(200).json({
+      message: 'Verification code sent successfully to your registered email.',
+      maskedEmail: maskEmail(userEmail),
+      identifier: userEmail
+    });
+  } catch (error) {
+    console.error('❌ OTP request error:', error);
+    return res.status(500).json({ error: 'Failed to process verification code request.' });
+  }
+});
+
+// POST /api/auth/otp/verify - Verify 6-digit code and generate single-use resetToken
+router.post('/otp/verify', async (req, res) => {
+  try {
+    const { identifier, otp } = req.body;
+    if (!identifier || !otp) {
+      return res.status(400).json({ error: 'Identifier and OTP code are required.' });
+    }
+
+    const cleanInput = String(identifier).trim().toLowerCase();
+    const cleanOtp = String(otp).trim();
+
+    // Resolve user's registered email
+    const user = await Employee.findOne({
+      where: {
+        [Op.or]: [
+          { email: cleanInput },
+          { id: identifier.trim() },
+          { empCode: identifier.trim() }
+        ]
+      }
+    });
+
+    const userEmail = user ? user.email.toLowerCase().trim() : cleanInput;
+
+    const record = await OtpVerification.findOne({
+      where: {
+        email: userEmail,
+        purpose: 'PASSWORD_RESET',
+        isUsed: false,
+        expiresAt: { [Op.gt]: new Date() }
+      },
+      order: [['createdAt', 'DESC']]
+    });
+
+    if (!record) {
+      return res.status(400).json({ error: 'Verification code has expired or is invalid. Please request a new one.' });
+    }
+
+    // Check attempts limit (max 5 attempts)
+    if (record.attempts >= 5) {
+      record.isUsed = true;
+      await record.save();
+      return res.status(400).json({ error: 'Too many failed attempts. This code has been invalidated. Please request a new one.' });
+    }
+
+    const isMatch = await comparePassword(cleanOtp, record.otpHash);
+    if (!isMatch) {
+      record.attempts += 1;
+      await record.save();
+      const remaining = Math.max(0, 5 - record.attempts);
+      return res.status(400).json({ 
+        error: `Invalid code. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining.` 
+      });
+    }
+
+    // Code verified: Generate single-use resetToken valid for 15 minutes
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    record.isUsed = true;
+    record.resetToken = resetToken;
+    await record.save();
+
+    return res.status(200).json({
+      message: 'Code verified successfully.',
+      resetToken
+    });
+  } catch (error) {
+    console.error('❌ OTP verify error:', error);
+    return res.status(500).json({ error: 'Failed to verify code.' });
+  }
+});
+
+// POST /api/auth/otp/reset-password - Complete password reset using verified resetToken
+router.post('/otp/reset-password', async (req, res) => {
+  try {
+    const { resetToken, newPassword } = req.body;
+    if (!resetToken || !newPassword) {
+      return res.status(400).json({ error: 'Reset token and new password are required.' });
+    }
+
+    const strengthCheck = validatePasswordStrength(newPassword);
+    if (!strengthCheck.valid) {
+      return res.status(400).json({ error: strengthCheck.message });
+    }
+
+    // Find valid reset token updated within last 15 minutes
+    const record = await OtpVerification.findOne({
+      where: {
+        resetToken: resetToken.trim(),
+        updatedAt: { [Op.gt]: new Date(Date.now() - 15 * 60 * 1000) }
+      }
+    });
+
+    if (!record) {
+      return res.status(400).json({ error: 'Invalid or expired password reset session. Please request a new code.' });
+    }
+
+    const user = await Employee.findByPk(record.employeeId) || await Employee.findOne({ where: { email: record.email } });
+    if (!user) {
+      return res.status(404).json({ error: 'User account not found.' });
+    }
+
+    // Hash new password and invalidate all existing tokens
+    user.password = await hashPassword(newPassword);
+    user.currentToken = null;
+    await user.save();
+
+    // Consume the resetToken so it cannot be reused
+    record.resetToken = null;
+    await record.save();
+
+    console.log(`🔐 [Auth] Password successfully reset via OTP for ${user.email} (${user.id})`);
+
+    return res.status(200).json({
+      message: 'Your password has been reset successfully! You can now sign in with your new password.'
+    });
+  } catch (error) {
+    console.error('❌ Password reset error:', error);
+    return res.status(500).json({ error: 'Failed to reset password.' });
   }
 });
 

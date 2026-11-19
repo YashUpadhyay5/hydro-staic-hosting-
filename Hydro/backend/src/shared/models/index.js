@@ -34,6 +34,7 @@ const EmployeeActivity = require('./EmployeeActivity');
 const AttendanceRegularization = require('./AttendanceRegularization');
 const AttendanceRegisterEdit = require('./AttendanceRegisterEdit');
 const Geofence = require('./Geofence');
+const OtpVerification = require('./OtpVerification');
 
 // Chat Models
 const Chat = require('./Chat');
@@ -157,5 +158,6 @@ module.exports = {
   EmployeeActivity,
   AttendanceRegularization,
   AttendanceRegisterEdit,
-  Geofence
+  Geofence,
+  OtpVerification
 };

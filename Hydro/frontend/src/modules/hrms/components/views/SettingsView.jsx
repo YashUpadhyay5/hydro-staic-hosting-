@@ -71,6 +71,18 @@ export default function SettingsView() {
   const [autoSyncIntervalSeconds, setAutoSyncIntervalSeconds] = useState(() => cachedSettings?.auto_sync_interval_seconds !== undefined ? Number(cachedSettings.auto_sync_interval_seconds) : 30);
   const [allowCrossDay, setAllowCrossDay] = useState(() => cachedSettings?.allow_cross_day !== undefined ? Boolean(cachedSettings.allow_cross_day) : true);
 
+  // Outbound SMTP & Email Delivery State
+  const [smtpHost, setSmtpHost] = useState(() => cachedSettings?.smtp_host || 'smtp.gmail.com');
+  const [smtpPort, setSmtpPort] = useState(() => Number(cachedSettings?.smtp_port || 465));
+  const [smtpUser, setSmtpUser] = useState(() => cachedSettings?.smtp_user || '');
+  const [smtpPass, setSmtpPass] = useState(() => cachedSettings?.smtp_pass || '');
+  const [smtpFromName, setSmtpFromName] = useState(() => cachedSettings?.smtp_from_name || 'Hydro HRMS');
+  const [smtpSecure, setSmtpSecure] = useState(() => cachedSettings?.smtp_secure !== undefined ? Boolean(cachedSettings.smtp_secure) : true);
+  const [savingSmtp, setSavingSmtp] = useState(false);
+  const [showSmtpPass, setShowSmtpPass] = useState(false);
+  const [testEmailRecipient, setTestEmailRecipient] = useState(() => cachedSettings?.smtp_user || '');
+  const [sendingTestEmail, setSendingTestEmail] = useState(false);
+
   // Audit Logs State
   const [acknowledgments, setAcknowledgments] = useState(() => Array.isArray(cachedAcks) ? cachedAcks : []);
   const [loadingAck, setLoadingAck] = useState(false);
@@ -124,6 +136,14 @@ export default function SettingsView() {
         setAutoSyncIntervalSeconds(data.auto_sync_interval_seconds !== undefined ? Number(data.auto_sync_interval_seconds) : 30);
         setAllowCrossDay(data.allow_cross_day !== undefined ? Boolean(data.allow_cross_day) : true);
 
+        setSmtpHost(data.smtp_host || 'smtp.gmail.com');
+        setSmtpPort(data.smtp_port ? Number(data.smtp_port) : 465);
+        setSmtpUser(data.smtp_user || '');
+        setSmtpPass(data.smtp_pass || '');
+        setSmtpFromName(data.smtp_from_name || 'Hydro HRMS');
+        setSmtpSecure(data.smtp_secure !== undefined ? Boolean(data.smtp_secure) : true);
+        if (data.smtp_user) setTestEmailRecipient(data.smtp_user);
+
         setIsDirty(false);
       }
     } catch (err) {
@@ -161,8 +181,54 @@ export default function SettingsView() {
     max_working_minutes: maxWorkingMinutes,
     overtime_threshold_minutes: overtimeThresholdMinutes,
     auto_sync_interval_seconds: autoSyncIntervalSeconds,
-    allow_cross_day: allowCrossDay
+    allow_cross_day: allowCrossDay,
+    smtp_host: smtpHost,
+    smtp_port: smtpPort,
+    smtp_user: smtpUser,
+    smtp_pass: smtpPass,
+    smtp_from_name: smtpFromName,
+    smtp_secure: smtpSecure
   });
+
+  const handleSaveSmtp = async (e) => {
+    if (e) e.preventDefault();
+    setSavingSmtp(true);
+    try {
+      const res = await api.updateSettings(buildPayload());
+      if (res && res.config_version) setConfigVersion(res.config_version);
+      setIsDirty(false);
+      showToast(`Email & SMTP configuration updated successfully (v${res?.config_version || configVersion + 1})`);
+    } catch (err) {
+      showToast(err.message || 'Failed to save SMTP settings', 'error');
+    } finally {
+      setSavingSmtp(false);
+    }
+  };
+
+  const handleSendTestEmail = async (e) => {
+    if (e) e.preventDefault();
+    if (!testEmailRecipient || !testEmailRecipient.includes('@')) {
+      showToast('Please enter a valid recipient email address for testing.', 'error');
+      return;
+    }
+    setSendingTestEmail(true);
+    try {
+      const res = await api.sendTestEmail({
+        to: testEmailRecipient.trim(),
+        smtp_user: smtpUser.trim(),
+        smtp_pass: smtpPass.trim(),
+        smtp_host: smtpHost.trim(),
+        smtp_port: smtpPort,
+        smtp_from_name: smtpFromName.trim(),
+        smtp_secure: smtpSecure
+      });
+      showToast(res.message || 'Test email dispatched successfully! Please check your inbox.');
+    } catch (err) {
+      showToast(err.message || 'Failed to send test email. Check SMTP credentials.', 'error');
+    } finally {
+      setSendingTestEmail(false);
+    }
+  };
 
   const handleSaveAttendance = async (e) => {
     if (e) e.preventDefault();
@@ -864,6 +930,149 @@ export default function SettingsView() {
                   ))}
                 </div>
               )}
+            </div>
+
+          </div>
+        </div>
+
+        {/* FOURTH COLUMN: EMAIL & SMTP DELIVERY ENGINE */}
+        <div className="glass" style={{ background: 'var(--bg-glass)', borderRadius: '16px', padding: '28px', border: '1px solid var(--border-glass)', boxShadow: 'var(--shadow-sm)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+          <div>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '24px', paddingBottom: '16px', borderBottom: '1px solid var(--border-glass)' }}>
+              <div style={{ width: '42px', height: '42px', borderRadius: '12px', background: 'rgba(234, 88, 12, 0.15)', color: '#ea580c', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <i className="fa-solid fa-envelope" style={{ fontSize: '20px' }}></i>
+              </div>
+              <div>
+                <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: 'var(--text-primary)' }}>Email & SMTP Engine</h2>
+                <p style={{ margin: '3px 0 0 0', fontSize: '14px', color: 'var(--text-muted)' }}>Configure company Gmail to send receipts & security OTPs</p>
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveSmtp} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                  Sender Gmail Address
+                </label>
+                <input
+                  type="email"
+                  placeholder="e.g. hrms.notifications@gmail.com"
+                  value={smtpUser}
+                  onChange={(e) => markDirty(setSmtpUser, e.target.value)}
+                  style={{ width: '100%', height: '42px', padding: '0 12px', borderRadius: '10px', border: '1px solid var(--border-glass)', background: 'var(--input-bg)', color: 'var(--text-primary)', fontSize: '14px', fontWeight: 500, boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                  <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                    Google App Password (16-character)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowSmtpPass(!showSmtpPass)}
+                    style={{ background: 'none', border: 'none', color: 'var(--sv-blue)', fontSize: '11.5px', fontWeight: 600, cursor: 'pointer', padding: 0 }}
+                  >
+                    {showSmtpPass ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+                <input
+                  type={showSmtpPass ? 'text' : 'password'}
+                  placeholder="16-character Google App Password"
+                  value={smtpPass}
+                  onChange={(e) => markDirty(setSmtpPass, e.target.value)}
+                  style={{ width: '100%', height: '42px', padding: '0 12px', borderRadius: '10px', border: '1px solid var(--border-glass)', background: 'var(--input-bg)', color: 'var(--text-primary)', fontSize: '14px', fontWeight: 500, boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '12px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                    Display Name
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Hydro HRMS"
+                    value={smtpFromName}
+                    onChange={(e) => markDirty(setSmtpFromName, e.target.value)}
+                    style={{ width: '100%', height: '40px', padding: '0 12px', borderRadius: '8px', border: '1px solid var(--border-glass)', background: 'var(--input-bg)', color: 'var(--text-primary)', fontSize: '13px', fontWeight: 600, boxSizing: 'border-box' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                    Port (SSL)
+                  </label>
+                  <input
+                    type="number"
+                    value={smtpPort}
+                    onChange={(e) => markDirty(setSmtpPort, parseInt(e.target.value, 10) || 465)}
+                    style={{ width: '100%', height: '40px', padding: '0 12px', borderRadius: '8px', border: '1px solid var(--border-glass)', background: 'var(--input-bg)', color: 'var(--text-primary)', fontSize: '13px', fontWeight: 600, boxSizing: 'border-box' }}
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={savingSmtp || loading}
+                style={{
+                  height: '46px',
+                  borderRadius: '12px',
+                  background: '#ea580c',
+                  color: '#FFFFFF',
+                  border: 'none',
+                  fontSize: '14px',
+                  fontWeight: 700,
+                  cursor: savingSmtp ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                  marginTop: '4px'
+                }}
+              >
+                {savingSmtp ? <i className="fa-solid fa-spinner fa-spin"></i> : <i className="fa-solid fa-floppy-disk"></i>}
+                <span>{savingSmtp ? 'Saving Email Config...' : `Save Sender Settings (v${configVersion})`}</span>
+              </button>
+            </form>
+
+            {/* Test Email Section */}
+            <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px dashed var(--border-glass)' }}>
+              <div style={{ fontSize: '12.5px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span>🧪 Send Test Verification Email</span>
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  type="email"
+                  placeholder="Recipient test email"
+                  value={testEmailRecipient}
+                  onChange={(e) => setTestEmailRecipient(e.target.value)}
+                  style={{ flex: 1, height: '38px', padding: '0 10px', borderRadius: '8px', border: '1px solid var(--border-glass)', background: 'var(--input-bg)', color: 'var(--text-primary)', fontSize: '13px', boxSizing: 'border-box' }}
+                />
+                <button
+                  type="button"
+                  onClick={handleSendTestEmail}
+                  disabled={sendingTestEmail || !testEmailRecipient}
+                  style={{
+                    padding: '0 14px',
+                    height: '38px',
+                    borderRadius: '8px',
+                    background: '#2563eb',
+                    color: '#ffffff',
+                    border: 'none',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    cursor: (sendingTestEmail || !testEmailRecipient) ? 'not-allowed' : 'pointer',
+                    whiteSpace: 'nowrap',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  {sendingTestEmail ? <i className="fa-solid fa-spinner fa-spin"></i> : <i className="fa-solid fa-paper-plane"></i>}
+                  <span>{sendingTestEmail ? 'Sending...' : 'Send Test'}</span>
+                </button>
+              </div>
             </div>
 
           </div>

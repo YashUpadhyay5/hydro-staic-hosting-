@@ -53,6 +53,12 @@ const ensureSettingsColumns = async () => {
     await checkAndAdd('overtime_threshold_minutes', 'INTEGER DEFAULT 480');
     await checkAndAdd('auto_sync_interval_seconds', 'INTEGER DEFAULT 30');
     await checkAndAdd('allow_cross_day', 'TINYINT(1) DEFAULT 1');
+    await checkAndAdd('smtp_host', 'VARCHAR(255) DEFAULT "smtp.gmail.com"');
+    await checkAndAdd('smtp_port', 'INTEGER DEFAULT 465');
+    await checkAndAdd('smtp_user', 'VARCHAR(255)');
+    await checkAndAdd('smtp_pass', 'VARCHAR(255)');
+    await checkAndAdd('smtp_from_name', 'VARCHAR(255) DEFAULT "Hydro HRMS"');
+    await checkAndAdd('smtp_secure', 'TINYINT(1) DEFAULT 1');
   } catch (err) {
     console.error('Settings auto-migration notice:', err.message);
   }
@@ -101,7 +107,13 @@ router.put('/', requireRole(['ADMIN']), async (req, res) => {
       max_working_minutes,
       overtime_threshold_minutes,
       auto_sync_interval_seconds,
-      allow_cross_day
+      allow_cross_day,
+      smtp_host,
+      smtp_port,
+      smtp_user,
+      smtp_pass,
+      smtp_from_name,
+      smtp_secure
     } = req.body;
 
     if (location_provider && !VALID_LOCATION_PROVIDERS.includes(location_provider)) {
@@ -148,6 +160,13 @@ router.put('/', requireRole(['ADMIN']), async (req, res) => {
     if (auto_sync_interval_seconds !== undefined) settings.auto_sync_interval_seconds = Math.max(5, parseInt(auto_sync_interval_seconds, 10));
     if (allow_cross_day !== undefined) settings.allow_cross_day = Boolean(allow_cross_day);
 
+    if (smtp_host !== undefined) settings.smtp_host = String(smtp_host).trim();
+    if (smtp_port !== undefined) settings.smtp_port = parseInt(smtp_port, 10) || 465;
+    if (smtp_user !== undefined) settings.smtp_user = String(smtp_user).trim();
+    if (smtp_pass !== undefined) settings.smtp_pass = String(smtp_pass).trim();
+    if (smtp_from_name !== undefined) settings.smtp_from_name = String(smtp_from_name).trim();
+    if (smtp_secure !== undefined) settings.smtp_secure = Boolean(smtp_secure);
+
     await settings.save();
 
     // Immediately bust HeartbeatMonitorService config cache so the new location interval takes effect
@@ -170,6 +189,53 @@ router.put('/', requireRole(['ADMIN']), async (req, res) => {
   } catch (error) {
     console.error('Error updating system settings:', error);
     return res.status(500).json({ error: error.message, messageKey: 'settings.update_failed' });
+  }
+});
+
+// POST /api/settings/test-email - Test SMTP configuration live
+router.post('/test-email', requireRole(['ADMIN']), async (req, res) => {
+  try {
+    const { to, smtp_user, smtp_pass, smtp_host, smtp_port, smtp_from_name, smtp_secure } = req.body;
+    const recipient = (to || req.user?.email || '').trim();
+
+    if (!recipient || !recipient.includes('@')) {
+      return res.status(400).json({ error: 'A valid recipient email address is required to test SMTP delivery.' });
+    }
+
+    const EmailService = require('../../../core/services/EmailService');
+
+    let customConfig = null;
+    if (smtp_user && smtp_pass) {
+      customConfig = {
+        user: smtp_user.trim(),
+        pass: smtp_pass.trim(),
+        host: smtp_host || 'smtp.gmail.com',
+        port: parseInt(smtp_port, 10) || 465,
+        fromName: smtp_from_name || 'Hydro HRMS',
+        secure: smtp_secure !== undefined ? Boolean(smtp_secure) : true
+      };
+    }
+
+    const result = await EmailService.sendTestEmail({
+      to: recipient,
+      customConfig
+    });
+
+    if (result.success) {
+      return res.status(200).json({
+        success: true,
+        message: `Test email successfully dispatched to ${recipient}! Check your inbox.`,
+        messageId: result.messageId
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: result.error || 'Failed to dispatch test email. Please check your credentials.'
+      });
+    }
+  } catch (error) {
+    console.error('Test email exception:', error);
+    return res.status(500).json({ success: false, error: error.message });
   }
 });
 

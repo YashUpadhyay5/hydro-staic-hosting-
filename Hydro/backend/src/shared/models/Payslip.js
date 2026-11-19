@@ -35,6 +35,11 @@ const Payslip = sequelize.define('Payslip', {
     type: DataTypes.BOOLEAN,
     field: 'email_sent_status',
     defaultValue: false,
+  },
+  appSentStatus: {
+    type: DataTypes.BOOLEAN,
+    field: 'app_sent_status',
+    defaultValue: false,
   }
 }, {
   tableName: 'payslips',

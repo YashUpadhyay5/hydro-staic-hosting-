@@ -48,11 +48,57 @@ export default function MediaView({ employees = [] }) {
     const [editingClusterId, setEditingClusterId] = useState(null);
     const [editingClusterName, setEditingClusterName] = useState('');
     const [renameLoading, setRenameLoading] = useState(false);
+    const [clusterSearchTerm, setClusterSearchTerm] = useState('');
 
-    // Map Refs
+    // Helper to create high-visibility cluster pin icon on Leaflet map (Exact GeofenceView style)
+    const createClusterPinIcon = (clusterName, photoCount = 0, isFocused = false) => {
+        if (!window.L) return null;
+        const bg = isFocused ? '#f97316' : '#2563eb';
+        return window.L.divIcon({
+            className: 'custom-cluster-pin-icon',
+            html: `
+                <div style="
+                    display: flex;
+                    align-items: center;
+                    gap: 5px;
+                    background: ${bg};
+                    color: #ffffff;
+                    padding: 4px 10px;
+                    border-radius: 20px;
+                    font-size: 11px;
+                    font-weight: 700;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                    border: 2px solid #ffffff;
+                    white-space: nowrap;
+                    cursor: pointer;
+                    transform: translate(-50%, -50%);
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                ">
+                    <span style="font-size: 12px;">📍</span>
+                    <span style="max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${clusterName}</span>
+                    ${photoCount > 0 ? `
+                        <span style="
+                            background: rgba(255, 255, 255, 0.3);
+                            padding: 1px 6px;
+                            border-radius: 10px;
+                            font-size: 10px;
+                            font-weight: 800;
+                            margin-left: 2px;
+                        ">${photoCount}</span>
+                    ` : ''}
+                </div>
+            `,
+            iconSize: [110, 30],
+            iconAnchor: [55, 15]
+        });
+    };
+
+    // Map & Scroll Refs
     const mapRef = useRef(null);
     const mapInstance = useRef(null);
     const clusterLayersRef = useRef({});
+    const clusterCardRefs = useRef({});
+    const [focusedClusterId, setFocusedClusterId] = useState(null);
 
     // Fetch clusters, settings, and media
     const fetchClustersAndSettings = async () => {
@@ -100,21 +146,126 @@ export default function MediaView({ employees = [] }) {
         setCurrentPage(1);
     }, [searchQuery, fromDate, toDate, selectedClusterId]);
 
-    // Initialize Map for Clusters Visualization
+    // Initialize & render map whenever activeTab is 'clusters', clusters change, or focus changes
     useEffect(() => {
-        if (activeTab === 'clusters' && mapRef.current && !mapInstance.current && window.L) {
-            // Default center Delhi / NCR
-            mapInstance.current = window.L.map(mapRef.current).setView([28.6692, 77.4538], 11);
+        if (activeTab !== 'clusters') {
+            if (mapInstance.current) {
+                mapInstance.current.remove();
+                mapInstance.current = null;
+                clusterLayersRef.current = {};
+            }
+            return;
+        }
+
+        if (!mapRef.current || !window.L) return;
+
+        // Ensure Leaflet map instance exists
+        if (!mapInstance.current) {
+            // Default center Northern India / Punjab
+            mapInstance.current = window.L.map(mapRef.current, {
+                center: [31.50, 74.80],
+                zoom: 10,
+                zoomControl: true
+            });
+
             window.L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=cb1_2ae4_1_8e228ec653d025bb97ea2305', {
                 attribution: '&copy; OpenStreetMap &copy; CARTO'
             }).addTo(mapInstance.current);
         }
 
-        // Adjust layout after map renders
-        if (activeTab === 'clusters' && mapInstance.current) {
-            setTimeout(() => {
-                mapInstance.current.invalidateSize();
-            }, 300);
+        const map = mapInstance.current;
+
+        // Clear existing layers
+        Object.keys(clusterLayersRef.current).forEach(id => {
+            if (clusterLayersRef.current[id]) {
+                if (clusterLayersRef.current[id].circle) map.removeLayer(clusterLayersRef.current[id].circle);
+                if (clusterLayersRef.current[id].marker) map.removeLayer(clusterLayersRef.current[id].marker);
+            }
+        });
+        clusterLayersRef.current = {};
+
+        const validClusterCoords = [];
+
+        // Draw circles and high-visibility pins for each cluster
+        clusters.forEach(cl => {
+            const lat = Number(cl.centerLatitude);
+            const lng = Number(cl.centerLongitude);
+            if (isNaN(lat) || isNaN(lng) || lat === 0 || lng === 0) return;
+
+            const photoCount = cl.media ? cl.media.length : 0;
+            const isFocused = String(cl.id) === String(focusedClusterId);
+            const r = parseFloat(cl.radius) || clusterRadius || 200;
+
+            // 1. Geofence Circle Preview (Exact styling from GeofenceView)
+            const circleColor = isFocused ? '#f97316' : '#2563eb';
+            const circle = window.L.circle([lat, lng], {
+                radius: r,
+                color: circleColor,
+                fillColor: circleColor,
+                fillOpacity: isFocused ? 0.3 : 0.15,
+                weight: isFocused ? 3 : 1.5
+            }).addTo(map);
+
+            if (isFocused) {
+                circle.bringToFront();
+            }
+
+            // 2. High-Visibility Pin Marker (Centered at [55, 15], exact styling from GeofenceView)
+            const marker = window.L.marker([lat, lng], {
+                icon: createClusterPinIcon(cl.name, photoCount, isFocused)
+            }).addTo(map);
+
+            const popupContent = `
+                <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; padding: 4px; color: #1e293b; min-width: 180px;">
+                    <div style="font-weight: 700; color: ${isFocused ? '#f97316' : '#0f172a'}; font-size: 14px; margin-bottom: 4px; display: flex; align-items: center; gap: 4px;">
+                        📍 ${cl.name} ${isFocused ? '<span style="font-size: 11px; color: #f97316;">● Active</span>' : ''}
+                    </div>
+                    <div style="color: #64748b; font-size: 11px; margin-bottom: 4px;">Coordinates: ${lat.toFixed(5)}, ${lng.toFixed(5)}</div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #e2e8f0; padding-top: 6px; margin-top: 4px;">
+                        <span style="color: #059669; font-weight: 700; font-size: 12px;">📁 ${photoCount} Photo${photoCount !== 1 ? 's' : ''}</span>
+                        <span style="color: #2563eb; font-weight: 600; font-size: 11px;">Radius: ${r}m</span>
+                    </div>
+                </div>
+            `;
+
+            circle.bindPopup(popupContent, { minWidth: 190 });
+            marker.bindPopup(popupContent, { minWidth: 190 });
+
+            // Clicking pin or circle triggers focus and flies map directly onto location
+            marker.on('click', () => {
+                focusClusterOnMap(cl);
+            });
+            circle.on('click', () => {
+                focusClusterOnMap(cl);
+            });
+
+            clusterLayersRef.current[cl.id] = { circle, marker, lat, lng };
+
+            // Collect coordinates of clusters with media for smart bounds fitting
+            if (photoCount > 0) {
+                validClusterCoords.push([lat, lng]);
+            }
+        });
+
+        // Ensure container layout has completed before invalidateSize and bounds fitting (on first load when no cluster focused)
+        if (!focusedClusterId) {
+            requestAnimationFrame(() => {
+                setTimeout(() => {
+                    if (!mapInstance.current) return;
+                    mapInstance.current.invalidateSize();
+
+                    // Focus on operational clusters that have photos
+                    if (validClusterCoords.length > 0) {
+                        const bounds = window.L.latLngBounds(validClusterCoords);
+                        mapInstance.current.fitBounds(bounds.pad(0.25), { maxZoom: 13 });
+                    } else if (clusters.length > 0) {
+                        const firstCl = clusters[0];
+                        if (firstCl && firstCl.centerLatitude && firstCl.centerLongitude) {
+                            mapInstance.current.setView([Number(firstCl.centerLatitude), Number(firstCl.centerLongitude)], 11);
+                        }
+                    }
+                }, 180);
+            });
         }
 
         return () => {
@@ -124,49 +275,9 @@ export default function MediaView({ employees = [] }) {
                 clusterLayersRef.current = {};
             }
         };
-    }, [activeTab]);
+    }, [activeTab, clusters, focusedClusterId]);
 
-    // Render active clusters on Leaflet Map
-    useEffect(() => {
-        if (!mapInstance.current || !window.L) return;
-
-        // Clear existing map circles
-        Object.keys(clusterLayersRef.current).forEach(id => {
-            if (clusterLayersRef.current[id]) {
-                mapInstance.current.removeLayer(clusterLayersRef.current[id]);
-            }
-        });
-        clusterLayersRef.current = {};
-
-        // Draw new circles for each cluster
-        clusters.forEach(cl => {
-            const circle = window.L.circle([cl.centerLatitude, cl.centerLongitude], {
-                radius: cl.radius,
-                color: '#4f46e5',
-                fillColor: '#818cf8',
-                fillOpacity: 0.35
-            }).addTo(mapInstance.current);
-
-            // Bind premium popup info
-            circle.bindPopup(`
-                <div style="font-family: sans-serif; font-size: 13px;">
-                    <strong style="color: #4f46e5; font-size: 14px;">${cl.name}</strong><br/>
-                    <span style="color: var(--text-primary);">Geofence Radius: ${cl.radius}m</span><br/>
-                    <span style="color: #10b981; font-weight: 600;">Photos Count: ${cl.media ? cl.media.length : 0}</span>
-                </div>
-            `);
-
-            clusterLayersRef.current[cl.id] = circle;
-        });
-
-        // Fit map bounds if there are clusters
-        if (clusters.length > 0) {
-            const group = new window.L.featureGroup(Object.values(clusterLayersRef.current));
-            mapInstance.current.fitBounds(group.getBounds().pad(0.1));
-        }
-    }, [clusters, activeTab]);
-
-    // Local filters for search query & date range
+        // Local filters for search query & date range
     let filteredMedia = media;
     if (fromDate) {
         const from = new Date(fromDate);
@@ -238,17 +349,63 @@ export default function MediaView({ employees = [] }) {
         }
     };
 
+    // Click-to-Focus map navigation helper with flying animation (Exact GeofenceView behavior)
     const focusClusterOnMap = (cl) => {
-        if (mapInstance.current) {
-            mapInstance.current.setView([cl.centerLatitude, cl.centerLongitude], 14);
-            if (clusterLayersRef.current[cl.id]) {
-                clusterLayersRef.current[cl.id].openPopup();
-            }
+        if (!cl) return;
+        setFocusedClusterId(cl.id);
+        const lat = Number(cl.centerLatitude);
+        const lng = Number(cl.centerLongitude);
+
+        if (mapInstance.current && !isNaN(lat) && !isNaN(lng)) {
+            // Smooth flying swoop animation onto site location pin (duration: 1.2s, zoom: 16)
+            mapInstance.current.flyTo([lat, lng], 16, { duration: 1.2 });
+
+            setTimeout(() => {
+                const layer = clusterLayersRef.current[cl.id];
+                if (layer) {
+                    if (layer.circle) layer.circle.bringToFront();
+                    if (layer.marker) layer.marker.openPopup();
+                }
+            }, 450);
+        }
+
+        // Auto-scroll the left list to this cluster card smoothly!
+        const cardEl = clusterCardRefs.current[cl.id];
+        if (cardEl) {
+            cardEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
     };
 
+    // Auto-Fit map to show all cluster sites across the map (Matches GeofenceView)
+    const handleFitAllClusters = () => {
+        if (!mapInstance.current || clusters.length === 0 || !window.L) return;
+        const bounds = window.L.latLngBounds();
+        let validCount = 0;
+        clusters.forEach(cl => {
+            const lat = Number(cl.centerLatitude);
+            const lng = Number(cl.centerLongitude);
+            if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0) {
+                bounds.extend([lat, lng]);
+                validCount++;
+            }
+        });
+        if (validCount > 0) {
+            mapInstance.current.fitBounds(bounds, { padding: [60, 60], maxZoom: 15 });
+            setFocusedClusterId(null);
+        }
+    };
+
+    // Filter clusters by search term (Matches GeofenceView)
+    const filteredClusterList = clusters.filter(cl => {
+        if (!clusterSearchTerm.trim()) return true;
+        const term = clusterSearchTerm.toLowerCase();
+        return (cl.name && cl.name.toLowerCase().includes(term)) ||
+               (cl.centerLatitude && cl.centerLatitude.toString().includes(term)) ||
+               (cl.centerLongitude && cl.centerLongitude.toString().includes(term));
+    });
+
     return (
-        <div id="media-view" className="view active" style={{ height: '100%', minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: '16px', overflow: 'hidden' }}>
+        <div id="media-view" className="view active" style={{ height: '100%', minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: '16px', overflow: 'auto' }}>
             <div className="view-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
                 <h2>Geotagged Photos & Clusters</h2>
                 
@@ -490,29 +647,77 @@ export default function MediaView({ employees = [] }) {
             )}
 
             {activeTab === 'clusters' && (
-                <div className="clustering-grid" style={{ flex: 1, minHeight: 0, overflow: 'hidden', height: '100%' }}>
+                <div className="clustering-grid" style={{ flex: 1, minHeight: '520px', height: 'calc(100vh - 170px)', display: 'grid', gridTemplateColumns: '400px 1fr', gap: '16px' }}>
                     {/* Left side: Cluster details list */}
-                    <div className="glass" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '15px', height: '100%' }}>
-                        <h3>Dynamically Grouped Clusters</h3>
-                        {clusters.length === 0 ? (
-                            <p style={{ color: 'var(--text-secondary)' }}>No auto-created photo clusters exist. Upload geotagged photos to dynamically form spatial groups.</p>
+                    <div className="glass" style={{ padding: '18px', display: 'flex', flexDirection: 'column', gap: '12px', height: '100%', maxHeight: '100%', minHeight: 0, overflow: 'hidden' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                            <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700 }}>
+                                Dynamically Grouped Clusters ({clusters.length})
+                            </h3>
+                            <button 
+                                type="button"
+                                className="btn btn-outline" 
+                                style={{ margin: 0, padding: '4px 8px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '5px', borderColor: '#3b82f6', color: '#3b82f6' }}
+                                onClick={handleFitAllClusters}
+                                title="Auto-zoom map to show all cluster sites"
+                            >
+                                <i className="fa-solid fa-earth-americas"></i> Fit All Sites
+                            </button>
+                        </div>
+
+                        {/* Search Bar Input (Matches GeofenceView) */}
+                        <div style={{ position: 'relative' }}>
+                            <input 
+                                type="text"
+                                placeholder="🔍 Search site by name or coordinates..."
+                                value={clusterSearchTerm}
+                                onChange={(e) => setClusterSearchTerm(e.target.value)}
+                                style={{
+                                    width: '100%',
+                                    padding: '7px 10px 7px 30px',
+                                    borderRadius: '6px',
+                                    border: '1px solid var(--border-glass, #334155)',
+                                    background: 'rgba(0,0,0,0.06)',
+                                    color: 'var(--text-primary)',
+                                    fontSize: '12px',
+                                    outline: 'none'
+                                }}
+                            />
+                            <i className="fa-solid fa-magnifying-glass" style={{ position: 'absolute', left: '10px', top: '9px', color: '#64748b', fontSize: '11px' }}></i>
+                        </div>
+
+                        {filteredClusterList.length === 0 ? (
+                            <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>No matching photo clusters found.</p>
                         ) : (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', overflowY: 'auto', flex: 1, paddingRight: '5px' }}>
-                                {clusters.map(cl => (
-                                    <div key={cl.id} style={{
-                                        padding: '16px',
-                                        borderRadius: '8px',
-                                        background: 'var(--input-bg)',
-                                        border: '1px solid var(--border-glass)',
-                                        display: 'flex',
-                                        flexDirection: 'column',
-                                        gap: '10px',
-                                        boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
-                                    }}>
+                            <div 
+                                id="clusters-list-scroll"
+                                className="custom-scrollbar"
+                                style={{ display: 'flex', flexDirection: 'column', gap: '12px', overflowY: 'auto', overflowX: 'hidden', flex: 1, minHeight: 0, paddingRight: '6px' }}
+                            >
+                                {filteredClusterList.map(cl => {
+                                    const isFocused = String(cl.id) === String(focusedClusterId);
+                                    return (
+                                    <div 
+                                        key={cl.id} 
+                                        ref={el => { if (el) clusterCardRefs.current[cl.id] = el; }}
+                                        onClick={() => focusClusterOnMap(cl)}
+                                        style={{
+                                            padding: '14px 16px',
+                                            borderRadius: '8px',
+                                            background: isFocused ? 'rgba(249, 115, 22, 0.12)' : 'var(--input-bg)',
+                                            border: isFocused ? '1.5px solid #f97316' : '1px solid var(--border-glass)',
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            gap: '10px',
+                                            boxShadow: isFocused ? '0 2px 8px rgba(249, 115, 22, 0.2)' : '0 1px 3px rgba(0,0,0,0.05)',
+                                            transition: 'all 0.2s ease',
+                                            cursor: 'pointer'
+                                        }}
+                                    >
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                             <div>
                                                 {editingClusterId === cl.id ? (
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }} onClick={e => e.stopPropagation()}>
                                                         <input 
                                                             type="text" 
                                                             value={editingClusterName}
@@ -523,9 +728,9 @@ export default function MediaView({ employees = [] }) {
                                                                 border: '1px solid var(--border-glass)',
                                                                 background: 'var(--input-bg)',
                                                                 color: 'var(--text-primary)',
-                                                                fontSize: '0.9rem',
+                                                                fontSize: '0.85rem',
                                                                 outline: 'none',
-                                                                width: '180px'
+                                                                width: '140px'
                                                             }}
                                                             disabled={renameLoading}
                                                             autoFocus
@@ -562,10 +767,17 @@ export default function MediaView({ employees = [] }) {
                                                         </button>
                                                     </div>
                                                 ) : (
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                        <h4 style={{ margin: 0, fontWeight: 700, color: '#4f46e5' }}>{cl.name}</h4>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                        <h4 style={{ margin: 0, fontWeight: 700, color: isFocused ? '#f97316' : 'var(--text-primary)' }}>
+                                                            {cl.name}
+                                                        </h4>
+                                                        {isFocused && (
+                                                            <span style={{ fontSize: '11px', color: '#f97316', fontWeight: 700, marginLeft: '2px' }}>
+                                                                ● Active
+                                                            </span>
+                                                        )}
                                                         <button 
-                                                            onClick={() => { setEditingClusterId(cl.id); setEditingClusterName(cl.name); }}
+                                                            onClick={(e) => { e.stopPropagation(); setEditingClusterId(cl.id); setEditingClusterName(cl.name); }}
                                                             style={{
                                                                 background: 'none',
                                                                 border: 'none',
@@ -580,22 +792,35 @@ export default function MediaView({ employees = [] }) {
                                                         </button>
                                                     </div>
                                                 )}
-                                                <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                                                    Center: {cl.centerLatitude.toFixed(5)}, {cl.centerLongitude.toFixed(5)} <br/>
-                                                    Radius Bounds: {cl.radius}m
+                                                <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', color: '#64748b' }}>
+                                                    Coordinates: {Number(cl.centerLatitude).toFixed(5)}, {Number(cl.centerLongitude).toFixed(5)} <br/>
+                                                    Radius: {cl.radius}m
                                                 </p>
                                             </div>
                                             <button 
-                                                onClick={() => focusClusterOnMap(cl)}
+                                                onClick={(e) => { e.stopPropagation(); focusClusterOnMap(cl); }}
                                                 className="btn btn-outline"
-                                                style={{ padding: '6px 12px', fontSize: '0.8rem' }}
+                                                style={{ 
+                                                    margin: 0,
+                                                    padding: '4px 8px', 
+                                                    fontSize: '0.75rem',
+                                                    borderColor: '#3b82f6',
+                                                    color: '#3b82f6',
+                                                    background: isFocused ? 'rgba(59, 130, 246, 0.1)' : 'var(--input-bg)',
+                                                    borderRadius: '6px',
+                                                    cursor: 'pointer',
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    gap: '5px'
+                                                }}
+                                                title="Focus map on site location"
                                             >
-                                                <i className="fa-solid fa-crosshairs"></i> Focus Map
+                                                <i className="fa-solid fa-eye"></i> View Map
                                             </button>
                                         </div>
                                         
                                         {/* Mini photos thumbnails list within the cluster */}
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', borderTop: '1px solid var(--border-glass)', paddingTop: '8px' }}>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', borderTop: '1px solid var(--border-glass)', paddingTop: '8px' }} onClick={e => e.stopPropagation()}>
                                             <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-primary)' }}>
                                                 Grouped Uploads ({cl.media ? cl.media.length : 0}):
                                             </span>
@@ -613,16 +838,19 @@ export default function MediaView({ employees = [] }) {
                                             </div>
                                         </div>
                                     </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         )}
                     </div>
 
                     {/* Right side: Radius settings form & map circles */}
-                    <div className="glass" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '15px', height: '100%' }}>
-                        <h3>Configuration & Map Preview</h3>
+                    <div className="glass" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px', height: '100%' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700 }}>Configuration & Map Preview</h3>
+                        </div>
                         
-                        <form onSubmit={handleSaveSettings} className="glass" style={{ padding: '15px', display: 'flex', flexDirection: 'column', gap: '12px', background: 'var(--bg-glass)' }}>
+                        <form onSubmit={handleSaveSettings} className="glass" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '10px', background: 'var(--bg-glass)' }}>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                     <label style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)' }}>
@@ -646,15 +874,59 @@ export default function MediaView({ employees = [] }) {
                             <button 
                                 type="submit" 
                                 className="btn btn-primary" 
-                                style={{ height: '38px', fontWeight: 600 }}
+                                style={{ height: '36px', fontWeight: 600, fontSize: '0.85rem' }}
                                 disabled={settingsLoading}
                             >
                                 {settingsLoading ? 'Saving Settings...' : 'Update Clustering radius'}
                             </button>
                         </form>
 
-                        <div style={{ flex: 1, minHeight: '320px', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border-glass)', position: 'relative' }}>
+                        {/* Leaflet Map with Floating Banner (Matches GeofenceView) */}
+                        <div style={{ flex: 1, minHeight: '320px', borderRadius: '10px', overflow: 'hidden', border: '1px solid var(--border-glass)', position: 'relative' }}>
                             <div ref={mapRef} style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }} />
+                            
+                            {/* Floating banner on map (Exact match to GeofenceView) */}
+                            <div style={{
+                                position: 'absolute',
+                                bottom: '10px',
+                                left: '10px',
+                                zIndex: 1000,
+                                background: 'var(--bg-glass, #ffffff)',
+                                color: 'var(--text-primary)',
+                                border: '1px solid var(--border-glass, #e2e8f0)',
+                                padding: '6px 12px',
+                                borderRadius: '6px',
+                                fontSize: '0.75rem',
+                                fontWeight: 500,
+                                boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                                pointerEvents: 'none',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px'
+                            }}>
+                                <i className="fa-solid fa-location-dot" style={{ color: '#2563eb' }}></i> 
+                                Click any site row in table to fly map directly onto location pin.
+                            </div>
+                        </div>
+
+                        {/* Map Legend (Matches GeofenceView) */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted, #64748b)', padding: '0 4px' }}>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#f97316' }}></span>
+                                Active Focused Site
+                            </span>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#2563eb' }}></span>
+                                Office Geofence
+                            </span>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981' }}></span>
+                                Grouped Photos
+                            </span>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ef4444' }}></span>
+                                Outside Geofence
+                            </span>
                         </div>
                     </div>
                 </div>

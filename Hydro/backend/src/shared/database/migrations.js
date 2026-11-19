@@ -511,6 +511,39 @@ const runMigrations = async (sequelize) => {
       console.warn('payroll_runs lop_source migration warning:', err.message);
     }
   }
+
+  // Migration: Settings table SMTP configuration columns
+  try {
+    if (isPostgres) {
+      await sequelize.query('ALTER TABLE settings ADD COLUMN IF NOT EXISTS smtp_host VARCHAR(255) DEFAULT \'smtp.gmail.com\';');
+      await sequelize.query('ALTER TABLE settings ADD COLUMN IF NOT EXISTS smtp_port INTEGER DEFAULT 465;');
+      await sequelize.query('ALTER TABLE settings ADD COLUMN IF NOT EXISTS smtp_user VARCHAR(255);');
+      await sequelize.query('ALTER TABLE settings ADD COLUMN IF NOT EXISTS smtp_pass VARCHAR(255);');
+      await sequelize.query('ALTER TABLE settings ADD COLUMN IF NOT EXISTS smtp_from_name VARCHAR(255) DEFAULT \'Hydro HRMS\';');
+      await sequelize.query('ALTER TABLE settings ADD COLUMN IF NOT EXISTS smtp_secure BOOLEAN DEFAULT true;');
+    } else {
+      await sequelize.query('ALTER TABLE settings ADD COLUMN smtp_host VARCHAR(255) DEFAULT \'smtp.gmail.com\';');
+      await sequelize.query('ALTER TABLE settings ADD COLUMN smtp_port INTEGER DEFAULT 465;');
+      await sequelize.query('ALTER TABLE settings ADD COLUMN smtp_user VARCHAR(255);');
+      await sequelize.query('ALTER TABLE settings ADD COLUMN smtp_pass VARCHAR(255);');
+      await sequelize.query('ALTER TABLE settings ADD COLUMN smtp_from_name VARCHAR(255) DEFAULT \'Hydro HRMS\';');
+      await sequelize.query('ALTER TABLE settings ADD COLUMN smtp_secure BOOLEAN DEFAULT 1;');
+    }
+    console.log('Migrated settings: added smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from_name, smtp_secure.');
+  } catch (err) {
+    if (!err.message.includes('duplicate column') && !err.message.includes('already exists')) {
+      console.warn('settings SMTP migration warning:', err.message);
+    }
+  }
+
+  // Migration: OtpVerification table
+  try {
+    const OtpVerification = require('../models/OtpVerification');
+    await OtpVerification.sync();
+    console.log('Synchronized OtpVerification table.');
+  } catch (err) {
+    console.warn('OtpVerification table sync warning:', err.message);
+  }
 };
 
 module.exports = { runMigrations };

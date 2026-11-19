@@ -3851,7 +3851,7 @@ html[data-theme='dark'] body.invoice-body, [data-theme='dark'] .dashboard { back
   font-weight: 600;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 900px) {
   body.invoice-body {
     overflow-y: auto !important;
     height: auto !important;

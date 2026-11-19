@@ -91,12 +91,47 @@ exports.scheduleNotification = async (req, res) => {
 
 exports.getHistory = async (req, res) => {
   try {
-    const { page = 1, limit = 20 } = req.query;
-    const offset = (page - 1) * limit;
+    const { page = 1, limit = 20, date, startDate, endDate, type, target } = req.query;
+    const parsedLimit = limit === 'all' ? 1000 : Math.min(1000, Math.max(1, parseInt(limit) || 20));
+    const offset = (Math.max(1, parseInt(page) || 1) - 1) * parsedLimit;
+    
+    const whereClause = {};
+
+    if (date) {
+      // Support YYYY-MM-DD in IST timezone (Asia/Kolkata +05:30)
+      const dateStr = String(date).trim();
+      const startOfDay = new Date(`${dateStr}T00:00:00.000+05:30`);
+      const endOfDay = new Date(`${dateStr}T23:59:59.999+05:30`);
+      if (!isNaN(startOfDay.getTime()) && !isNaN(endOfDay.getTime())) {
+        whereClause.createdAt = { [Op.between]: [startOfDay, endOfDay] };
+      }
+    } else if (startDate || endDate) {
+      const dateRange = {};
+      if (startDate) {
+        const s = new Date(`${String(startDate).trim()}T00:00:00.000+05:30`);
+        if (!isNaN(s.getTime())) dateRange[Op.gte] = s;
+      }
+      if (endDate) {
+        const e = new Date(`${String(endDate).trim()}T23:59:59.999+05:30`);
+        if (!isNaN(e.getTime())) dateRange[Op.lte] = e;
+      }
+      if (Object.keys(dateRange).length > 0) {
+        whereClause.createdAt = dateRange;
+      }
+    }
+
+    if (type) {
+      whereClause.type = type;
+    }
+    if (target) {
+      whereClause.target = target;
+    }
     
     const notifications = await Notification.findAndCountAll({
+      where: whereClause,
+      distinct: true,
       order: [['createdAt', 'DESC']],
-      limit: parseInt(limit),
+      limit: parsedLimit,
       offset: parseInt(offset),
       include: [{ model: NotificationLog, as: 'logs' }]
     });
@@ -198,7 +233,7 @@ exports.getHistory = async (req, res) => {
       };
     });
 
-    res.json({ success: true, data: formattedRows, total: notifications.count, page: parseInt(page), limit: parseInt(limit) });
+    res.json({ success: true, data: formattedRows, total: notifications.count, page: parseInt(page) || 1, limit: parsedLimit });
   } catch (error) {
     console.error('Error fetching history:', error);
     res.status(500).json({ success: false, message: 'Internal server error' });

@@ -66,6 +66,26 @@ export default function DashboardView({ employees: propEmployees = [], totalEmpl
     const [activeTab, setActiveTab] = useState('ALL'); // 'ALL' | 'ANNOUNCEMENTS' | 'BIRTHDAYS' | 'HOLIDAYS'
     const [loadingHighlights, setLoadingHighlights] = useState(true);
 
+    // Full-day date filter for notifications & announcements
+    const getTodayDateStr = () => {
+        const d = new Date();
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
+
+    const getYesterdayDateStr = () => {
+        const d = new Date();
+        d.setDate(d.getDate() - 1);
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
+
+    const [notifDate, setNotifDate] = useState(getTodayDateStr);
+
     // Modal state for creating dynamic announcements
     const [showModal, setShowModal] = useState(false);
     const [title, setTitle] = useState('');
@@ -95,15 +115,16 @@ export default function DashboardView({ employees: propEmployees = [], totalEmpl
 
     const formatRelativeTime = (dateStr) => {
         if (!dateStr) return 'Just Now';
-        const diffMs = new Date() - new Date(dateStr);
+        const d = new Date(dateStr);
+        if (isNaN(d.getTime())) return 'Just Now';
+        const timeStr = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+        const diffMs = new Date() - d;
         const diffMins = Math.floor(diffMs / 60000);
-        if (diffMins < 2) return 'Just Now';
-        if (diffMins < 60) return `${diffMins} mins ago`;
+        if (diffMins < 2) return `Just Now (${timeStr})`;
+        if (diffMins < 60) return `${diffMins} mins ago (${timeStr})`;
         const diffHours = Math.floor(diffMins / 60);
-        if (diffHours < 24) return `${diffHours} hrs ago`;
-        const diffDays = Math.floor(diffHours / 24);
-        if (diffDays === 1) return 'Yesterday';
-        return `${diffDays} days ago`;
+        if (diffHours < 24 && d.toDateString() === new Date().toDateString()) return `${diffHours} hrs ago (${timeStr})`;
+        return `${timeStr} • ${d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}`;
     };
 
     const [wishingEmpId, setWishingEmpId] = useState(null);
@@ -549,10 +570,15 @@ export default function DashboardView({ employees: propEmployees = [], totalEmpl
         setHolidays(processed);
     };
 
-    const fetchAnnouncements = async () => {
+    const fetchAnnouncements = async (overrideDate) => {
         setLoadingHighlights(true);
+        const dateToQuery = overrideDate !== undefined ? overrideDate : notifDate;
         try {
-            const res = await api.getNotificationHistory({ limit: 15 });
+            const params = { limit: 500 };
+            if (dateToQuery) {
+                params.date = dateToQuery;
+            }
+            const res = await api.getNotificationHistory(params);
             let history = [];
             if (res && res.data && Array.isArray(res.data)) {
                 history = res.data;
@@ -682,7 +708,7 @@ export default function DashboardView({ employees: propEmployees = [], totalEmpl
 
     useEffect(() => {
         fetchDashboardData();
-        fetchAnnouncements();
+        fetchAnnouncements(notifDate);
         loadHolidays();
 
         // Controlled background auto-refresh every 60 seconds only if tab is visible and not busy
@@ -709,6 +735,11 @@ export default function DashboardView({ employees: propEmployees = [], totalEmpl
         };
     }, []);
 
+    // Re-fetch notifications whenever selected date changes
+    useEffect(() => {
+        fetchAnnouncements(notifDate);
+    }, [notifDate]);
+
     const handleCreateAnnouncement = async (e) => {
         e.preventDefault();
         if (!title.trim() || !body.trim()) {
@@ -733,6 +764,12 @@ export default function DashboardView({ employees: propEmployees = [], totalEmpl
 
     const getBadgeStyle = (cat) => {
         const catUpper = (cat || '').toUpperCase();
+        if (catUpper.includes('OVERDUE')) {
+            return { color: '#ef4444', bg: 'rgba(239, 68, 68, 0.08)', border: 'rgba(239, 68, 68, 0.25)', icon: '⚠️' };
+        }
+        if (catUpper.includes('EXTENDED')) {
+            return { color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.08)', border: 'rgba(245, 158, 11, 0.25)', icon: '⏳' };
+        }
         if (catUpper.includes('OUTSIDE_GEOFENCE') || catUpper.includes('GEOFENCE')) {
             return { color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.08)', border: 'rgba(245, 158, 11, 0.25)', icon: '⚠️' };
         }
@@ -967,6 +1004,109 @@ export default function DashboardView({ employees: propEmployees = [], totalEmpl
                         >
                             🌴 Holidays ({holidays.length})
                         </button>
+                    </div>
+
+                    {/* Date Selector Filter Bar for Full-Day Notifications */}
+                    <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        flexWrap: 'wrap',
+                        gap: '10px',
+                        padding: '8px 14px',
+                        borderRadius: '12px',
+                        background: 'var(--bg-glass, rgba(255,255,255,0.03))',
+                        border: '1px solid var(--border-glass, #334155)',
+                        fontSize: '12px'
+                    }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 700, color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                                <i className="fa-regular fa-calendar-days" style={{ color: '#2563eb' }}></i> Filter by Date:
+                            </span>
+                            
+                            {/* Quick Filter: Today (Full Day) */}
+                            <button
+                                type="button"
+                                onClick={() => setNotifDate(getTodayDateStr())}
+                                style={{
+                                    padding: '4px 12px',
+                                    borderRadius: '8px',
+                                    border: '1px solid ' + (notifDate === getTodayDateStr() ? '#2563eb' : 'var(--border-glass)'),
+                                    background: notifDate === getTodayDateStr() ? '#2563eb' : 'transparent',
+                                    color: notifDate === getTodayDateStr() ? '#ffffff' : 'var(--text-primary)',
+                                    fontWeight: 700,
+                                    fontSize: '11px',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s'
+                                }}
+                            >
+                                Today (Full Day)
+                            </button>
+
+                            {/* Quick Filter: Yesterday */}
+                            <button
+                                type="button"
+                                onClick={() => setNotifDate(getYesterdayDateStr())}
+                                style={{
+                                    padding: '4px 12px',
+                                    borderRadius: '8px',
+                                    border: '1px solid ' + (notifDate === getYesterdayDateStr() ? '#2563eb' : 'var(--border-glass)'),
+                                    background: notifDate === getYesterdayDateStr() ? '#2563eb' : 'transparent',
+                                    color: notifDate === getYesterdayDateStr() ? '#ffffff' : 'var(--text-primary)',
+                                    fontWeight: 700,
+                                    fontSize: '11px',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s'
+                                }}
+                            >
+                                Yesterday
+                            </button>
+
+                            {/* Custom Date Input for Any Particular Date */}
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                                <input
+                                    type="date"
+                                    value={notifDate}
+                                    onChange={(e) => {
+                                        if (e.target.value) setNotifDate(e.target.value);
+                                    }}
+                                    max={getTodayDateStr()}
+                                    style={{
+                                        padding: '4px 10px',
+                                        borderRadius: '8px',
+                                        border: '1px solid var(--border-glass)',
+                                        background: 'var(--input-bg)',
+                                        color: 'var(--text-primary)',
+                                        fontSize: '11px',
+                                        fontWeight: 700,
+                                        outline: 'none',
+                                        cursor: 'pointer'
+                                    }}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Day Stream Summary Badge */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{
+                                background: 'rgba(16, 185, 129, 0.12)',
+                                color: '#10b981',
+                                padding: '3px 10px',
+                                borderRadius: '12px',
+                                fontWeight: 800,
+                                fontSize: '11px',
+                                border: '1px solid rgba(16, 185, 129, 0.25)',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '5px'
+                            }}>
+                                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981' }}></span>
+                                {announcements.length} Notification{announcements.length !== 1 ? 's' : ''}
+                            </span>
+                            <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>
+                                {notifDate === getTodayDateStr() ? 'All Day: 00:00 to 23:59' : `Full Day: ${notifDate}`}
+                            </span>
+                        </div>
                     </div>
                     
                     {/* Feed Cards Scroll Area */}

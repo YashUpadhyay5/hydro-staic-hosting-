@@ -809,10 +809,31 @@ class ApiService {
     getPayslips() {
         return this.request('/payroll/payslips');
     }
-    dispatchPayslips(month) {
+    dispatchPayslips(monthOrParams, channel = 'both', payslipIds = null) {
+        let payload = {};
+        if (typeof monthOrParams === 'object' && monthOrParams !== null) {
+            payload = { ...monthOrParams };
+            if (!payload.channel) payload.channel = 'both';
+        } else {
+            payload = { month: monthOrParams, channel };
+            if (payslipIds) payload.payslipIds = payslipIds;
+        }
         return this.request('/payroll/dispatch-payslips', {
             method: 'POST',
-            body: JSON.stringify({ month })
+            body: JSON.stringify(payload)
+        });
+    }
+
+    dispatchSinglePayslip(payslipId, channel = 'both') {
+        return this.request(`/payroll/payslips/${payslipId}/dispatch`, {
+            method: 'POST',
+            body: JSON.stringify({ channel })
+        });
+    }
+
+    sendSinglePayslipEmail(payslipId) {
+        return this.request(`/payroll/payslips/${payslipId}/send-email`, {
+            method: 'POST'
         });
     }
 
@@ -917,6 +938,13 @@ class ApiService {
 
     getAcknowledgments() {
         return this.request('/acknowledgments');
+    }
+
+    sendTestEmail(payload) {
+        return this.request('/settings/test-email', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
     }
 
     // ==========================================

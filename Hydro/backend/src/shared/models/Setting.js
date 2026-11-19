@@ -86,6 +86,34 @@ const Setting = sequelize.define('Setting', {
     type: DataTypes.BOOLEAN,
     allowNull: false,
     defaultValue: true,
+  },
+  smtp_host: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    defaultValue: 'smtp.gmail.com',
+  },
+  smtp_port: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    defaultValue: 465,
+  },
+  smtp_user: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  smtp_pass: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  smtp_from_name: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    defaultValue: 'Hydro HRMS',
+  },
+  smtp_secure: {
+    type: DataTypes.BOOLEAN,
+    allowNull: true,
+    defaultValue: true,
   }
 }, {
   tableName: 'settings',

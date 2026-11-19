@@ -19,6 +19,8 @@ const PayrollQueue = require('../services/PayrollQueue');
 const PayslipGenerator = require('../services/PayslipGenerator');
 const PayCalculator = require('../services/PayCalculator');
 const professionalTaxRoutes = require('./professionalTax');
+const EmailService = require('../../../core/services/EmailService');
+const NotificationService = require('../../hrms/notification/services/NotificationService');
 const { Op } = require('sequelize');
 
 // Mount Professional Tax configuration & calculation routes
@@ -781,7 +783,7 @@ router.get('/payslips', async (req, res) => {
   try {
     const payslips = await Payslip.findAll({
       include: [
-        { model: Employee, as: 'employee', attributes: ['name', 'department', 'designation'] },
+        { model: Employee, as: 'employee', attributes: ['id', 'empCode', 'name', 'email', 'department', 'designation'] },
         { model: PayrollItem, as: 'payrollItem', attributes: ['netSalary', 'grossEarned', 'totalDeductions', 'workedDays', 'lopDays'] }
       ],
       order: [['month', 'DESC']]
@@ -1086,47 +1088,324 @@ router.get('/payslips/download-archive', async (req, res) => {
   }
 });
 
+// Helper to share payslip PDF to employee mobile app and dispatch push notification
+async function sharePayslipToApp({ ps, employee, month, uploaderId = 'ADMIN', uploaderName = 'System Admin' }) {
+  if (!ps || !ps.filePath) {
+    return { success: false, error: 'Payslip file path is missing' };
+  }
+
+  const targetEmpId = employee.id || ps.employeeId;
+  const targetEmpName = employee.name || 'Employee';
+
+  // Deduplication: look for existing document for this payslip / month
+  let doc = await Document.findOne({
+    where: {
+      targetType: 'INDIVIDUAL',
+      targetUserId: targetEmpId,
+      title: `Payslip - ${month}`
+    }
+  });
+
+  if (doc) {
+    doc.filePath = ps.filePath;
+    doc.uploadedAt = Date.now();
+    await doc.save();
+  } else {
+    doc = await Document.create({
+      title: `Payslip - ${month}`,
+      filePath: ps.filePath,
+      uploaderId: uploaderId || 'ADMIN',
+      uploaderName: uploaderName || 'System Admin',
+      targetType: 'INDIVIDUAL',
+      targetUserId: targetEmpId,
+      targetUserName: targetEmpName,
+      fileType: 'pdf',
+      fileSize: 1024,
+      uploadedAt: Date.now()
+    });
+  }
+
+  // Push notification to mobile phone via Firebase Cloud Messaging
+  try {
+    if (NotificationService && typeof NotificationService.sendToEmployee === 'function') {
+      await NotificationService.sendToEmployee(
+        targetEmpId,
+        `Salary Slip Released: ${month}`,
+        `Hello ${targetEmpName}, your payslip for ${month} has been published and is available in your app documents.`,
+        {
+          type: 'PAYSLIP_RELEASE',
+          month,
+          payslipId: ps.id,
+          documentId: doc.id
+        },
+        uploaderId
+      );
+    }
+  } catch (notifErr) {
+    console.warn(`⚠️ Push notification failed for ${targetEmpName}:`, notifErr.message);
+  }
+
+  ps.appSentStatus = true;
+  await ps.save();
+
+  return { success: true, docId: doc.id };
+}
+
 router.post('/dispatch-payslips', async (req, res) => {
   try {
-    const { month } = req.body;
-    if (!month) return res.status(400).json({ error: 'month is required' });
+    const { month, channel = 'both', payslipIds } = req.body;
+    if (!month && (!payslipIds || !payslipIds.length)) {
+      return res.status(400).json({ error: 'month or payslipIds is required' });
+    }
+
+    const whereClause = {};
+    if (payslipIds && Array.isArray(payslipIds) && payslipIds.length > 0) {
+      whereClause.id = { [Op.in]: payslipIds };
+    } else if (month) {
+      whereClause.month = month;
+    }
 
     const payslips = await Payslip.findAll({
-      where: { month },
-      include: [{ model: Employee, as: 'employee' }]
+      where: whereClause,
+      include: [
+        { model: Employee, as: 'employee' },
+        { model: PayrollItem, as: 'payrollItem' }
+      ]
     });
 
-    let dispatchCount = 0;
+    let emailCount = 0;
+    let appCount = 0;
+    let failedEmailCount = 0;
+    const errors = [];
+
+    const shouldSendEmail = channel === 'both' || channel === 'email';
+    const shouldSendApp = channel === 'both' || channel === 'app';
 
     for (const ps of payslips) {
       if (!ps.employee) continue;
 
-      // Mark email as sent
-      ps.emailSentStatus = true;
-      await ps.save();
+      const emp = ps.employee;
 
-      // Share document to employee app
-      if (ps.filePath) {
-        await Document.create({
-          title: `Payslip - ${month}`,
-          filePath: ps.filePath,
-          uploaderId: (req.user && req.user.id) || 'ADMIN',
-          uploaderName: (req.user && req.user.name) || 'System Admin',
-          targetType: 'INDIVIDUAL',
-          targetUserId: ps.employee.id,
-          targetUserName: ps.employee.name,
-          fileType: 'pdf', // payslip generated is html, but assuming pdf handling
-          fileSize: 1024,
-          uploadedAt: Date.now()
-        });
+      // 1. Dispatch Email (Gmail SMTP hydromaterials9@gmail.com / Resend fallback)
+      if (shouldSendEmail) {
+        const targetEmail = emp.email ? String(emp.email).trim() : null;
+        if (!targetEmail) {
+          failedEmailCount++;
+          errors.push(`${emp.name || emp.id}: No registered email address`);
+        } else {
+          const netPay = ps.payrollItem?.netSalary ?? null;
+          const emailResult = await EmailService.sendPayslipEmail({
+            to: targetEmail,
+            employeeName: emp.name,
+            empCode: emp.empCode || emp.id,
+            month: ps.month,
+            netPay: netPay,
+            pdfPath: ps.filePath,
+            designation: emp.designation
+          });
+
+          if (emailResult.success) {
+            ps.emailSentStatus = true;
+            emailCount++;
+          } else {
+            failedEmailCount++;
+            errors.push(`${emp.name} (${targetEmail}): ${emailResult.error}`);
+          }
+        }
       }
 
-      console.log(`[Email Service Mock] Sent Payslip for ${month} to ${ps.employee.email}`);
-      dispatchCount++;
+      // 2. Share to Mobile App + FCM Push Notification
+      if (shouldSendApp && ps.filePath) {
+        try {
+          const appRes = await sharePayslipToApp({
+            ps,
+            employee: emp,
+            month: ps.month || month,
+            uploaderId: (req.user && req.user.id) || 'ADMIN',
+            uploaderName: (req.user && req.user.name) || 'System Admin'
+          });
+          if (appRes.success) {
+            appCount++;
+          }
+        } catch (appErr) {
+          console.warn(`⚠️ App dispatch error for ${emp.name}:`, appErr.message);
+        }
+      }
+
+      await ps.save();
     }
 
-    return res.status(200).json({ message: `Successfully dispatched ${dispatchCount} payslips.` });
+    let summary = '';
+    if (channel === 'both') {
+      summary = `Dispatched to Both: ${emailCount} emailed, ${appCount} published to Mobile App.`;
+    } else if (channel === 'email') {
+      summary = `Dispatched ${emailCount} payslip${emailCount === 1 ? '' : 's'} via Email.`;
+    } else {
+      summary = `Published ${appCount} payslip${appCount === 1 ? '' : 's'} to Mobile App.`;
+    }
+
+    if (failedEmailCount > 0 && shouldSendEmail) {
+      summary += ` (${failedEmailCount} email issues)`;
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: summary,
+      channel,
+      emailCount,
+      appCount,
+      failedEmailCount,
+      errors: errors.slice(0, 5)
+    });
   } catch (error) {
+    console.error('Dispatch payslips error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/payroll/payslips/:id/dispatch - Unified single payslip dispatch (both, email, or app)
+router.post('/payslips/:id/dispatch', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { channel = 'both' } = req.body;
+
+    const ps = await Payslip.findByPk(id, {
+      include: [
+        { model: Employee, as: 'employee' },
+        { model: PayrollItem, as: 'payrollItem' }
+      ]
+    });
+
+    if (!ps) {
+      return res.status(404).json({ error: 'Payslip record not found.' });
+    }
+    if (!ps.employee) {
+      return res.status(400).json({ error: 'No employee record associated with this payslip.' });
+    }
+
+    const emp = ps.employee;
+    let emailSent = false;
+    let appSent = false;
+    let emailError = null;
+
+    const shouldSendEmail = channel === 'both' || channel === 'email';
+    const shouldSendApp = channel === 'both' || channel === 'app';
+
+    // 1. Email Dispatch
+    if (shouldSendEmail) {
+      const targetEmail = emp.email ? String(emp.email).trim() : null;
+      if (!targetEmail) {
+        if (channel === 'email') {
+          return res.status(400).json({ error: `Employee ${emp.name} has no registered email address.` });
+        }
+        emailError = 'No registered email address';
+      } else {
+        const netPay = ps.payrollItem?.netSalary ?? null;
+        const emailResult = await EmailService.sendPayslipEmail({
+          to: targetEmail,
+          employeeName: emp.name,
+          empCode: emp.empCode || emp.id,
+          month: ps.month,
+          netPay: netPay,
+          pdfPath: ps.filePath,
+          designation: emp.designation
+        });
+
+        if (emailResult.success) {
+          ps.emailSentStatus = true;
+          emailSent = true;
+        } else {
+          emailError = emailResult.error;
+          if (channel === 'email') {
+            return res.status(500).json({ error: `Failed to deliver email: ${emailResult.error}` });
+          }
+        }
+      }
+    }
+
+    // 2. Mobile App Dispatch
+    if (shouldSendApp && ps.filePath) {
+      const appRes = await sharePayslipToApp({
+        ps,
+        employee: emp,
+        month: ps.month,
+        uploaderId: (req.user && req.user.id) || 'ADMIN',
+        uploaderName: (req.user && req.user.name) || 'System Admin'
+      });
+      if (appRes.success) {
+        appSent = true;
+      }
+    }
+
+    await ps.save();
+
+    let msg = '';
+    if (channel === 'both') {
+      msg = `Payslip for ${ps.month} sent to ${emp.name} via ${emailSent ? 'Email' : ''}${emailSent && appSent ? ' & ' : ''}${appSent ? 'Mobile App' : ''}.`;
+      if (emailError) msg += ` (Email notice: ${emailError})`;
+    } else if (channel === 'email') {
+      msg = `Payslip for ${ps.month} emailed to ${emp.name} (${emp.email}).`;
+    } else {
+      msg = `Payslip for ${ps.month} published to ${emp.name}'s Mobile App with notification.`;
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: msg,
+      channel,
+      emailSentStatus: ps.emailSentStatus,
+      appSentStatus: ps.appSentStatus
+    });
+  } catch (error) {
+    console.error('Dispatch single payslip error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/payroll/payslips/:id/send-email - Backward-compatible endpoint (defaults to email dispatch)
+router.post('/payslips/:id/send-email', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const ps = await Payslip.findByPk(id, {
+      include: [
+        { model: Employee, as: 'employee' },
+        { model: PayrollItem, as: 'payrollItem' }
+      ]
+    });
+
+    if (!ps) return res.status(404).json({ error: 'Payslip record not found.' });
+    if (!ps.employee) return res.status(400).json({ error: 'No employee record associated with this payslip.' });
+
+    const emp = ps.employee;
+    const targetEmail = emp.email ? String(emp.email).trim() : null;
+    if (!targetEmail) return res.status(400).json({ error: `Employee ${emp.name} has no registered email address.` });
+
+    const netPay = ps.payrollItem?.netSalary ?? null;
+    const emailResult = await EmailService.sendPayslipEmail({
+      to: targetEmail,
+      employeeName: emp.name,
+      empCode: emp.empCode || emp.id,
+      month: ps.month,
+      netPay: netPay,
+      pdfPath: ps.filePath,
+      designation: emp.designation
+    });
+
+    if (!emailResult.success) {
+      return res.status(500).json({ error: `Failed to deliver email: ${emailResult.error}` });
+    }
+
+    ps.emailSentStatus = true;
+    await ps.save();
+
+    return res.status(200).json({
+      message: `Payslip for ${ps.month} sent successfully to ${emp.name} (${targetEmail}).`,
+      messageId: emailResult.messageId,
+      emailSentStatus: true,
+      appSentStatus: ps.appSentStatus
+    });
+  } catch (error) {
+    console.error('Single payslip send-email error:', error);
     return res.status(500).json({ error: error.message });
   }
 });

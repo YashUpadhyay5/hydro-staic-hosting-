@@ -4,6 +4,7 @@ const sequelize = require('../../../../config/database');
 const { getCachedEmployees } = require('../../../../core/utils/employeeCache');
 const fs = require('fs');
 const path = require('path');
+const EmailService = require('../../../../core/services/EmailService');
 
 // 1. Fetch all expenses
 exports.getAllExpenses = async (req, res) => {
@@ -135,6 +136,39 @@ exports.updateExpenseStatus = async (req, res) => {
     await expense.save();
 
     console.log(`--- [BACKEND] Expense ${id} status updated to ${status} by ${expense.actionBy} ---`);
+
+    // Asynchronously dispatch decision & receipt email to employee if email is registered
+    if (status === 'approved' || status === 'rejected') {
+      (async () => {
+        try {
+          const emp = await Employee.findOne({
+            where: {
+              [sequelize.Sequelize.Op.or]: [
+                { id: expense.userId },
+                { empCode: expense.userId }
+              ]
+            }
+          });
+
+          if (emp && emp.email && emp.email.includes('@')) {
+            console.log(`✉️ [Expense Hook] Dispatching receipt email to ${emp.email} for expense #${expense.id}`);
+            await EmailService.sendExpenseDecisionEmail({
+              to: emp.email,
+              employeeName: emp.name,
+              expense: expense.toJSON(),
+              decision: status,
+              actionBy: expense.actionBy,
+              receiptPath: expense.invoiceUrl
+            });
+          } else {
+            console.log(`ℹ️ [Expense Hook] No email found for employee ${expense.userId}; skipping email notification.`);
+          }
+        } catch (mailErr) {
+          console.error('⚠️ [Expense Hook] Failed to send receipt email:', mailErr.message);
+        }
+      })();
+    }
+
     return res.status(200).json(expense);
   } catch (error) {
     console.error('❌ Update expense status exception:', error);
@@ -197,6 +231,36 @@ exports.updateExpense = async (req, res) => {
 
     await expense.save();
     console.log(`--- [BACKEND] Expense ${id} updated successfully ---`);
+
+    if (expense.status === 'approved' || expense.status === 'rejected') {
+      (async () => {
+        try {
+          const emp = await Employee.findOne({
+            where: {
+              [sequelize.Sequelize.Op.or]: [
+                { id: expense.userId },
+                { empCode: expense.userId }
+              ]
+            }
+          });
+
+          if (emp && emp.email && emp.email.includes('@')) {
+            console.log(`✉️ [Expense Hook] Dispatching receipt email to ${emp.email} for expense #${expense.id}`);
+            await EmailService.sendExpenseDecisionEmail({
+              to: emp.email,
+              employeeName: emp.name,
+              expense: expense.toJSON(),
+              decision: expense.status,
+              actionBy: expense.actionBy,
+              receiptPath: expense.invoiceUrl
+            });
+          }
+        } catch (mailErr) {
+          console.error('⚠️ [Expense Hook] Failed to send receipt email on update:', mailErr.message);
+        }
+      })();
+    }
+
     return res.status(200).json(expense);
   } catch (error) {
     console.error('❌ Update expense exception:', error);
