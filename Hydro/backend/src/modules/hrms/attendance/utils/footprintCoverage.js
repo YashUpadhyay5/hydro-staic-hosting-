@@ -1,8 +1,11 @@
 const DEFAULT_INTERVAL_MS = 30000;
 
 function parseIntervalMs(value) {
-  if (!value) return DEFAULT_INTERVAL_MS;
-  const text = String(value).toLowerCase();
+  if (typeof value === 'number') {
+    return (Number.isFinite(value) && value > 0) ? value * 1000 : DEFAULT_INTERVAL_MS;
+  }
+  const text = String(value || '').toLowerCase().trim();
+  if (text.startsWith('-')) return DEFAULT_INTERVAL_MS;
   const digits = text.replace(/[^0-9]/g, '');
   if (!digits) return DEFAULT_INTERVAL_MS;
   const multiplier = (text.includes('hour') || text.includes('hr')) ? 3600 : (text.includes('min') ? 60 : 1);
