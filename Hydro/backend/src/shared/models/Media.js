@@ -80,6 +80,10 @@ const Site = require('./Site');
 Media.belongsTo(Site, { foreignKey: 'siteId', as: 'site' });
 Site.hasMany(Media, { foreignKey: 'siteId', as: 'media' });
 
+const Geofence = require('./Geofence');
+Media.belongsTo(Geofence, { foreignKey: 'siteId', as: 'geofence' });
+Geofence.hasMany(Media, { foreignKey: 'siteId', as: 'media' });
+
 const Cluster = require('./Cluster');
 Media.belongsTo(Cluster, { foreignKey: 'clusterId', as: 'cluster' });
 Cluster.hasMany(Media, { foreignKey: 'clusterId', as: 'media' });

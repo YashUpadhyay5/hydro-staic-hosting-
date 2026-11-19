@@ -3,22 +3,36 @@ const router = express.Router();
 const Cluster = require('../../../../shared/models/Cluster');
 const ClusterSetting = require('../../../../shared/models/ClusterSetting');
 const Media = require('../../../../shared/models/Media');
+const Geofence = require('../../../../shared/models/Geofence');
 
-// GET all auto-created clusters and their associated photos
+// GET all office geofence locations as clusters (with associated photos grouped by site)
 router.get('/', async (req, res) => {
   try {
-    const clusters = await Cluster.findAll({
+    const geofences = await Geofence.findAll({
       include: [{
         model: Media,
         as: 'media',
         order: [['timestamp', 'DESC']]
       }],
-      order: [['createdAt', 'DESC']]
+      order: [['name', 'ASC']]
     });
-    return res.status(200).json(clusters);
+
+    // Map Geofence fields to Cluster shape so frontend works unchanged
+    const siteAsClusters = geofences.map(g => ({
+      id: g.id,
+      name: g.name,
+      centerLatitude: g.latitude,
+      centerLongitude: g.longitude,
+      radius: g.radius,
+      media: g.media || [],
+      createdAt: g.createdAt,
+      updatedAt: g.updatedAt
+    }));
+
+    return res.status(200).json(siteAsClusters);
   } catch (err) {
-    console.error('Error fetching clusters:', err);
-    return res.status(500).json({ error: 'Failed to retrieve spatial clusters.' });
+    console.error('Error fetching office geofence clusters:', err);
+    return res.status(500).json({ error: 'Failed to retrieve site clusters.' });
   }
 });
 
@@ -61,28 +75,28 @@ router.post('/settings', async (req, res) => {
   }
 });
 
-// PUT rename cluster
+// PUT rename geofence site (called from cluster rename UI)
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { name } = req.body;
     if (!name || name.trim() === '') {
-      return res.status(400).json({ error: 'Cluster name cannot be empty.' });
+      return res.status(400).json({ error: 'Site name cannot be empty.' });
     }
 
-    const cluster = await Cluster.findByPk(id);
-    if (!cluster) {
-      return res.status(404).json({ error: 'Cluster not found.' });
+    const gf = await Geofence.findByPk(id);
+    if (!gf) {
+      return res.status(404).json({ error: 'Site not found.' });
     }
 
-    cluster.name = name.trim();
-    await cluster.save();
+    gf.name = name.trim();
+    await gf.save();
 
-    console.log(`[Clusters] Renamed cluster ID ${id} to: ${cluster.name}`);
-    return res.status(200).json(cluster);
+    console.log(`[Site Clusters] Renamed geofence site ID ${id} to: ${gf.name}`);
+    return res.status(200).json({ id: gf.id, name: gf.name });
   } catch (err) {
-    console.error('Error updating cluster name:', err);
-    return res.status(500).json({ error: 'Failed to update cluster name.' });
+    console.error('Error updating site name:', err);
+    return res.status(500).json({ error: 'Failed to update site name.' });
   }
 });
 

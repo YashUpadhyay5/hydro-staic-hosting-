@@ -421,7 +421,7 @@ export default function MediaView({ employees = [] }) {
                         className={`tab-btn ${activeTab === 'clusters' ? 'active' : ''}`} 
                         onClick={() => setActiveTab('clusters')}
                     >
-                        <i className="fa-solid fa-circle-nodes" style={{ marginRight: '6px' }}></i> Auto-Clustering
+                        <i className="fa-solid fa-circle-nodes" style={{ marginRight: '6px' }}></i> Site Clustering
                     </button>
                 </div>
             </div>
@@ -433,7 +433,7 @@ export default function MediaView({ employees = [] }) {
                         <div style={{ display: 'flex', gap: '15px', alignItems: 'center', flexWrap: 'wrap' }}>
                             <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                    <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-primary)' }}>Filter by Cluster Group</span>
+                                    <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-primary)' }}>Filter by Site</span>
                                     <select
                                         value={selectedClusterId}
                                         onChange={(e) => setSelectedClusterId(e.target.value)}
@@ -449,7 +449,7 @@ export default function MediaView({ employees = [] }) {
                                             cursor: 'pointer'
                                         }}
                                     >
-                                        <option value="" style={{ background: '#1a1a1c', color: '#f9fafb' }}>All Dynamic Clusters</option>
+                                        <option value="" style={{ background: '#1a1a1c', color: '#f9fafb' }}>All Sites</option>
                                         <option value="unassigned" style={{ background: '#1a1a1c', color: '#f9fafb' }}>⚠️ Unassigned / Out of bounds</option>
                                         {clusters.map(cl => (
                                             <option key={cl.id} value={cl.id} style={{ background: '#1a1a1c', color: '#f9fafb' }}>
@@ -546,7 +546,7 @@ export default function MediaView({ employees = [] }) {
                                                 onClick={() => setSelectedPhoto(m)}
                                                 style={{ cursor: 'pointer', width: '100%', height: '100%', objectFit: 'cover' }}
                                             />
-                                            {/* Dynamic Cluster Badge on Photo Card */}
+                                            {/* Geofence Site Badge on Photo Card */}
                                             <span style={{
                                                 position: 'absolute',
                                                 top: '10px',
@@ -555,11 +555,11 @@ export default function MediaView({ employees = [] }) {
                                                 fontWeight: 700,
                                                 padding: '4px 8px',
                                                 borderRadius: '12px',
-                                                backgroundColor: m.cluster ? 'rgba(79, 70, 229, 0.9)' : 'rgba(107, 114, 128, 0.9)',
+                                                backgroundColor: (m.geofence || m.site || m.cluster) ? 'rgba(79, 70, 229, 0.9)' : 'rgba(107, 114, 128, 0.9)',
                                                 color: '#ffffff',
                                                 boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
                                             }}>
-                                                {m.cluster ? m.cluster.name : '⚠️ Unassigned'}
+                                                {(m.geofence?.name || m.site?.name || m.cluster?.name) || '⚠️ Unassigned'}
                                             </span>
                                         </div>
                                         <div className="media-card-body" style={{ padding: '12px' }}>

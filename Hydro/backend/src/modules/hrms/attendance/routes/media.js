@@ -65,20 +65,23 @@ router.get('/', async (req, res) => {
 
     if (cluster_id !== undefined && cluster_id !== '') {
       if (cluster_id === 'null' || cluster_id === 'unassigned') {
-        whereClause.clusterId = null;
+        whereClause.siteId = null;
       } else {
-        whereClause.clusterId = cluster_id;
+        whereClause.siteId = cluster_id;
       }
     }
 
     const mediaList = await Media.findAll({
       where: whereClause,
-      include: ['site', 'cluster'],
+      include: ['site', 'cluster', 'geofence'],
       order: [['timestamp', 'DESC']]
     });
 
     const enrichedList = mediaList.map(m => {
       const plain = m.toJSON();
+      if (plain.geofence) {
+        plain.site = plain.geofence;
+      }
       const emp = empMap.get(String(plain.userId || '').toLowerCase()) || 
                   empMap.get(String(plain.userName || '').toLowerCase());
       if (emp) {
@@ -133,83 +136,38 @@ router.post('/', (req, res, next) => {
     const filePath = `images/${req.file.filename}`;
     const cloudinaryUrl = null; // Removed Cloudinary integration for offline self-hosted mode
 
-    // 1. Dynamic Site classification
-    const { findNearestSite, getDistance } = require('../../../../core/utils/siteCache');
-    const matchedSite = findNearestSite(latitude, longitude);
-    const siteId = matchedSite ? matchedSite.id : null;
+    // 1. Dynamic Office Geofence classification (matches the 158 sites from Office Geofence Configuration)
+    const Geofence = require('../../../../shared/models/Geofence');
+    const { getDistance } = require('../../../../core/utils/siteCache');
+    let siteId = null;
 
-    // 2. Dynamic Cluster classification
-    // Grouping into a cluster is a convenience: if it fails the photo is still saved, just without a cluster
-    let clusterId = null;
-    try {
     if (latitude && longitude) {
-      const Cluster = require('../../../../shared/models/Cluster');
-      const ClusterSetting = require('../../../../shared/models/ClusterSetting');
-      
-      // Get settings
-      let setting = await ClusterSetting.findByPk(1);
-      const radiusThreshold = setting ? setting.clusterRadius : 500;
-
       const latNum = parseFloat(latitude);
       const lonNum = parseFloat(longitude);
-
-      // Find matching cluster
-      const clusters = await Cluster.findAll();
-      let matchedCluster = null;
-      let minDistance = Infinity;
-      const GPS_BUFFER = 20; // 20m GPS noise buffer
-
-      for (const cl of clusters) {
-        const dist = getDistance(latNum, lonNum, cl.centerLatitude, cl.centerLongitude);
-        if (dist <= (radiusThreshold + GPS_BUFFER)) {
-          if (dist < minDistance) {
-            minDistance = dist;
-            matchedCluster = cl;
-          }
-        }
-      }
-
-      if (matchedCluster) {
-        clusterId = matchedCluster.id;
-        // Update cluster center average
-        const siblings = await Media.findAll({ where: { clusterId: matchedCluster.id } });
-        const lats = [...siblings.map(s => s.latitude), latNum].filter(l => l !== null);
-        const lons = [...siblings.map(s => s.longitude), lonNum].filter(l => l !== null);
-        
-        matchedCluster.centerLatitude = lats.reduce((a, b) => a + b, 0) / lats.length;
-        matchedCluster.centerLongitude = lons.reduce((a, b) => a + b, 0) / lons.length;
-        await matchedCluster.save();
-      } else {
-        // Create new cluster
-        const count = await Cluster.count();
-        let clusterName = `Cluster #${count + 1}`;
-        if (address) {
-          const parts = address.split(',').map(p => p.trim()).filter(Boolean);
-          if (parts.length > 0) {
-            const firstPart = parts[0];
-            const hasPlus = firstPart.includes('+');
-            const isShortNumeric = /^\d+[\d\/\-\s]*$/.test(firstPart);
-            if ((hasPlus || isShortNumeric) && parts.length > 1) {
-              clusterName = parts.slice(1, 3).join(', ');
-            } else {
-              clusterName = parts.slice(0, 2).join(', ');
+      if (!isNaN(latNum) && !isNaN(lonNum)) {
+        try {
+          const geofences = await Geofence.findAll();
+          let closestGf = null;
+          let minDist = Infinity;
+          for (const gf of geofences) {
+            const dist = getDistance(latNum, lonNum, Number(gf.latitude), Number(gf.longitude));
+            const maxAllowed = (Number(gf.radius) || 300) + 30; // 30m GPS drift buffer
+            if (dist <= maxAllowed && dist < minDist) {
+              minDist = dist;
+              closestGf = gf;
             }
           }
+          if (closestGf) {
+            siteId = closestGf.id;
+          }
+        } catch (gfErr) {
+          console.warn('[Media Upload] Geofence resolution error:', gfErr.message);
         }
-
-        const newCluster = await Cluster.create({
-          name: clusterName,
-          centerLatitude: latNum,
-          centerLongitude: lonNum,
-          radius: radiusThreshold
-        });
-        clusterId = newCluster.id;
       }
     }
-    } catch (clusterError) {
-      console.error('Cluster classification failed, saving the photo without a cluster:', clusterError.message);
-      clusterId = null;
-    }
+
+    // 2. Photo groups under matched Geofence Site
+    const clusterId = null;
 
     const newMedia = await Media.create({
       userId: finalUserId,
@@ -228,7 +186,7 @@ router.post('/', (req, res, next) => {
 
     // Load with associations for immediate frontend updates
     const finalMedia = await Media.findByPk(newMedia.id, {
-      include: ['site', 'cluster']
+      include: ['site', 'cluster', 'geofence']
     });
 
     console.log(`[Storage Log] Geotagged media uploaded successfully. DB ID: ${newMedia.id}, Site ID: ${siteId}, Cluster ID: ${clusterId}`);
