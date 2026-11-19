@@ -1,5 +1,5 @@
 import LoadingSpinner from '../LoadingSpinner';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { api } from '../../services/api';
 import { formatDate } from '../../utils/helpers';
 import DayActivitiesPanel from './DayActivitiesPanel';
@@ -51,6 +51,18 @@ const getAuthoritativeISTDate = (d = new Date()) => {
     }
 };
 
+const getDistance = (lat1, lon1, lat2, lon2) => {
+    if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) return Infinity;
+    const toRad = (x) => (x * Math.PI) / 180;
+    const R = 6371000;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+};
+
 export default function EmployeeTrackingView({ userId, userName, employees = [], onBack, backText = 'Back to Employees' }) {
     const [trackingDate, setTrackingDate] = useState(() => {
         try {
@@ -67,6 +79,26 @@ export default function EmployeeTrackingView({ userId, userName, employees = [],
     const [loading, setLoading] = useState(true);
     const [selectedFootprintKey, setSelectedFootprintKey] = useState(null);
     const [addresses, setAddresses] = useState({});
+
+    // Geofence Sites & Employee Residences for Map Visualization
+    const [geofences, setGeofences] = useState([]);
+    const [houseGeofences, setHouseGeofences] = useState([]);
+    const geofenceLayersGroupRef = useRef(null);
+
+    const matchedEmp = useMemo(() => {
+        return (employees || []).find(e => {
+            if (!e) return false;
+            const uLower = String(userId || '').trim().toLowerCase();
+            const nameLower = String(userName || '').trim().toLowerCase();
+            return (e.id && (String(e.id).trim().toLowerCase() === uLower || String(e.id).trim().toLowerCase() === nameLower)) ||
+                   (e.empCode && (String(e.empCode).trim().toLowerCase() === uLower || String(e.empCode).trim().toLowerCase() === nameLower)) ||
+                   (e.name && (String(e.name).trim().toLowerCase() === nameLower || String(e.name).trim().toLowerCase() === uLower));
+        });
+    }, [employees, userId, userName]);
+
+    const displayName = matchedEmp?.name || userName || userId || 'Employee';
+    const displayCode = matchedEmp?.empCode || matchedEmp?.emp_code || (userId && !String(userId).startsWith('EMP0') ? userId : '');
+    const displaySubtitle = matchedEmp ? `${matchedEmp.designation || matchedEmp.jobTitle || matchedEmp.department || 'Field Staff'}` : '';
 
     // Asynchronously resolve raw coordinates to exact street address via BigDataCloud & Photon APIs
     const getDisplayAddress = (f, lat, lon, isOffStatus) => {
@@ -144,6 +176,22 @@ export default function EmployeeTrackingView({ userId, userName, employees = [],
             marker.openPopup();
         }
     };
+
+    // Fetch Geofences (Split into Work Sites & Employee Residences)
+    useEffect(() => {
+        const loadGeofences = async () => {
+            try {
+                const res = await api.getGeofences();
+                if (Array.isArray(res)) {
+                    setGeofences(res.filter(g => (g.category || 'SITE').toUpperCase() === 'SITE'));
+                    setHouseGeofences(res.filter(g => (g.category || 'SITE').toUpperCase() === 'HOUSE'));
+                }
+            } catch (err) {
+                console.warn('Error fetching geofences for tracking map:', err.message);
+            }
+        };
+        loadGeofences();
+    }, []);
 
     const fetchTrackingData = async () => {
         setLoading(true);
@@ -314,9 +362,122 @@ export default function EmployeeTrackingView({ userId, userName, employees = [],
         markersRef.current = [];
         markersMapRef.current.clear();
 
-        const latlngs = (data || [])
-            .filter(f => f.latitude && f.longitude)
-            .map(f => [parseFloat(f.latitude), parseFloat(f.longitude)]);
+        if (!geofenceLayersGroupRef.current) {
+            geofenceLayersGroupRef.current = window.L.layerGroup().addTo(mapInstance.current);
+        } else {
+            geofenceLayersGroupRef.current.clearLayers();
+        }
+
+        const validFootprints = (data || []).filter(f => f.latitude && f.longitude);
+
+        // -------------------------------------------------------------------
+        // 1. Office Work Sites: Blue circles, turning Green if visited today
+        // -------------------------------------------------------------------
+        (geofences || []).forEach(gf => {
+            if (!gf.latitude || !gf.longitude) return;
+            const gfLat = parseFloat(gf.latitude);
+            const gfLng = parseFloat(gf.longitude);
+            const gfRadius = parseFloat(gf.radius) || 100;
+
+            const isVisited = validFootprints.some(f => {
+                const dist = getDistance(parseFloat(f.latitude), parseFloat(f.longitude), gfLat, gfLng);
+                return dist <= gfRadius;
+            });
+
+            const circleColor = isVisited ? '#10b981' : '#3b82f6';
+            const circle = window.L.circle([gfLat, gfLng], {
+                color: circleColor,
+                fillColor: circleColor,
+                fillOpacity: isVisited ? 0.25 : 0.12,
+                radius: gfRadius,
+                weight: isVisited ? 2.5 : 1.5
+            });
+
+            const tooltipText = `<b>🏢 ${gf.name}</b><br/>Status: ${isVisited ? '<span style="color:#10b981;font-weight:bold;">Visited ✅</span>' : '<span style="color:#64748b;">Not Visited</span>'}<br/>Radius: ${gfRadius}m`;
+            circle.bindTooltip(tooltipText, { sticky: true, opacity: 0.95 });
+
+            const popupContent = `
+                <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 4px; font-size: 13px; color: #1e293b; min-width: 170px;">
+                    <h4 style="margin: 0 0 6px 0; font-size: 14px; color: ${isVisited ? '#059669' : '#2563eb'}; display: flex; align-items: center; gap: 6px;">
+                        🏢 ${gf.name}
+                    </h4>
+                    <div style="margin-bottom: 6px; font-weight: 700; font-size: 11.5px; color: ${isVisited ? '#10b981' : '#64748b'};">
+                        ${isVisited ? '✅ Visited by Employee Today' : '⚪ Configured Office Site'}
+                    </div>
+                    <div style="font-size: 11px; color: #64748b;">
+                        <b>Coordinates:</b> ${gfLat.toFixed(5)}, ${gfLng.toFixed(5)}<br/>
+                        <b>Radius:</b> ${gfRadius} meters
+                    </div>
+                </div>
+            `;
+            circle.bindPopup(popupContent, { minWidth: 180 });
+            circle.addTo(geofenceLayersGroupRef.current);
+        });
+
+        // -------------------------------------------------------------------
+        // 2. Employee Residences (Houses): Purple dashed circle + 🏠 Pin
+        // -------------------------------------------------------------------
+        (houseGeofences || []).forEach(house => {
+            if (!house.latitude || !house.longitude) return;
+            const hLat = parseFloat(house.latitude);
+            const hLng = parseFloat(house.longitude);
+            const hRadius = parseFloat(house.radius) || 30;
+
+            const isOwnerHouse = matchedEmp && house.employeeId && (
+                String(house.employeeId).trim().toLowerCase() === String(matchedEmp.empCode || '').trim().toLowerCase() ||
+                String(house.employeeId).trim().toLowerCase() === String(matchedEmp.id || '').trim().toLowerCase() ||
+                String(house.name || '').toLowerCase().includes(String(matchedEmp.name || '').toLowerCase().split(' ')[0])
+            );
+
+            const houseCircle = window.L.circle([hLat, hLng], {
+                color: '#8b5cf6',
+                fillColor: '#8b5cf6',
+                fillOpacity: isOwnerHouse ? 0.3 : 0.2,
+                radius: hRadius,
+                weight: isOwnerHouse ? 3 : 2,
+                dashArray: '5, 5'
+            });
+
+            const empLabel = house.employeeId ? ` (${house.employeeId})` : '';
+            const houseTooltipText = `<b>🏠 ${house.name}</b><br/><span style="color:#a78bfa;font-weight:bold;">Employee Residence</span>${empLabel}<br/>Radius: ${hRadius}m`;
+            houseCircle.bindTooltip(houseTooltipText, { sticky: true, opacity: 0.95 });
+
+            const housePopup = `
+                <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 4px; font-size: 13px; color: #1e293b; min-width: 180px;">
+                    <h4 style="margin: 0 0 6px 0; font-size: 14px; color: #8b5cf6; display: flex; align-items: center; gap: 6px;">
+                        🏠 ${house.name}
+                    </h4>
+                    <div style="font-size: 11.5px; color: #64748b; margin-bottom: 4px;">
+                        Employee Residence (Off-Duty Location)
+                    </div>
+                    ${house.employeeId ? `<div style="font-size: 12px; font-weight: 700; color: #475569;">Resident: ${house.employeeId}</div>` : ''}
+                    <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">
+                        <b>Coordinates:</b> ${hLat.toFixed(5)}, ${hLng.toFixed(5)}<br/>
+                        <b>Radius:</b> ${hRadius} meters
+                    </div>
+                </div>
+            `;
+            houseCircle.bindPopup(housePopup, { minWidth: 190 });
+            houseCircle.addTo(geofenceLayersGroupRef.current);
+
+            // Add center 🏠 pin
+            const housePin = window.L.marker([hLat, hLng], {
+                icon: window.L.divIcon({
+                    className: 'custom-house-map-marker',
+                    html: `<div style="background: #8b5cf6; color: white; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; border: 2px solid white; box-shadow: 0 2px 10px rgba(139,92,246,0.6); cursor: pointer;" title="${house.name}">🏠</div>`,
+                    iconSize: [22, 22],
+                    iconAnchor: [11, 11]
+                })
+            });
+            housePin.bindTooltip(houseTooltipText, { sticky: true });
+            housePin.bindPopup(housePopup, { minWidth: 190 });
+            housePin.addTo(geofenceLayersGroupRef.current);
+        });
+
+        // -------------------------------------------------------------------
+        // 3. Employee Footprint Trajectory Polyline & Markers
+        // -------------------------------------------------------------------
+        const latlngs = validFootprints.map(f => [parseFloat(f.latitude), parseFloat(f.longitude)]);
 
         if (latlngs.length > 0) {
             if (latlngs.length === 1) {
@@ -326,7 +487,6 @@ export default function EmployeeTrackingView({ userId, userName, employees = [],
                 mapInstance.current.fitBounds(polylineRef.current.getBounds(), { padding: [50, 50] });
             }
             
-            const validFootprints = (data || []).filter(f => f.latitude && f.longitude);
             validFootprints.forEach((f, index) => {
                 const isStart = index === 0;
                 const isEnd = index === validFootprints.length - 1;
@@ -355,6 +515,7 @@ export default function EmployeeTrackingView({ userId, userName, employees = [],
         }
     };
 
+    // Initialize Map with layer group and proper unmount teardown
     useEffect(() => {
         if (!mapInstance.current && mapRef.current && window.L) {
             mapInstance.current = window.L.map(mapRef.current).setView([28.6692, 77.4538], 10);
@@ -363,31 +524,38 @@ export default function EmployeeTrackingView({ userId, userName, employees = [],
                 maxZoom: 19
             }).addTo(mapInstance.current);
 
+            geofenceLayersGroupRef.current = window.L.layerGroup().addTo(mapInstance.current);
+
             if (footprints && footprints.length > 0) {
                 renderMapLayers(footprints);
             }
         }
 
-        setTimeout(() => {
+        const resizeTimer = setTimeout(() => {
             if (mapInstance.current) mapInstance.current.invalidateSize();
         }, 300);
-    }, [footprints]);
+
+        return () => {
+            clearTimeout(resizeTimer);
+            if (mapInstance.current) {
+                mapInstance.current.off();
+                mapInstance.current.remove();
+                mapInstance.current = null;
+                geofenceLayersGroupRef.current = null;
+            }
+        };
+    }, []);
+
+    // Re-render map layers whenever footprints or geofences update
+    useEffect(() => {
+        if (mapInstance.current) {
+            renderMapLayers(footprints);
+        }
+    }, [footprints, geofences, houseGeofences]);
 
     useEffect(() => {
         fetchTrackingData();
     }, [userId, userName, trackingDate]);
-
-    const matchedEmp = (employees || []).find(e => {
-        if (!e) return false;
-        const uLower = String(userId || '').trim().toLowerCase();
-        const nameLower = String(userName || '').trim().toLowerCase();
-        return (e.id && (String(e.id).trim().toLowerCase() === uLower || String(e.id).trim().toLowerCase() === nameLower)) ||
-               (e.empCode && (String(e.empCode).trim().toLowerCase() === uLower || String(e.empCode).trim().toLowerCase() === nameLower)) ||
-               (e.name && (String(e.name).trim().toLowerCase() === nameLower || String(e.name).trim().toLowerCase() === uLower));
-    });
-    const displayName = matchedEmp?.name || userName || userId || 'Employee';
-    const displayCode = matchedEmp?.empCode || matchedEmp?.emp_code || (userId && !String(userId).startsWith('EMP0') ? userId : '');
-    const displaySubtitle = matchedEmp ? `${matchedEmp.designation || matchedEmp.jobTitle || matchedEmp.department || 'Field Staff'}` : '';
 
     return (
         <div id="employee-tracking-view" className="view active" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -455,6 +623,49 @@ export default function EmployeeTrackingView({ userId, userName, employees = [],
             <div style={{ display: 'flex', gap: '16px', flex: 1, minHeight: 0 }}>
                 <div className="glass" style={{ flex: '2 1 600px', height: '100%', maxHeight: '640px', position: 'relative', overflow: 'hidden', borderRadius: '16px' }}>
                     <div ref={mapRef} style={{ width: '100%', height: '100%', borderRadius: '16px' }}></div>
+
+                    {/* Floating Visual Map Legend matching SiteInfoView */}
+                    <div style={{
+                        position: 'absolute',
+                        bottom: '16px',
+                        left: '16px',
+                        zIndex: 1000,
+                        background: 'rgba(15, 23, 42, 0.88)',
+                        backdropFilter: 'blur(8px)',
+                        border: '1px solid rgba(255, 255, 255, 0.12)',
+                        borderRadius: '10px',
+                        padding: '7px 13px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '12px',
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        color: '#cbd5e1',
+                        boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+                        pointerEvents: 'none',
+                        flexWrap: 'wrap'
+                    }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            <span style={{ width: '9px', height: '9px', borderRadius: '50%', background: '#3b82f6', border: '1.5px solid #fff' }}></span>
+                            Office Site
+                        </span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            <span style={{ width: '9px', height: '9px', borderRadius: '50%', background: '#10b981', border: '1.5px solid #fff' }}></span>
+                            Visited Site
+                        </span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            <span style={{ width: '9px', height: '9px', borderRadius: '50%', background: '#8b5cf6', border: '1.5px dashed #fff' }}></span>
+                            🏠 Employee House
+                        </span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            <span style={{ width: '9px', height: '9px', borderRadius: '50%', background: '#10b981', border: '1.5px solid #fff' }}></span>
+                            Start
+                        </span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            <span style={{ width: '9px', height: '9px', borderRadius: '50%', background: '#ef4444', border: '1.5px solid #fff' }}></span>
+                            Current
+                        </span>
+                    </div>
                 </div>
 
                 <DayActivitiesPanel employeeId={matchedEmp?.id || userId} date={trackingDate} />
