@@ -546,8 +546,8 @@ class EmailService {
    * Send 6-digit OTP email for password reset
    */
   async sendPasswordOtp({ to, name, otp, purpose = 'PASSWORD_RESET' }) {
-    const greetingName = name || 'Employee';
-    const subject = `Your Verification Code: ${otp} - Hydro HRMS`;
+    const greetingName = name || 'there';
+    const subject = `${otp} is your Hydro HRMS verification code`;
 
     const html = `
     <!DOCTYPE html>
@@ -557,84 +557,60 @@ class EmailService {
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <title>Verification Code</title>
     </head>
-    <body style="margin: 0; padding: 0; background-color: #f4f6f8; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; -webkit-font-smoothing: antialiased; color: #1e293b;">
-      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f4f6f8; padding: 32px 16px;">
+    <body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; -webkit-font-smoothing: antialiased; color: #0f172a;">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f8fafc; padding: 40px 16px;">
         <tr>
           <td align="center">
-            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 520px; background-color: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.04);">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 460px; background-color: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; padding: 32px 28px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);">
               
               <!-- Company Header -->
               <tr>
-                <td style="padding: 24px 32px; border-bottom: 1px solid #edf2f7;">
-                  <table width="100%" cellpadding="0" cellspacing="0" border="0">
-                    <tr>
-                      <td valign="middle">
-                        <div style="font-size: 15px; font-weight: 700; color: #0f172a; letter-spacing: -0.2px; text-transform: uppercase;">
-                          Hydro Materials Management
-                        </div>
-                        <div style="font-size: 11.5px; color: #64748b; margin-top: 2px;">
-                          Account Security &amp; Identity
-                        </div>
-                      </td>
-                      <td align="right" valign="middle">
-                        <span style="display: inline-block; padding: 4px 10px; background-color: #f1f5f9; color: #475569; font-size: 11px; font-weight: 600; border-radius: 4px; letter-spacing: 0.5px;">
-                          VERIFICATION
-                        </span>
-                      </td>
-                    </tr>
-                  </table>
+                <td style="padding-bottom: 20px; border-bottom: 1px solid #f1f5f9;">
+                  <div style="font-size: 14px; font-weight: 700; color: #0f172a; letter-spacing: -0.2px; text-transform: uppercase;">
+                    Hydro Materials Management
+                  </div>
                 </td>
               </tr>
 
               <!-- Greeting & Instructions -->
               <tr>
-                <td style="padding: 28px 32px 16px 32px;">
-                  <div style="font-size: 15px; font-weight: 600; color: #0f172a; margin-bottom: 10px;">
+                <td style="padding-top: 22px; padding-bottom: 8px;">
+                  <div style="font-size: 15px; font-weight: 600; color: #0f172a; margin-bottom: 6px;">
                     Hi ${greetingName},
                   </div>
-                  <div style="font-size: 13.5px; line-height: 1.6; color: #475569;">
-                    We received a request to access or reset the password for your Hydro HRMS account. Enter the verification code below to verify your identity:
+                  <div style="font-size: 13.5px; color: #475569; line-height: 1.5;">
+                    Here is your verification code to update your password:
                   </div>
                 </td>
               </tr>
 
               <!-- Clean Monospace OTP Box -->
               <tr>
-                <td style="padding: 0 32px 16px 32px;">
-                  <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; text-align: center; margin: 8px 0;">
-                    <div style="font-size: 34px; font-weight: 700; letter-spacing: 10px; color: #0f172a; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; padding-left: 10px;">
+                <td style="padding: 14px 0;">
+                  <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 18px 20px; text-align: center;">
+                    <div style="font-size: 32px; font-weight: 800; letter-spacing: 8px; color: #0f172a; font-family: 'SFMono-Regular', Consolas, Monaco, monospace; padding-left: 8px;">
                       ${otp}
-                    </div>
-                    <div style="font-size: 11.5px; color: #64748b; margin-top: 8px;">
-                      This code is valid for 10 minutes and can only be used once.
                     </div>
                   </div>
                 </td>
               </tr>
 
-              <!-- Security Information Note -->
+              <!-- Expiry & Ignore Notice -->
               <tr>
-                <td style="padding: 0 32px 24px 32px;">
-                  <div style="font-size: 12px; color: #64748b; line-height: 1.5; border-top: 1px solid #f1f5f9; padding-top: 16px;">
-                    If you did not initiate this request, you can safely ignore this email. No changes will be made to your account without this verification code.
+                <td style="padding-bottom: 22px;">
+                  <div style="font-size: 12.5px; color: #64748b; line-height: 1.5;">
+                    This code expires in 10 minutes. If you did not request this, you can safely ignore this email.
                   </div>
                 </td>
               </tr>
 
               <!-- Sign-off -->
               <tr>
-                <td style="padding: 0 32px 28px 32px; font-size: 13px; color: #475569; line-height: 1.6;">
-                  Regards,<br>
-                  <strong style="color: #0f172a;">IT Security &amp; Operations</strong><br>
-                  Hydro Materials Management Pvt. Ltd.
-                </td>
-              </tr>
-
-              <!-- Minimal Footer -->
-              <tr>
-                <td style="background-color: #f8fafc; padding: 20px 32px; border-top: 1px solid #edf2f7; font-size: 11.5px; color: #94a3b8; line-height: 1.6; text-align: center;">
-                  This is an automated system email. Please do not reply directly.<br>
-                  Hydro HRMS Security Service
+                <td style="border-top: 1px solid #f1f5f9; padding-top: 18px;">
+                  <div style="font-size: 13px; color: #475569; line-height: 1.5;">
+                    Thanks,<br>
+                    <strong style="color: #0f172a;">Hydro Team</strong>
+                  </div>
                 </td>
               </tr>
 
