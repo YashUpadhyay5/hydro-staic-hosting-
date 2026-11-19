@@ -1068,10 +1068,7 @@ body {
   font-weight: 400;
 }
 
-.sidebar-toggle,
-.sidebar-collapse-btn {
-  display: none !important;
-}
+/* Floating toggle enabled */
 
 /* Upload button in sidebar */
 .sidebar-upload {

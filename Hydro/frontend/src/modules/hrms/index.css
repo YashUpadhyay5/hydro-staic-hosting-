@@ -3151,3 +3151,35 @@ body.dark-theme .mobile-record-card {
         width: 100% !important;
     }
 }
+
+
+/* Collapsed Sidebar Hover Expansion Support */
+.sidebar.collapsed.hover-expanded,
+.sidebar.collapsed:hover {
+    width: 260px !important;
+    z-index: 9999 !important;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25) !important;
+}
+.sidebar.collapsed.hover-expanded .sidebar-header h2,
+.sidebar.collapsed.hover-expanded .sidebar-header span,
+.sidebar.collapsed.hover-expanded .nav-item span,
+.sidebar.collapsed.hover-expanded .sidebar-section-title,
+.sidebar.collapsed.hover-expanded .admin-info,
+.sidebar.collapsed.hover-expanded #logout-btn span,
+.sidebar.collapsed:hover .sidebar-header h2,
+.sidebar.collapsed:hover .sidebar-header span,
+.sidebar.collapsed:hover .nav-item span,
+.sidebar.collapsed:hover .sidebar-section-title,
+.sidebar.collapsed:hover .admin-info,
+.sidebar.collapsed:hover #logout-btn span {
+    display: inline-block !important;
+    opacity: 1 !important;
+    max-width: 180px !important;
+    visibility: visible !important;
+}
+.sidebar.collapsed.hover-expanded .nav-item,
+.sidebar.collapsed:hover .nav-item {
+    justify-content: flex-start !important;
+    padding: 8px 12px !important;
+    gap: 10px !important;
+}

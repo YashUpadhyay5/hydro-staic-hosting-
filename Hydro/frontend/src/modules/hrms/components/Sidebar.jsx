@@ -101,27 +101,27 @@ export default function Sidebar({ adminUser, currentView, trackingOrigin, onView
                 onClick={onToggleCollapse} 
                 style={{
                     position: 'absolute',
-                    top: '20px',
-                    right: '-11px',
-                    width: '22px',
-                    height: '22px',
+                    top: '18px',
+                    right: '-12px',
+                    width: '24px',
+                    height: '24px',
                     borderRadius: '50%',
-                    background: 'var(--bg-glass, #ffffff)',
-                    border: '1px solid var(--border-glass, #e2e8f0)',
-                    color: 'var(--text-muted, #64748b)',
+                    background: '#ffffff',
+                    border: '1px solid #e2e8f0',
+                    color: '#475569',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     cursor: 'pointer',
-                    boxShadow: 'var(--shadow-sm)',
+                    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15), 0 2px 4px rgba(0, 0, 0, 0.08)',
                     zIndex: 1000,
                     padding: 0,
-                    transition: 'all 0.15s ease',
+                    transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
                 }}
                 className="sidebar-collapse-btn"
-                title={isCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+                title={isCollapsed ? "Expand Sidebar (Pin open)" : "Collapse Sidebar (Auto-shrink rail)"}
             >
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transition: 'transform 0.2s ease', transform: isCollapsed && !isHovered ? 'rotate(0deg)' : 'rotate(180deg)' }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transition: 'transform 0.2s ease', transform: isCollapsed && !isHovered ? 'rotate(0deg)' : 'rotate(180deg)' }}>
                     <polyline points="9 18 15 12 9 6" />
                 </svg>
             </div>

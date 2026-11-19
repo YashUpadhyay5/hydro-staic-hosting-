@@ -150,7 +150,11 @@ function App() {
 
     const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'light');
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => localStorage.getItem('isSidebarCollapsed') === 'true');
+    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+        const pinned = localStorage.getItem('isSidebarPinned');
+        if (pinned !== null) return pinned !== 'true';
+        return true; // Default to auto-shrink rail mode
+    });
     const [badgeCounts, setBadgeCounts] = useState({
         'leaves-view': 0,
         'expenses-view': 0,
@@ -437,6 +441,7 @@ function App() {
                 onToggleCollapse={() => {
                     setIsSidebarCollapsed(prev => {
                         const next = !prev;
+                        localStorage.setItem('isSidebarPinned', String(!next));
                         localStorage.setItem('isSidebarCollapsed', String(next));
                         return next;
                     });
