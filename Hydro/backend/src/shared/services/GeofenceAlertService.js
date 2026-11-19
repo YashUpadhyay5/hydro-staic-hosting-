@@ -57,7 +57,9 @@ class GeofenceAlertService {
     }
 
     try {
-      const list = await Geofence.findAll();
+      const list = await Geofence.findAll({
+        where: { category: 'SITE' }
+      });
       this.geofenceCache = list.map(g => (g.get ? g.get({ plain: true }) : g));
       this.lastGeofenceCacheTime = now;
     } catch (err) {

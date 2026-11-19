@@ -29,9 +29,11 @@ class SiteResolver {
     const hasCoords = Number.isFinite(latNum) && Number.isFinite(lonNum) && (latNum !== 0 || lonNum !== 0);
 
     if (hasCoords) {
-      // 1. Check against Office Geofences (157 official site boundaries from location_geofence_settings)
+      // 1. Check against Office Geofences (official SITE boundaries from location_geofence_settings)
       try {
-        const geofences = await Geofence.findAll();
+        const geofences = await Geofence.findAll({
+          where: { category: 'SITE' }
+        });
         let closestGeofence = null;
         let minGeofenceDist = Infinity;
         for (const g of geofences) {

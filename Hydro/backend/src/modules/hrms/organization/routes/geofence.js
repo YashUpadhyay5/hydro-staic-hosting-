@@ -3,21 +3,29 @@ const router = express.Router();
 const Geofence = require('../../../../shared/models/Geofence');
 const GeofenceMediaSyncService = require('../services/GeofenceMediaSyncService');
 
-// GET all active geofence settings
+// GET all active geofence settings (optionally filtered by ?category=SITE or ?category=HOUSE)
 router.get('/', async (req, res) => {
   try {
+    const { category } = req.query;
+    const whereClause = {};
+    if (category) {
+      whereClause.category = String(category).toUpperCase();
+    }
+
     const list = await Geofence.findAll({
-      order: [['createdAt', 'ASC']]
+      where: whereClause,
+      order: [['name', 'ASC'], ['createdAt', 'ASC']]
     });
 
-    if (list.length === 0) {
+    if (list.length === 0 && !category) {
       // Return default if none created
       return res.status(200).json([{
         id: 1,
         name: 'Default Office',
         latitude: 28.6692,
         longitude: 77.4538,
-        radius: 100.0
+        radius: 100.0,
+        category: 'SITE'
       }]);
     }
     return res.status(200).json(list);
@@ -27,19 +35,22 @@ router.get('/', async (req, res) => {
   }
 });
 
-// POST Create a new geofence boundary
+// POST Create a new geofence boundary (supports category: 'SITE' | 'HOUSE', employeeId)
 router.post('/', async (req, res) => {
   try {
-    const { name, latitude, longitude, radius } = req.body;
+    const { name, latitude, longitude, radius, category, employeeId } = req.body;
     if (latitude === undefined || longitude === undefined || radius === undefined) {
       return res.status(400).json({ error: 'Latitude, longitude and radius are required.' });
     }
 
+    const cleanCategory = category ? String(category).toUpperCase() : 'SITE';
     const newGf = await Geofence.create({
-      name: name || 'Office Geofence',
+      name: name || (cleanCategory === 'HOUSE' ? 'Employee House' : 'Office Geofence'),
       latitude: Number(latitude),
       longitude: Number(longitude),
-      radius: Number(radius)
+      radius: Number(radius),
+      category: cleanCategory,
+      employeeId: employeeId || null
     });
 
     // Retroactively synchronize all past and future photos with this new site
@@ -94,7 +105,7 @@ router.post('/bulk', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, latitude, longitude, radius } = req.body;
+    const { name, latitude, longitude, radius, category, employeeId } = req.body;
 
     const gf = await Geofence.findByPk(id);
     if (!gf) {
@@ -109,6 +120,8 @@ router.put('/:id', async (req, res) => {
     if (latitude !== undefined) gf.latitude = Number(latitude);
     if (longitude !== undefined) gf.longitude = Number(longitude);
     if (radius !== undefined) gf.radius = Number(radius);
+    if (category !== undefined) gf.category = String(category).toUpperCase();
+    if (employeeId !== undefined) gf.employeeId = employeeId;
 
     await gf.save();
 

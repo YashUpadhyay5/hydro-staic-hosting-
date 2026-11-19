@@ -79,7 +79,10 @@ export default function SiteInfoView({ employees }) {
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [exporting, setExporting] = useState(false);
     const [showExportMenu, setShowExportMenu] = useState(false);
-    const [geofences, setGeofences] = useState(() => Array.isArray(cachedGeofences) ? cachedGeofences : []);
+    const [geofences, setGeofences] = useState(() => {
+        if (!Array.isArray(cachedGeofences)) return [];
+        return cachedGeofences.filter(g => (g.category || 'SITE').toUpperCase() === 'SITE');
+    });
     const [logs, setLogs] = useState([]);
     const [metrics, setMetrics] = useState({
         insideTime: 0,
@@ -160,22 +163,35 @@ export default function SiteInfoView({ employees }) {
             layersGroupRef.current = window.L.layerGroup().addTo(mapInstance.current);
         }
 
-        setTimeout(() => {
+        const resizeTimer = setTimeout(() => {
             if (mapInstance.current) {
                 mapInstance.current.invalidateSize();
             }
         }, 300);
+
+        return () => {
+            clearTimeout(resizeTimer);
+            if (mapInstance.current) {
+                mapInstance.current.off();
+                mapInstance.current.remove();
+                mapInstance.current = null;
+                layersGroupRef.current = null;
+            }
+        };
     }, []);
 
-    // Load Geofences List
+    // Load Geofences List (Strictly official work/office sites only; employee house residences excluded)
     useEffect(() => {
         const loadGeofences = async () => {
             try {
                 const res = await api.getGeofences();
                 if (Array.isArray(res)) {
-                    setGeofences(res);
-                } else if (res) {
+                    const siteOnly = res.filter(g => (g.category || 'SITE').toUpperCase() === 'SITE');
+                    setGeofences(siteOnly);
+                } else if (res && (res.category || 'SITE').toUpperCase() === 'SITE') {
                     setGeofences([res]);
+                } else {
+                    setGeofences([]);
                 }
             } catch (err) {
                 console.error('Error fetching geofences:', err);

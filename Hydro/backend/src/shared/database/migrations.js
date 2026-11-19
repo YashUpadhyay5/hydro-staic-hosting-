@@ -544,6 +544,22 @@ const runMigrations = async (sequelize) => {
   } catch (err) {
     console.warn('OtpVerification table sync warning:', err.message);
   }
+
+  // Migration: location_geofence_settings category & employee_id
+  try {
+    if (isPg) {
+      await sequelize.query('ALTER TABLE location_geofence_settings ADD COLUMN IF NOT EXISTS category VARCHAR(32) DEFAULT \'SITE\';');
+      await sequelize.query('ALTER TABLE location_geofence_settings ADD COLUMN IF NOT EXISTS employee_id VARCHAR(64) DEFAULT NULL;');
+    } else {
+      await sequelize.query('ALTER TABLE location_geofence_settings ADD COLUMN category VARCHAR(32) DEFAULT \'SITE\';');
+      await sequelize.query('ALTER TABLE location_geofence_settings ADD COLUMN employee_id VARCHAR(64) DEFAULT NULL;');
+    }
+    console.log('Migrated location_geofence_settings: added category and employee_id.');
+  } catch (err) {
+    if (!err.message.includes('duplicate column') && !err.message.includes('already exists')) {
+      console.warn('location_geofence_settings category migration warning:', err.message);
+    }
+  }
 };
 
 module.exports = { runMigrations };

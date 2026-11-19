@@ -586,7 +586,7 @@ function App() {
                         {currentView === 'payroll-view' && <PayrollView employees={employees} adminUser={adminUser} />}
                         {currentView === 'live-tracking-view' && <LiveTrackingView employees={activeEmployees} />}
                         {currentView === 'route-replay-view' && <RouteReplayView employees={activeEmployees} />}
-                        {currentView === 'geofence-view' && <GeofenceView />}
+                        {currentView === 'geofence-view' && <GeofenceView employees={employees} />}
                         {currentView === 'documents-view' && (
                             <DocumentsView 
                                 employees={employees} 

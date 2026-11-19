@@ -9,6 +9,9 @@ const Geofence = require('../../../../shared/models/Geofence');
 router.get('/', async (req, res) => {
   try {
     const geofences = await Geofence.findAll({
+      where: {
+        category: 'SITE'
+      },
       include: [{
         model: Media,
         as: 'media',

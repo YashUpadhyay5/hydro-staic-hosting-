@@ -26,6 +26,16 @@ const Geofence = sequelize.define('Geofence', {
     type: DataTypes.DOUBLE,
     allowNull: false,
     defaultValue: 300.0, // in meters
+  },
+  category: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    defaultValue: 'SITE', // 'SITE' or 'HOUSE'
+  },
+  employeeId: {
+    type: DataTypes.STRING,
+    field: 'employee_id',
+    allowNull: true,
   }
 }, {
   tableName: 'location_geofence_settings',
