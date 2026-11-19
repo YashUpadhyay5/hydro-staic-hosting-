@@ -83,6 +83,10 @@ export default function SiteInfoView({ employees }) {
         if (!Array.isArray(cachedGeofences)) return [];
         return cachedGeofences.filter(g => (g.category || 'SITE').toUpperCase() === 'SITE');
     });
+    const [houseGeofences, setHouseGeofences] = useState(() => {
+        if (!Array.isArray(cachedGeofences)) return [];
+        return cachedGeofences.filter(g => (g.category || 'SITE').toUpperCase() === 'HOUSE');
+    });
     const [logs, setLogs] = useState([]);
     const [metrics, setMetrics] = useState({
         insideTime: 0,
@@ -180,18 +184,25 @@ export default function SiteInfoView({ employees }) {
         };
     }, []);
 
-    // Load Geofences List (Strictly official work/office sites only; employee house residences excluded)
+    // Load Geofences List (Splits into official office sites and employee residences)
     useEffect(() => {
         const loadGeofences = async () => {
             try {
                 const res = await api.getGeofences();
                 if (Array.isArray(res)) {
                     const siteOnly = res.filter(g => (g.category || 'SITE').toUpperCase() === 'SITE');
+                    const houseOnly = res.filter(g => (g.category || 'SITE').toUpperCase() === 'HOUSE');
                     setGeofences(siteOnly);
+                    setHouseGeofences(houseOnly);
                 } else if (res && (res.category || 'SITE').toUpperCase() === 'SITE') {
                     setGeofences([res]);
+                    setHouseGeofences([]);
+                } else if (res && (res.category || 'SITE').toUpperCase() === 'HOUSE') {
+                    setGeofences([]);
+                    setHouseGeofences([res]);
                 } else {
                     setGeofences([]);
+                    setHouseGeofences([]);
                 }
             } catch (err) {
                 console.error('Error fetching geofences:', err);
@@ -628,6 +639,13 @@ export default function SiteInfoView({ employees }) {
                 longitude: parseFloat(gf.longitude)
             }));
 
+            const parsedHouseGeofences = houseGeofences.map(hf => ({
+                ...hf,
+                radius: parseFloat(hf.radius || 30),
+                latitude: parseFloat(hf.latitude),
+                longitude: parseFloat(hf.longitude)
+            }));
+
             for (let d = 0; d < datesToProcess.length; d++) {
                 const currDate = datesToProcess[d];
                 const res = await analyzeSingleEmployee(selectedEmp, currDate, geofences);
@@ -746,6 +764,61 @@ export default function SiteInfoView({ employees }) {
                 circle.addTo(layersGroupRef.current);
                 if (gf.id) circleLayersRef.current[gf.id] = circle;
                 if (gf.name) circleLayersRef.current[gf.name] = circle;
+            });
+
+            // -------------------------------------------------------------------
+            // Employee Residence Plotting: Distinct Purple Circle & 🏠 Pin
+            // -------------------------------------------------------------------
+            parsedHouseGeofences.forEach(house => {
+                if (!house.latitude || !house.longitude) return;
+                const houseRadius = house.radius || 30;
+
+                const houseCircle = window.L.circle([house.latitude, house.longitude], {
+                    color: '#8b5cf6',
+                    fillColor: '#8b5cf6',
+                    fillOpacity: 0.22,
+                    radius: houseRadius,
+                    weight: 2,
+                    dashArray: '5, 5'
+                });
+
+                const empLabel = house.employeeId ? ` (${house.employeeId})` : '';
+                const houseTooltipText = `<b>🏠 ${house.name}</b><br/><span style="color:#a78bfa;font-weight:bold;">Employee Residence</span>${empLabel}<br/>Radius: ${houseRadius}m`;
+                houseCircle.bindTooltip(houseTooltipText, { sticky: true, opacity: 0.95 });
+
+                const housePopup = `
+                    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 4px; font-size: 13px; color: #1e293b; min-width: 180px;">
+                        <h4 style="margin: 0 0 6px 0; font-size: 14px; color: #8b5cf6; display: flex; align-items: center; gap: 6px;">
+                            🏠 ${house.name}
+                        </h4>
+                        <div style="font-size: 11.5px; color: #64748b; margin-bottom: 4px;">
+                            Employee Residence (Off-Duty Location)
+                        </div>
+                        ${house.employeeId ? `<div style="font-size: 12px; font-weight: 700; color: #475569;">Resident: ${house.employeeId}</div>` : ''}
+                        <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">
+                            <b>Coordinates:</b> ${house.latitude.toFixed(5)}, ${house.longitude.toFixed(5)}<br/>
+                            <b>Radius:</b> ${houseRadius} meters
+                        </div>
+                    </div>
+                `;
+                houseCircle.bindPopup(housePopup, { minWidth: 190 });
+                houseCircle.addTo(layersGroupRef.current);
+
+                // Add distinct house pin marker with 🏠 icon
+                const housePin = window.L.marker([house.latitude, house.longitude], {
+                    icon: window.L.divIcon({
+                        className: 'custom-house-map-marker',
+                        html: `<div style="background: #8b5cf6; color: white; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; border: 2px solid white; box-shadow: 0 2px 10px rgba(139,92,246,0.6); cursor: pointer;" title="${house.name}">🏠</div>`,
+                        iconSize: [22, 22],
+                        iconAnchor: [11, 11]
+                    })
+                });
+                housePin.bindTooltip(houseTooltipText, { sticky: true });
+                housePin.bindPopup(housePopup, { minWidth: 190 });
+                housePin.addTo(layersGroupRef.current);
+
+                if (house.id) circleLayersRef.current[house.id] = houseCircle;
+                if (house.name) circleLayersRef.current[house.name] = houseCircle;
             });
 
             // Draw Segmented Trajectory Path (Green for Inside, Red for Outside)
@@ -1682,6 +1755,44 @@ export default function SiteInfoView({ employees }) {
                 {/* Right Side: Leaflet Map */}
                 <div className="glass site-info-map-panel" style={{ padding: '8px', position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
                     <div ref={mapRef} className="site-info-map-container" style={{ width: '100%', height: '100%', borderRadius: '12px', zIndex: 1 }} />
+                    
+                    {/* Floating Map Legend */}
+                    <div style={{
+                        position: 'absolute',
+                        bottom: '18px',
+                        left: '18px',
+                        zIndex: 1000,
+                        background: 'rgba(15, 23, 42, 0.88)',
+                        backdropFilter: 'blur(8px)',
+                        border: '1px solid rgba(255, 255, 255, 0.12)',
+                        borderRadius: '10px',
+                        padding: '8px 14px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '14px',
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        color: '#cbd5e1',
+                        boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+                        pointerEvents: 'none'
+                    }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#3b82f6', border: '1.5px solid #fff' }}></span>
+                            Office Site
+                        </span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#10b981', border: '1.5px solid #fff' }}></span>
+                            Visited Site
+                        </span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#8b5cf6', border: '1.5px dashed #fff' }}></span>
+                            🏠 Employee House
+                        </span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#ef4444', border: '1.5px solid #fff' }}></span>
+                            Outside Ping
+                        </span>
+                    </div>
                 </div>
             </div>
 
