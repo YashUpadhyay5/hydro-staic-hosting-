@@ -4,6 +4,8 @@ const Footprint = require('../../../../shared/models/Footprint');
 const Attendance = require('../../../../shared/models/Attendance');
 const Employee = require('../../../../shared/models/Employee');
 const ShiftEngine = require('../../../../shared/services/ShiftEngine');
+const Setting = require('../../../../shared/models/Setting');
+const SystemSettings = Setting;
 const sequelize = require('../../../../config/database');
 const { getAddressFromCoords, getCachedAddress } = require('../../../../core/utils/geocoder');
 const { resolveCellToCoords } = require('../../../../core/utils/cellResolver');
@@ -577,17 +579,33 @@ router.post('/batch', async (req, res) => {
 
   if (!records.length) {
     const duration = Date.now() - startTime;
-    console.log(`[FOOTPRINT AUDIT] [POST /api/footprints/batch] -> 4. Processing Finished | 5. HTTP Response 400 | Duration: ${duration}ms`);
-    return res.status(400).json({
-      status: 'failed',
-      error: 'Empty batch array provided in request body.',
+    console.log(`[FOOTPRINT AUDIT] [POST /api/footprints/batch] -> 4. Empty batch array received | 5. Returning active settings | Duration: ${duration}ms`);
+    let settingsPayload = null;
+    try {
+      const settings = (await Setting.findByPk(1)) || (await Setting.findOne());
+      if (settings) {
+        settingsPayload = {
+          config_version: settings.config_version,
+          location_update_interval: settings.location_update_interval,
+          location_provider: settings.location_provider,
+          gps_ratio_count: settings.gps_ratio_count,
+          cellular_ratio_count: settings.cellular_ratio_count,
+        };
+      }
+    } catch (sErr) {
+      console.warn('[Batch Footprint Empty] Could not load SystemSettings:', sErr.message);
+    }
+    return res.status(200).json({
+      success: true,
+      status: 'success',
       uploadedIds: [],
       failedIds: [],
       duplicateIds: [],
       recordsReceived: 0,
       recordsInserted: 0,
       recordsSkipped: 0,
-      processingTimeMs: duration
+      processingTimeMs: duration,
+      settings: settingsPayload
     });
   }
 
@@ -1049,7 +1067,24 @@ router.post('/batch', async (req, res) => {
   console.log(`[FOOTPRINT BATCH LOG] === ACK Sent to Client ===`);
   console.log(`[FOOTPRINT BATCH LOG] Status: ${overallStatus} | Uploaded: ${uploadedIds.length} | Failed: ${failedIds.length} | Duplicates: ${duplicateIds.length} | Time: ${processingTimeMs}ms\n`);
 
+  let settingsPayload = null;
+  try {
+    const settings = (await Setting.findByPk(1)) || (await Setting.findOne());
+    if (settings) {
+      settingsPayload = {
+        config_version: settings.config_version,
+        location_update_interval: settings.location_update_interval,
+        location_provider: settings.location_provider,
+        gps_ratio_count: settings.gps_ratio_count,
+        cellular_ratio_count: settings.cellular_ratio_count,
+      };
+    }
+  } catch (sErr) {
+    console.warn('[Batch Footprint] Could not load SystemSettings:', sErr.message);
+  }
+
   return res.status(200).json({
+    success: true,
     status: overallStatus,
     uploadedIds,
     failedIds,
@@ -1057,7 +1092,8 @@ router.post('/batch', async (req, res) => {
     processingTimeMs,
     recordsReceived: records.length,
     recordsInserted,
-    recordsSkipped
+    recordsSkipped,
+    settings: settingsPayload
   });
 });
 
@@ -1386,7 +1422,27 @@ router.post('/', async (req, res) => {
       console.warn('[Single Geofence Evaluation Warning]:', evalErr.message);
     }
 
-    return res.status(201).json(newPoint);
+    let settingsPayload = null;
+    try {
+      const settings = (await Setting.findByPk(1)) || (await Setting.findOne());
+      if (settings) {
+        settingsPayload = {
+          config_version: settings.config_version,
+          location_update_interval: settings.location_update_interval,
+          location_provider: settings.location_provider,
+          gps_ratio_count: settings.gps_ratio_count,
+          cellular_ratio_count: settings.cellular_ratio_count,
+        };
+      }
+    } catch (e) {
+      console.warn('[Single Footprint] Could not load SystemSettings:', e.message);
+    }
+
+    const pointJson = newPoint && typeof newPoint.toJSON === 'function' ? newPoint.toJSON() : newPoint;
+    return res.status(201).json({
+      ...pointJson,
+      settings: settingsPayload
+    });
   } catch (error) {
     console.error('Error creating footprint:', error);
     return res.status(500).json({ error: error.message });

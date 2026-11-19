@@ -547,7 +547,7 @@ const runMigrations = async (sequelize) => {
 
   // Migration: location_geofence_settings category & employee_id
   try {
-    if (isPg) {
+    if (isPostgres) {
       await sequelize.query('ALTER TABLE location_geofence_settings ADD COLUMN IF NOT EXISTS category VARCHAR(32) DEFAULT \'SITE\';');
       await sequelize.query('ALTER TABLE location_geofence_settings ADD COLUMN IF NOT EXISTS employee_id VARCHAR(64) DEFAULT NULL;');
     } else {
@@ -558,6 +558,33 @@ const runMigrations = async (sequelize) => {
   } catch (err) {
     if (!err.message.includes('duplicate column') && !err.message.includes('already exists')) {
       console.warn('location_geofence_settings category migration warning:', err.message);
+    }
+  }
+
+  // Migration: System Settings table & view for dynamic phone tracking sync
+  try {
+    if (isPostgres) {
+      await sequelize.query('ALTER TABLE settings ADD COLUMN IF NOT EXISTS config_version INTEGER DEFAULT 1;');
+      await sequelize.query('ALTER TABLE settings ADD COLUMN IF NOT EXISTS location_provider VARCHAR(255) DEFAULT \'GPS Only\';');
+      await sequelize.query('ALTER TABLE settings ADD COLUMN IF NOT EXISTS gps_ratio_count INTEGER DEFAULT 1;');
+      await sequelize.query('ALTER TABLE settings ADD COLUMN IF NOT EXISTS cellular_ratio_count INTEGER DEFAULT 2;');
+      await sequelize.query('ALTER TABLE settings ADD COLUMN IF NOT EXISTS location_update_interval VARCHAR(255) DEFAULT \'30 Seconds\';');
+      await sequelize.query('ALTER TABLE settings ADD COLUMN IF NOT EXISTS auto_sync_interval_seconds INTEGER DEFAULT 30;');
+      await sequelize.query('ALTER TABLE settings ADD COLUMN IF NOT EXISTS allow_cross_day BOOLEAN DEFAULT true;');
+      await sequelize.query('CREATE OR REPLACE VIEW system_settings AS SELECT * FROM settings;');
+    } else {
+      await sequelize.query('ALTER TABLE settings ADD COLUMN config_version INTEGER DEFAULT 1;');
+      await sequelize.query('ALTER TABLE settings ADD COLUMN location_provider VARCHAR(255) DEFAULT \'GPS Only\';');
+      await sequelize.query('ALTER TABLE settings ADD COLUMN gps_ratio_count INTEGER DEFAULT 1;');
+      await sequelize.query('ALTER TABLE settings ADD COLUMN cellular_ratio_count INTEGER DEFAULT 2;');
+      await sequelize.query('ALTER TABLE settings ADD COLUMN location_update_interval VARCHAR(255) DEFAULT \'30 Seconds\';');
+      await sequelize.query('ALTER TABLE settings ADD COLUMN auto_sync_interval_seconds INTEGER DEFAULT 30;');
+      await sequelize.query('ALTER TABLE settings ADD COLUMN allow_cross_day BOOLEAN DEFAULT 1;');
+    }
+    console.log('Migrated settings/system_settings: verified config_version, location_provider, gps_ratio_count, cellular_ratio_count, location_update_interval.');
+  } catch (migErr) {
+    if (!migErr.message.includes('duplicate column') && !migErr.message.includes('already exists')) {
+      console.warn('settings/system_settings migration warning:', migErr.message);
     }
   }
 };

@@ -144,6 +144,7 @@ module.exports = {
   ArchivedChat,
   Footprint,
   Setting,
+  SystemSettings: Setting,
   Acknowledgment,
   SettingAuditLog,
   NotificationSetting,
