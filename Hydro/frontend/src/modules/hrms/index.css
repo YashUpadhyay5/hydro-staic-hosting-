@@ -243,6 +243,9 @@ body.dark-theme .btn-outline:hover {
     border: 1px solid #e2e8f0;
     border-radius: 12px;
     box-shadow: 0 1px 8px rgba(0, 0, 0, 0.02);
+    position: relative !important;
+    overflow: visible !important;
+    z-index: 50;
 }
 
 .sidebar-header {
@@ -3182,4 +3185,41 @@ body.dark-theme .mobile-record-card {
     justify-content: flex-start !important;
     padding: 8px 12px !important;
     gap: 10px !important;
+}
+
+
+/* Floating Arrow Collapse Button (HRMS) */
+.sidebar-collapse-btn {
+    position: absolute;
+    top: 14px;
+    right: -12px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    color: #475569;
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15), 0 2px 4px rgba(0, 0, 0, 0.08);
+    z-index: 1000;
+    padding: 0;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.sidebar-collapse-btn:hover {
+    transform: scale(1.1);
+    color: #2563eb;
+    border-color: #cbd5e1;
+}
+body.dark-theme .sidebar-collapse-btn {
+    background: #1e293b !important;
+    border-color: rgba(255, 255, 255, 0.15) !important;
+    color: #e2e8f0 !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35) !important;
+}
+body.dark-theme .sidebar-collapse-btn:hover {
+    color: #60a5fa !important;
+    border-color: #3b82f6 !important;
 }

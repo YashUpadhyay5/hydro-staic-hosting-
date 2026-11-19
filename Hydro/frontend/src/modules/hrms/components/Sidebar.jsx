@@ -94,40 +94,52 @@ export default function Sidebar({ adminUser, currentView, trackingOrigin, onView
             className={`sidebar glass ${isSidebarOpen ? 'open' : ''} ${isCollapsed ? 'collapsed' : ''} ${isHovered ? 'hover-expanded' : ''}`} 
             onMouseEnter={() => setIsHovered(true)}
             onMouseLeave={() => setIsHovered(false)}
-            style={{ overflow: 'visible' }}
+            style={{ position: 'relative', overflow: 'visible', zIndex: 50 }}
         >
-            {/* Smooth Floating Collapse Button */}
-            <div 
-                onClick={onToggleCollapse} 
-                style={{
-                    position: 'absolute',
-                    top: '16px',
-                    right: '-12px',
-                    width: '24px',
-                    height: '24px',
-                    borderRadius: '50%',
-                    background: '#ffffff',
-                    border: '1px solid #e2e8f0',
-                    color: '#475569',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    cursor: 'pointer',
-                    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15), 0 2px 4px rgba(0, 0, 0, 0.08)',
-                    zIndex: 1000,
-                    padding: 0,
-                    transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-                }}
-                className="sidebar-collapse-btn"
-                title={isCollapsed ? "Stop shrink & keep open" : "Collapse sidebar"}
-            >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transition: 'transform 0.2s ease', transform: isCollapsed ? 'rotate(0deg)' : 'rotate(180deg)' }}>
-                    <polyline points="9 18 15 12 9 6" />
-                </svg>
-            </div>
-
-            {/* Sidebar Brand Header (Matches Mobile Mockup) */}
-            <div className="sidebar-header" style={{ justifyContent: !isExpanded ? 'center' : 'flex-start', padding: !isExpanded ? '10px 0' : '12px 14px', gap: '10px', borderBottom: '1px solid var(--border-glass)', minHeight: '52px' }}>
+            {/* Sidebar Brand Header (Matches Invoice Extractor) */}
+            <div className="sidebar-header" style={{ justifyContent: !isExpanded ? 'center' : 'flex-start', padding: !isExpanded ? '10px 0' : '12px 14px', gap: '10px', borderBottom: '1px solid var(--border-glass)', minHeight: '52px', position: 'relative' }}>
+                {/* Floating Arrow Collapse Button (Matches Invoice Extractor) */}
+                <div 
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onToggleCollapse();
+                    }}
+                    style={{
+                        position: 'absolute',
+                        top: '14px',
+                        right: '-12px',
+                        width: '24px',
+                        height: '24px',
+                        borderRadius: '50%',
+                        background: '#ffffff',
+                        border: '1px solid #e2e8f0',
+                        color: '#475569',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15), 0 2px 4px rgba(0, 0, 0, 0.08)',
+                        zIndex: 1000,
+                        padding: 0,
+                        transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                    }}
+                    className="sidebar-collapse-btn"
+                    title={isCollapsed ? "Stop shrink & keep open" : "Collapse sidebar"}
+                    onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = 'scale(1.1)';
+                        e.currentTarget.style.color = '#2563eb';
+                        e.currentTarget.style.borderColor = '#cbd5e1';
+                    }}
+                    onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = 'scale(1)';
+                        e.currentTarget.style.color = '#475569';
+                        e.currentTarget.style.borderColor = '#e2e8f0';
+                    }}
+                >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transition: 'transform 0.2s ease', transform: isCollapsed ? 'rotate(0deg)' : 'rotate(180deg)' }}>
+                        <polyline points="9 18 15 12 9 6" />
+                    </svg>
+                </div>
                 <div style={{ width: '32px', height: '32px', borderRadius: '10px', background: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgba(37, 99, 235, 0.25)', flexShrink: 0 }}>
                     <i className="fa-solid fa-building-user" style={{ fontSize: '15px', color: '#ffffff' }}></i>
                 </div>
