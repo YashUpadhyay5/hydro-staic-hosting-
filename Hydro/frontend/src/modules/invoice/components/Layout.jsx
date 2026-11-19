@@ -9,9 +9,8 @@ export default function Layout() {
   const [toasts, setToasts] = useState([]);
   const [isDragActive, setIsDragActive] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    const pinned = localStorage.getItem('invoice_sidebar_pinned');
-    if (pinned !== null) return pinned !== 'true';
-    return true; // Default: auto-shrink rail mode
+    // Default is simple: expanded by default
+    return localStorage.getItem('invoice_sidebar_collapsed_mode') === 'true';
   });
   const [isSidebarHovered, setIsSidebarHovered] = useState(false);
 
@@ -233,7 +232,7 @@ export default function Layout() {
               <div 
                 className="sidebar-toggle" 
                 onClick={toggleSidebar} 
-                title={sidebarCollapsed ? "Expand Sidebar (Pin open)" : "Collapse Sidebar (Auto-shrink rail)"}
+                title={sidebarCollapsed ? "Stop shrink & keep open" : "Collapse sidebar"}
                 style={{
                   position: 'absolute',
                   top: '16px',
@@ -264,7 +263,7 @@ export default function Layout() {
                   e.currentTarget.style.borderColor = '#e2e8f0';
                 }}
               >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transition: 'transform 0.2s ease', transform: sidebarCollapsed && !isSidebarHovered ? 'rotate(0deg)' : 'rotate(180deg)' }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transition: 'transform 0.2s ease', transform: sidebarCollapsed ? 'rotate(0deg)' : 'rotate(180deg)' }}>
                   <polyline points="9 18 15 12 9 6" />
                 </svg>
               </div>

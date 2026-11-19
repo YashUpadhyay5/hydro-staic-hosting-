@@ -1189,3 +1189,32 @@ body.dark-theme .skeleton {
     background: transparent !important;
     border: none !important;
 }
+
+
+/* Universal Sidebar Collapse Arrow Button Styling */
+.sidebar-collapse-btn,
+.sidebar-toggle {
+    transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), background 0.2s, border-color 0.2s, color 0.2s, box-shadow 0.2s !important;
+}
+.sidebar-collapse-btn:hover,
+.sidebar-toggle:hover {
+    transform: scale(1.15) !important;
+    color: #2563eb !important;
+    border-color: #3b82f6 !important;
+    box-shadow: 0 6px 16px rgba(37, 99, 235, 0.25) !important;
+}
+body.dark-theme .sidebar-collapse-btn,
+body.dark-theme .sidebar-toggle,
+[data-theme='dark'] .sidebar-toggle {
+    background: #1e293b !important;
+    border-color: rgba(255, 255, 255, 0.18) !important;
+    color: #f1f5f9 !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5) !important;
+}
+body.dark-theme .sidebar-collapse-btn:hover,
+body.dark-theme .sidebar-toggle:hover,
+[data-theme='dark'] .sidebar-toggle:hover {
+    color: #60a5fa !important;
+    border-color: #60a5fa !important;
+    box-shadow: 0 6px 16px rgba(96, 165, 250, 0.3) !important;
+}

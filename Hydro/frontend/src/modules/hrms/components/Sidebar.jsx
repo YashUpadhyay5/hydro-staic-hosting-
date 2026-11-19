@@ -101,7 +101,7 @@ export default function Sidebar({ adminUser, currentView, trackingOrigin, onView
                 onClick={onToggleCollapse} 
                 style={{
                     position: 'absolute',
-                    top: '18px',
+                    top: '16px',
                     right: '-12px',
                     width: '24px',
                     height: '24px',
@@ -119,9 +119,9 @@ export default function Sidebar({ adminUser, currentView, trackingOrigin, onView
                     transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
                 }}
                 className="sidebar-collapse-btn"
-                title={isCollapsed ? "Expand Sidebar (Pin open)" : "Collapse Sidebar (Auto-shrink rail)"}
+                title={isCollapsed ? "Stop shrink & keep open" : "Collapse sidebar"}
             >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transition: 'transform 0.2s ease', transform: isCollapsed && !isHovered ? 'rotate(0deg)' : 'rotate(180deg)' }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transition: 'transform 0.2s ease', transform: isCollapsed ? 'rotate(0deg)' : 'rotate(180deg)' }}>
                     <polyline points="9 18 15 12 9 6" />
                 </svg>
             </div>
