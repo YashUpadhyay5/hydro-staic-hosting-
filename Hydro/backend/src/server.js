@@ -57,6 +57,43 @@ const startServer = async () => {
     }
     await sequelize.query('CREATE INDEX IF NOT EXISTS idx_footprints_user_ts ON location_footprints(user_id, timestamp DESC);').catch(() => {});
     console.log(`Database architecture connected (${sequelize.options.dialect}) with schema sync enabled.`);
+
+    // Schema Migrations for Footprints table
+    try {
+      await sequelize.query('ALTER TABLE location_footprints ADD COLUMN IF NOT EXISTS location_source VARCHAR(50) DEFAULT \'GPS\';');
+      await sequelize.query('ALTER TABLE location_footprints ADD COLUMN IF NOT EXISTS battery_level DOUBLE PRECISION;');
+      await sequelize.query('ALTER TABLE location_footprints ADD COLUMN IF NOT EXISTS battery_temp DOUBLE PRECISION;');
+      await sequelize.query('ALTER TABLE location_footprints ADD COLUMN IF NOT EXISTS speed DOUBLE PRECISION;');
+      await sequelize.query('ALTER TABLE location_footprints ADD COLUMN IF NOT EXISTS heading DOUBLE PRECISION;');
+      await sequelize.query('ALTER TABLE location_footprints ADD COLUMN IF NOT EXISTS altitude DOUBLE PRECISION;');
+      await sequelize.query('ALTER TABLE location_footprints ADD COLUMN IF NOT EXISTS is_mock_location BOOLEAN DEFAULT false;');
+      await sequelize.query('ALTER TABLE location_footprints ADD COLUMN IF NOT EXISTS fix_timestamp BIGINT;');
+      await sequelize.query('ALTER TABLE location_footprints ADD COLUMN IF NOT EXISTS fix_age_ms BIGINT;');
+      await sequelize.query('ALTER TABLE location_footprints ADD COLUMN IF NOT EXISTS fix_elapsed_realtime_nanos BIGINT;');
+      await sequelize.query('ALTER TABLE location_footprints ADD COLUMN IF NOT EXISTS provider VARCHAR(255);');
+      await sequelize.query('ALTER TABLE location_footprints ADD COLUMN IF NOT EXISTS capture_source VARCHAR(255);');
+      await sequelize.query('ALTER TABLE location_footprints ADD COLUMN IF NOT EXISTS validation_status VARCHAR(255);');
+      await sequelize.query('ALTER TABLE location_footprints ADD COLUMN IF NOT EXISTS network_type VARCHAR(255);');
+      await sequelize.query('ALTER TABLE location_footprints ADD COLUMN IF NOT EXISTS reason VARCHAR(255);');
+      console.log('Migrated location_footprints table: verified location diagnostics.');
+    } catch (migErr) {
+      console.warn('PostgreSQL Footprints migration warning:', migErr.message);
+    }
+
+    // Schema Migrations for SystemSettings table
+    try {
+      await sequelize.query('ALTER TABLE settings ADD COLUMN IF NOT EXISTS config_version INTEGER DEFAULT 1;');
+      await sequelize.query('ALTER TABLE settings ADD COLUMN IF NOT EXISTS location_provider VARCHAR(255) DEFAULT \'GPS Only\';');
+      await sequelize.query('ALTER TABLE settings ADD COLUMN IF NOT EXISTS gps_ratio_count INTEGER DEFAULT 1;');
+      await sequelize.query('ALTER TABLE settings ADD COLUMN IF NOT EXISTS cellular_ratio_count INTEGER DEFAULT 2;');
+      await sequelize.query('ALTER TABLE settings ADD COLUMN IF NOT EXISTS location_update_interval VARCHAR(255) DEFAULT \'30 Seconds\';');
+      await sequelize.query('ALTER TABLE settings ADD COLUMN IF NOT EXISTS auto_sync_interval_seconds INTEGER DEFAULT 30;');
+      await sequelize.query('ALTER TABLE settings ADD COLUMN IF NOT EXISTS allow_cross_day BOOLEAN DEFAULT true;');
+      await sequelize.query('CREATE OR REPLACE VIEW system_settings AS SELECT * FROM settings;');
+      console.log('Migrated system_settings table: verified config_version, location_provider, gps_ratio_count, cellular_ratio_count, location_update_interval.');
+    } catch (migErr) {
+      console.warn('PostgreSQL SystemSettings migration warning:', migErr.message);
+    }
     
     await runMigrations(sequelize);
     await runSeeders(sequelize);
