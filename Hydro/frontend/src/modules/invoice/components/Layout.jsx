@@ -8,11 +8,20 @@ export default function Layout() {
   const [uploading, setUploading] = useState(false);
   const [toasts, setToasts] = useState([]);
   const [isDragActive, setIsDragActive] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
-  const [isSidebarHovered, setIsSidebarHovered] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    return localStorage.getItem("invoice_sidebar_collapsed") === "true";
+  });
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
+
+  const toggleSidebar = () => {
+    setSidebarCollapsed(prev => {
+      const next = !prev;
+      localStorage.setItem("invoice_sidebar_collapsed", String(next));
+      return next;
+    });
+  };
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -193,12 +202,10 @@ export default function Layout() {
     >
       {/* Sidebar */}
       {(() => {
-        const isExpanded = !sidebarCollapsed || isSidebarHovered;
+        const isExpanded = !sidebarCollapsed;
         return (
           <aside 
-            className={`sidebar ${sidebarCollapsed ? "collapsed" : ""} ${isSidebarHovered ? "hover-expanded" : ""}`} 
-            onMouseEnter={() => setIsSidebarHovered(true)}
-            onMouseLeave={() => setIsSidebarHovered(false)}
+            className={`sidebar ${sidebarCollapsed ? "collapsed" : ""}`} 
             style={{ position: 'relative', overflow: 'visible' }}
           >
             <div className="sidebar-header" style={{ justifyContent: !isExpanded ? 'center' : 'space-between', padding: !isExpanded ? '14px 0' : '14px 12px' }}>
@@ -219,8 +226,8 @@ export default function Layout() {
               </div>
           <div 
             className="sidebar-toggle" 
-            onClick={() => setSidebarCollapsed(c => !c)} 
-            title="Toggle sidebar"
+            onClick={toggleSidebar} 
+            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             style={{
               position: 'absolute',
               top: '16px',
