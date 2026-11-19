@@ -367,19 +367,37 @@ router.post('/otp/reset-password', async (req, res) => {
       return res.status(404).json({ error: 'User account not found.' });
     }
 
-    // Hash new password and invalidate all existing tokens
+    // Hash new password and create fresh session token for seamless auto-login
     user.password = await hashPassword(newPassword);
-    user.currentToken = null;
+    
+    const token = jwt.sign(
+      { id: user.id, email: user.email, role: user.role },
+      process.env.JWT_SECRET || 'super_secret_hrms_token_key_2026',
+      { expiresIn: '365d' }
+    );
+    user.currentToken = token;
     await user.save();
 
     // Consume the resetToken so it cannot be reused
     record.resetToken = null;
     await record.save();
 
-    console.log(`🔐 [Auth] Password successfully reset via OTP for ${user.email} (${user.id})`);
+    console.log(`🔐 [Auth] Password successfully reset via OTP with auto-login for ${user.email} (${user.id})`);
 
+    const isOffice = String(user.designation || '').trim().toUpperCase() === 'OFFICE';
     return res.status(200).json({
-      message: 'Your password has been reset successfully! You can now sign in with your new password.'
+      success: true,
+      message: 'Your password has been reset successfully! Signing you in...',
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        designation: user.designation,
+        primaryWorkMode: isOffice ? 'office' : 'field',
+        canSwitchMode: isOffice
+      },
+      token
     });
   } catch (error) {
     console.error('❌ Password reset error:', error);

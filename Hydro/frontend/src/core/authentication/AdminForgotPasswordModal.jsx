@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
+import { useNavigate } from 'react-router-dom';
 
 export default function AdminForgotPasswordModal({ isOpen, onClose, onPasswordResetSuccess }) {
   const [step, setStep] = useState(1); // 1: Email, 2: OTP, 3: New Password, 4: Success
@@ -10,11 +11,14 @@ export default function AdminForgotPasswordModal({ isOpen, onClose, onPasswordRe
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [resendCooldown, setResendCooldown] = useState(0);
+  const [autoSigningIn, setAutoSigningIn] = useState(false);
 
   const otpInputRefs = useRef([]);
+  const navigate = useNavigate();
 
   const authBaseUrl = (import.meta.env && import.meta.env.VITE_API_URL)
     ? `${import.meta.env.VITE_API_URL.replace(/\/$/, '')}/auth`
@@ -46,6 +50,7 @@ export default function AdminForgotPasswordModal({ isOpen, onClose, onPasswordRe
       setOtpDigits(['', '', '', '', '', '']);
       setNewPassword('');
       setConfirmPassword('');
+      setAutoSigningIn(false);
     }
   }, [isOpen]);
 
@@ -84,7 +89,6 @@ export default function AdminForgotPasswordModal({ isOpen, onClose, onPasswordRe
     const newDigits = [...otpDigits];
 
     if (clean.length > 1) {
-      // Pasted multiple digits
       const pasted = clean.slice(0, 6).split('');
       pasted.forEach((char, i) => {
         if (index + i < 6) newDigits[index + i] = char;
@@ -98,7 +102,6 @@ export default function AdminForgotPasswordModal({ isOpen, onClose, onPasswordRe
     newDigits[index] = clean;
     setOtpDigits(newDigits);
 
-    // Auto-advance to next input
     if (clean && index < 5) {
       otpInputRefs.current[index + 1]?.focus();
     }
@@ -153,7 +156,7 @@ export default function AdminForgotPasswordModal({ isOpen, onClose, onPasswordRe
     }
   };
 
-  // Step 3: Set New Password
+  // Step 3: Set New Password & Seamless Auto-Login
   const handleResetPassword = async (e) => {
     if (e) e.preventDefault();
 
@@ -171,14 +174,31 @@ export default function AdminForgotPasswordModal({ isOpen, onClose, onPasswordRe
     setError('');
 
     try {
-      await axios.post(`${authBaseUrl}/otp/reset-password`, {
+      const res = await axios.post(`${authBaseUrl}/otp/reset-password`, {
         resetToken,
         newPassword
       });
 
-      setStep(4);
-      if (onPasswordResetSuccess) {
-        onPasswordResetSuccess(identifier);
+      // Seamless Auto-Login: store session tokens immediately
+      if (res.data?.token && res.data?.user) {
+        const { user, token } = res.data;
+        localStorage.setItem('adminUser', JSON.stringify(user));
+        localStorage.setItem('adminToken', token);
+        localStorage.setItem('token', token);
+        localStorage.setItem('username', user.name || user.email);
+
+        setAutoSigningIn(true);
+        setStep(4);
+
+        setTimeout(() => {
+          if (onPasswordResetSuccess) {
+            onPasswordResetSuccess(res.data);
+          }
+          onClose();
+          navigate('/');
+        }, 1200);
+      } else {
+        setStep(4);
       }
     } catch (err) {
       setError(err.response?.data?.error || err.message || 'Failed to reset password.');
@@ -187,111 +207,165 @@ export default function AdminForgotPasswordModal({ isOpen, onClose, onPasswordRe
     }
   };
 
+  const isPasswordValid = newPassword.length >= 8;
+  const doPasswordsMatch = newPassword && confirmPassword && newPassword === confirmPassword;
+
   return (
     <div className="otp-modal-overlay" style={{
       position: 'fixed',
       inset: 0,
-      backgroundColor: 'rgba(15, 23, 42, 0.75)',
-      backdropFilter: 'blur(6px)',
+      backgroundColor: 'rgba(15, 23, 42, 0.72)',
+      backdropFilter: 'blur(8px)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       zIndex: 9999,
       padding: '16px',
-      boxSizing: 'border-box'
+      boxSizing: 'border-box',
+      animation: 'fadeIn 0.2s ease-out'
     }}>
       <div className="otp-modal-card" style={{
         backgroundColor: '#ffffff',
-        borderRadius: '20px',
+        borderRadius: '16px',
         width: '100%',
-        maxWidth: '440px',
-        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+        maxWidth: '430px',
+        boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.25), 0 0 0 1px rgba(226, 232, 240, 0.8)',
         overflow: 'hidden',
         border: '1px solid #e2e8f0',
-        animation: 'fadeInScale 0.2s ease-out'
+        animation: 'scaleIn 0.2s ease-out',
+        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
       }}>
         {/* Header Bar */}
         <div style={{
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          padding: '16px 20px',
+          padding: '16px 22px',
           borderBottom: '1px solid #f1f5f9',
           background: '#f8fafc'
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '18px' }}>🛡️</span>
-            <span style={{ fontSize: '13px', fontWeight: '700', color: '#0f172a' }}>
-              Account Security Recovery
-            </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
+            <div style={{
+              width: '30px',
+              height: '30px',
+              borderRadius: '8px',
+              background: 'rgba(37, 99, 235, 0.08)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#2563eb'
+            }}>
+              <i className="fa-solid fa-shield-halved" style={{ fontSize: '15px' }}></i>
+            </div>
+            <div>
+              <span style={{ fontSize: '13.5px', fontWeight: '700', color: '#0f172a', letterSpacing: '-0.2px' }}>
+                Account Security Recovery
+              </span>
+            </div>
           </div>
           <button
             type="button"
             onClick={onClose}
+            aria-label="Close dialog"
             style={{
               background: 'none',
               border: 'none',
-              fontSize: '20px',
+              width: '28px',
+              height: '28px',
+              borderRadius: '6px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '14px',
               color: '#64748b',
               cursor: 'pointer',
-              lineHeight: 1,
-              padding: '4px'
+              transition: 'all 0.15s ease'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = '#f1f5f9';
+              e.currentTarget.style.color = '#0f172a';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+              e.currentTarget.style.color = '#64748b';
             }}
           >
-            ✕
+            <i className="fa-solid fa-xmark"></i>
           </button>
         </div>
 
         {/* Modal Body */}
-        <div style={{ padding: '24px 24px 28px' }}>
+        <div style={{ padding: '24px 26px 28px' }}>
           {error && (
             <div style={{
               background: '#fef2f2',
               border: '1px solid #fecaca',
               color: '#dc2626',
               borderRadius: '10px',
-              padding: '10px 14px',
-              fontSize: '12.5px',
+              padding: '11px 14px',
+              fontSize: '13px',
               marginBottom: '18px',
-              lineHeight: 1.4
+              lineHeight: 1.45,
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '9px'
             }}>
-              {error}
+              <i className="fa-solid fa-circle-exclamation" style={{ marginTop: '2px', fontSize: '14px' }}></i>
+              <div style={{ flex: 1 }}>{error}</div>
             </div>
           )}
 
           {/* STEP 1: Enter Identifier */}
           {step === 1 && (
             <form onSubmit={handleRequestOtp}>
-              <h3 style={{ margin: '0 0 6px 0', fontSize: '18px', fontWeight: '700', color: '#0f172a' }}>
+              <h3 style={{ margin: '0 0 6px 0', fontSize: '18px', fontWeight: '700', color: '#0f172a', letterSpacing: '-0.3px' }}>
                 Forgot Password?
               </h3>
-              <p style={{ margin: '0 0 20px 0', fontSize: '13px', color: '#64748b', lineHeight: 1.45 }}>
-                Enter your registered Gmail or Employee ID. We will send a 6-digit verification code to recover your account.
+              <p style={{ margin: '0 0 22px 0', fontSize: '13px', color: '#64748b', lineHeight: 1.5 }}>
+                Enter your registered Email or Employee ID. We will send a secure 6-digit verification code.
               </p>
 
               <div style={{ marginBottom: '20px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#334155', marginBottom: '6px' }}>
-                  Registered Email or Employee ID
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#334155', marginBottom: '7px' }}>
+                  Email or Employee ID
                 </label>
                 <div style={{ position: 'relative' }}>
-                  <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', fontSize: '15px', color: '#94a3b8' }}>
-                    ✉️
+                  <span style={{
+                    position: 'absolute',
+                    left: '14px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    color: '#94a3b8',
+                    fontSize: '14px',
+                    pointerEvents: 'none'
+                  }}>
+                    <i className="fa-regular fa-envelope"></i>
                   </span>
                   <input
                     type="text"
                     required
-                    placeholder="e.g. anshup@gmail.com"
+                    placeholder="e.g. employee@company.com"
                     value={identifier}
                     onChange={(e) => setIdentifier(e.target.value)}
                     style={{
                       width: '100%',
                       boxSizing: 'border-box',
-                      padding: '12px 14px 12px 38px',
+                      padding: '11px 14px 11px 40px',
                       borderRadius: '10px',
-                      border: '1.5px solid #cbd5e1',
-                      fontSize: '14px',
+                      border: '1px solid #cbd5e1',
+                      fontSize: '13.5px',
                       outline: 'none',
-                      transition: 'border-color 0.15s ease'
+                      color: '#0f172a',
+                      background: '#ffffff',
+                      transition: 'border-color 0.15s ease, box-shadow 0.15s ease'
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = '#2563eb';
+                      e.target.style.boxShadow = '0 0 0 3px rgba(37, 99, 235, 0.1)';
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = '#cbd5e1';
+                      e.target.style.boxShadow = 'none';
                     }}
                     autoFocus
                   />
@@ -306,16 +380,23 @@ export default function AdminForgotPasswordModal({ isOpen, onClose, onPasswordRe
                   padding: '12px',
                   borderRadius: '10px',
                   border: 'none',
-                  background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+                  background: '#2563eb',
                   color: '#ffffff',
-                  fontSize: '14px',
+                  fontSize: '13.5px',
                   fontWeight: '600',
                   cursor: loading ? 'not-allowed' : 'pointer',
-                  opacity: loading ? 0.7 : 1,
-                  boxShadow: '0 4px 12px rgba(37, 99, 235, 0.25)'
+                  opacity: loading ? 0.75 : 1,
+                  boxShadow: '0 4px 12px rgba(37, 99, 235, 0.2)',
+                  transition: 'background-color 0.15s ease'
                 }}
+                onMouseEnter={(e) => { if (!loading) e.currentTarget.style.backgroundColor = '#1d4ed8'; }}
+                onMouseLeave={(e) => { if (!loading) e.currentTarget.style.backgroundColor = '#2563eb'; }}
               >
-                {loading ? 'Sending Verification Code...' : 'Send Verification Code →'}
+                {loading ? (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                    <i className="fa-solid fa-circle-notch fa-spin"></i> Sending Code...
+                  </span>
+                ) : 'Send Verification Code →'}
               </button>
             </form>
           )}
@@ -323,11 +404,11 @@ export default function AdminForgotPasswordModal({ isOpen, onClose, onPasswordRe
           {/* STEP 2: Enter 6-digit OTP */}
           {step === 2 && (
             <form onSubmit={handleVerifyOtp}>
-              <h3 style={{ margin: '0 0 6px 0', fontSize: '18px', fontWeight: '700', color: '#0f172a' }}>
-                Enter 6-Digit Code
+              <h3 style={{ margin: '0 0 6px 0', fontSize: '18px', fontWeight: '700', color: '#0f172a', letterSpacing: '-0.3px' }}>
+                Verify Security Code
               </h3>
-              <p style={{ margin: '0 0 20px 0', fontSize: '13px', color: '#64748b', lineHeight: 1.45 }}>
-                We sent a security code to <strong>{maskedEmail}</strong>. Enter it below to verify your identity:
+              <p style={{ margin: '0 0 20px 0', fontSize: '13px', color: '#64748b', lineHeight: 1.5 }}>
+                We sent a 6-digit code to <strong style={{ color: '#0f172a' }}>{maskedEmail}</strong>. Enter it below to proceed:
               </p>
 
               {/* 6 Digit Inputs */}
@@ -349,17 +430,26 @@ export default function AdminForgotPasswordModal({ isOpen, onClose, onPasswordRe
                     onKeyDown={(e) => handleOtpKeyDown(idx, e)}
                     style={{
                       width: '48px',
-                      height: '56px',
+                      height: '52px',
                       textAlign: 'center',
-                      fontSize: '24px',
-                      fontWeight: '800',
+                      fontSize: '22px',
+                      fontWeight: '700',
                       fontFamily: 'monospace',
                       borderRadius: '10px',
-                      border: digit ? '2px solid #2563eb' : '1.5px solid #cbd5e1',
+                      border: digit ? '2px solid #2563eb' : '1px solid #cbd5e1',
                       background: digit ? '#eff6ff' : '#f8fafc',
                       color: '#1e3a8a',
                       outline: 'none',
-                      boxSizing: 'border-box'
+                      boxSizing: 'border-box',
+                      transition: 'border-color 0.15s ease, background 0.15s ease'
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = '#2563eb';
+                      e.target.style.boxShadow = '0 0 0 3px rgba(37, 99, 235, 0.12)';
+                    }}
+                    onBlur={(e) => {
+                      if (!digit) e.target.style.borderColor = '#cbd5e1';
+                      e.target.style.boxShadow = 'none';
                     }}
                   />
                 ))}
@@ -373,24 +463,31 @@ export default function AdminForgotPasswordModal({ isOpen, onClose, onPasswordRe
                   padding: '12px',
                   borderRadius: '10px',
                   border: 'none',
-                  background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+                  background: '#2563eb',
                   color: '#ffffff',
-                  fontSize: '14px',
+                  fontSize: '13.5px',
                   fontWeight: '600',
                   cursor: (loading || otpDigits.join('').length < 6) ? 'not-allowed' : 'pointer',
                   opacity: (loading || otpDigits.join('').length < 6) ? 0.6 : 1,
-                  boxShadow: '0 4px 12px rgba(37, 99, 235, 0.25)',
-                  marginBottom: '16px'
+                  boxShadow: '0 4px 12px rgba(37, 99, 235, 0.2)',
+                  marginBottom: '16px',
+                  transition: 'background-color 0.15s ease'
                 }}
+                onMouseEnter={(e) => { if (!loading && otpDigits.join('').length === 6) e.currentTarget.style.backgroundColor = '#1d4ed8'; }}
+                onMouseLeave={(e) => { if (!loading && otpDigits.join('').length === 6) e.currentTarget.style.backgroundColor = '#2563eb'; }}
               >
-                {loading ? 'Verifying Code...' : 'Verify Code & Proceed'}
+                {loading ? (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                    <i className="fa-solid fa-circle-notch fa-spin"></i> Verifying...
+                  </span>
+                ) : 'Verify Code & Proceed'}
               </button>
 
               <div style={{
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
-                fontSize: '12px',
+                fontSize: '12.5px',
                 color: '#64748b'
               }}>
                 <button
@@ -402,14 +499,15 @@ export default function AdminForgotPasswordModal({ isOpen, onClose, onPasswordRe
                     color: '#2563eb',
                     cursor: 'pointer',
                     padding: 0,
-                    fontWeight: '600'
+                    fontWeight: '600',
+                    fontSize: '12.5px'
                   }}
                 >
                   ← Change Email / ID
                 </button>
 
                 {resendCooldown > 0 ? (
-                  <span>Resend code in {resendCooldown}s</span>
+                  <span style={{ color: '#94a3b8' }}>Resend code in {resendCooldown}s</span>
                 ) : (
                   <button
                     type="button"
@@ -421,7 +519,8 @@ export default function AdminForgotPasswordModal({ isOpen, onClose, onPasswordRe
                       color: '#2563eb',
                       cursor: 'pointer',
                       padding: 0,
-                      fontWeight: '600'
+                      fontWeight: '600',
+                      fontSize: '12.5px'
                     }}
                   >
                     Resend Code
@@ -434,18 +533,45 @@ export default function AdminForgotPasswordModal({ isOpen, onClose, onPasswordRe
           {/* STEP 3: Enter New Password */}
           {step === 3 && (
             <form onSubmit={handleResetPassword}>
-              <h3 style={{ margin: '0 0 6px 0', fontSize: '18px', fontWeight: '700', color: '#0f172a' }}>
+              <h3 style={{ margin: '0 0 6px 0', fontSize: '18px', fontWeight: '700', color: '#0f172a', letterSpacing: '-0.3px' }}>
                 Set New Password
               </h3>
-              <p style={{ margin: '0 0 20px 0', fontSize: '13px', color: '#64748b', lineHeight: 1.45 }}>
-                Your identity has been verified. Create a strong password for your account:
+              <p style={{ margin: '0 0 20px 0', fontSize: '13px', color: '#64748b', lineHeight: 1.5 }}>
+                Your identity is verified. Create a new strong password for your account:
               </p>
 
-              <div style={{ marginBottom: '14px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#334155', marginBottom: '6px' }}>
-                  New Password
-                </label>
+              {/* New Password Input */}
+              <div style={{ marginBottom: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '7px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: '600', color: '#334155' }}>
+                    New Password
+                  </label>
+                  {newPassword && (
+                    <span style={{
+                      fontSize: '11px',
+                      fontWeight: '600',
+                      color: isPasswordValid ? '#10b981' : '#f59e0b',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}>
+                      <i className={`fa-solid ${isPasswordValid ? 'fa-check' : 'fa-circle-info'}`}></i>
+                      {isPasswordValid ? '8+ chars' : 'At least 8 chars'}
+                    </span>
+                  )}
+                </div>
                 <div style={{ position: 'relative' }}>
+                  <span style={{
+                    position: 'absolute',
+                    left: '14px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    color: '#94a3b8',
+                    fontSize: '14px',
+                    pointerEvents: 'none'
+                  }}>
+                    <i className="fa-solid fa-lock"></i>
+                  </span>
                   <input
                     type={showPassword ? 'text' : 'password'}
                     required
@@ -455,17 +581,30 @@ export default function AdminForgotPasswordModal({ isOpen, onClose, onPasswordRe
                     style={{
                       width: '100%',
                       boxSizing: 'border-box',
-                      padding: '12px 42px 12px 14px',
+                      padding: '11px 40px 11px 38px',
                       borderRadius: '10px',
-                      border: '1.5px solid #cbd5e1',
-                      fontSize: '14px',
-                      outline: 'none'
+                      border: '1px solid #cbd5e1',
+                      fontSize: '13.5px',
+                      outline: 'none',
+                      color: '#0f172a',
+                      background: '#ffffff',
+                      transition: 'border-color 0.15s ease, box-shadow 0.15s ease'
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = '#2563eb';
+                      e.target.style.boxShadow = '0 0 0 3px rgba(37, 99, 235, 0.1)';
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = '#cbd5e1';
+                      e.target.style.boxShadow = 'none';
                     }}
                     autoFocus
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
+                    title={showPassword ? 'Hide password' : 'Show password'}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
                     style={{
                       position: 'absolute',
                       right: '12px',
@@ -473,100 +612,201 @@ export default function AdminForgotPasswordModal({ isOpen, onClose, onPasswordRe
                       transform: 'translateY(-50%)',
                       background: 'none',
                       border: 'none',
-                      fontSize: '16px',
+                      padding: '4px',
+                      fontSize: '14px',
                       cursor: 'pointer',
-                      color: '#64748b'
+                      color: '#64748b',
+                      lineHeight: 1
                     }}
                   >
-                    {showPassword ? '👁️' : '🙈'}
+                    <i className={`fa-solid ${showPassword ? 'fa-eye-slash' : 'fa-eye'}`}></i>
                   </button>
                 </div>
               </div>
 
-              <div style={{ marginBottom: '20px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#334155', marginBottom: '6px' }}>
-                  Confirm New Password
-                </label>
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  required
-                  placeholder="Re-type your password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  style={{
-                    width: '100%',
-                    boxSizing: 'border-box',
-                    padding: '12px 14px',
-                    borderRadius: '10px',
-                    border: '1.5px solid #cbd5e1',
+              {/* Confirm Password Input */}
+              <div style={{ marginBottom: '22px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '7px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: '600', color: '#334155' }}>
+                    Confirm New Password
+                  </label>
+                  {confirmPassword && (
+                    <span style={{
+                      fontSize: '11px',
+                      fontWeight: '600',
+                      color: doPasswordsMatch ? '#10b981' : '#ef4444',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}>
+                      <i className={`fa-solid ${doPasswordsMatch ? 'fa-check' : 'fa-xmark'}`}></i>
+                      {doPasswordsMatch ? 'Passwords match' : 'Passwords do not match'}
+                    </span>
+                  )}
+                </div>
+                <div style={{ position: 'relative' }}>
+                  <span style={{
+                    position: 'absolute',
+                    left: '14px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    color: '#94a3b8',
                     fontSize: '14px',
-                    outline: 'none'
-                  }}
-                />
+                    pointerEvents: 'none'
+                  }}>
+                    <i className="fa-solid fa-lock"></i>
+                  </span>
+                  <input
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    required
+                    placeholder="Re-type your password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    style={{
+                      width: '100%',
+                      boxSizing: 'border-box',
+                      padding: '11px 40px 11px 38px',
+                      borderRadius: '10px',
+                      border: '1px solid #cbd5e1',
+                      fontSize: '13.5px',
+                      outline: 'none',
+                      color: '#0f172a',
+                      background: '#ffffff',
+                      transition: 'border-color 0.15s ease, box-shadow 0.15s ease'
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = '#2563eb';
+                      e.target.style.boxShadow = '0 0 0 3px rgba(37, 99, 235, 0.1)';
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = '#cbd5e1';
+                      e.target.style.boxShadow = 'none';
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    title={showConfirmPassword ? 'Hide password' : 'Show password'}
+                    aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
+                    style={{
+                      position: 'absolute',
+                      right: '12px',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      background: 'none',
+                      border: 'none',
+                      padding: '4px',
+                      fontSize: '14px',
+                      cursor: 'pointer',
+                      color: '#64748b',
+                      lineHeight: 1
+                    }}
+                  >
+                    <i className={`fa-solid ${showConfirmPassword ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                  </button>
+                </div>
               </div>
 
+              {/* Submit Button */}
               <button
                 type="submit"
-                disabled={loading || !newPassword || newPassword !== confirmPassword}
+                disabled={loading || !newPassword || !confirmPassword || newPassword !== confirmPassword || newPassword.length < 8}
                 style={{
                   width: '100%',
                   padding: '12px',
                   borderRadius: '10px',
                   border: 'none',
-                  background: 'linear-gradient(135deg, #16a34a, #15803d)',
+                  background: '#2563eb',
                   color: '#ffffff',
-                  fontSize: '14px',
+                  fontSize: '13.5px',
                   fontWeight: '600',
-                  cursor: (loading || !newPassword || newPassword !== confirmPassword) ? 'not-allowed' : 'pointer',
-                  opacity: (loading || !newPassword || newPassword !== confirmPassword) ? 0.6 : 1,
-                  boxShadow: '0 4px 12px rgba(22, 163, 74, 0.25)'
+                  cursor: (loading || !newPassword || newPassword !== confirmPassword || newPassword.length < 8) ? 'not-allowed' : 'pointer',
+                  opacity: (loading || !newPassword || newPassword !== confirmPassword || newPassword.length < 8) ? 0.6 : 1,
+                  boxShadow: '0 4px 12px rgba(37, 99, 235, 0.2)',
+                  transition: 'background-color 0.15s ease'
+                }}
+                onMouseEnter={(e) => {
+                  if (!loading && newPassword === confirmPassword && newPassword.length >= 8) {
+                    e.currentTarget.style.backgroundColor = '#1d4ed8';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!loading && newPassword === confirmPassword && newPassword.length >= 8) {
+                    e.currentTarget.style.backgroundColor = '#2563eb';
+                  }
                 }}
               >
-                {loading ? 'Updating Password...' : 'Save New Password & Sign In'}
+                {loading ? (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                    <i className="fa-solid fa-circle-notch fa-spin"></i> Saving Password...
+                  </span>
+                ) : 'Save New Password & Sign In'}
               </button>
             </form>
           )}
 
-          {/* STEP 4: Success Message */}
+          {/* STEP 4: Success Message & Seamless Auto-Login */}
           {step === 4 && (
-            <div style={{ textAlign: 'center', padding: '12px 0' }}>
+            <div style={{ textAlign: 'center', padding: '16px 8px' }}>
               <div style={{
-                width: '64px',
-                height: '64px',
-                background: '#dcfce7',
+                width: '56px',
+                height: '56px',
+                background: 'rgba(16, 185, 129, 0.12)',
                 borderRadius: '50%',
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                fontSize: '32px',
+                color: '#10b981',
+                fontSize: '28px',
                 marginBottom: '16px'
               }}>
-                ✅
+                <i className="fa-solid fa-circle-check"></i>
               </div>
-              <h3 style={{ margin: '0 0 8px 0', fontSize: '19px', fontWeight: '700', color: '#0f172a' }}>
-                Password Reset Successfully!
+              <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: '700', color: '#0f172a', letterSpacing: '-0.3px' }}>
+                Password Updated!
               </h3>
-              <p style={{ margin: '0 0 24px 0', fontSize: '13.5px', color: '#64748b', lineHeight: 1.5 }}>
-                Your account password has been updated securely. You can now log in to the portal with your new password.
+              <p style={{ margin: '0 0 20px 0', fontSize: '13.5px', color: '#64748b', lineHeight: 1.5 }}>
+                {autoSigningIn
+                  ? 'Your new password is saved. Signing you into the platform automatically...'
+                  : 'Your account password has been updated. You can now access your dashboard.'}
               </p>
-              <button
-                type="button"
-                onClick={onClose}
-                style={{
-                  width: '100%',
-                  padding: '12px',
-                  borderRadius: '10px',
-                  border: 'none',
-                  background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
-                  color: '#ffffff',
-                  fontSize: '14px',
+
+              {autoSigningIn ? (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '10px',
+                  color: '#2563eb',
                   fontWeight: '600',
-                  cursor: 'pointer',
-                  boxShadow: '0 4px 12px rgba(37, 99, 235, 0.25)'
-                }}
-              >
-                Proceed to Sign In
-              </button>
+                  fontSize: '13px'
+                }}>
+                  <i className="fa-solid fa-circle-notch fa-spin"></i>
+                  <span>Redirecting to Dashboard...</span>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    navigate('/');
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    borderRadius: '10px',
+                    border: 'none',
+                    background: '#2563eb',
+                    color: '#ffffff',
+                    fontSize: '13.5px',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 12px rgba(37, 99, 235, 0.2)'
+                  }}
+                >
+                  Go to Dashboard
+                </button>
+              )}
             </div>
           )}
         </div>
