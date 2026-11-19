@@ -8,20 +8,9 @@ export default function Layout() {
   const [uploading, setUploading] = useState(false);
   const [toasts, setToasts] = useState([]);
   const [isDragActive, setIsDragActive] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    return localStorage.getItem("invoice_sidebar_collapsed") === "true";
-  });
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
-
-  const toggleSidebar = () => {
-    setSidebarCollapsed(prev => {
-      const next = !prev;
-      localStorage.setItem("invoice_sidebar_collapsed", String(next));
-      return next;
-    });
-  };
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -200,94 +189,45 @@ export default function Layout() {
       onDragLeave={handleDrag}
       onDrop={handleDrop}
     >
-      {/* Sidebar */}
-      {(() => {
-        const isExpanded = !sidebarCollapsed;
-        return (
-          <aside 
-            className={`sidebar ${sidebarCollapsed ? "collapsed" : ""}`} 
-            style={{ position: 'relative', overflow: 'visible' }}
-          >
-            <div className="sidebar-header" style={{ justifyContent: !isExpanded ? 'center' : 'space-between', padding: !isExpanded ? '14px 0' : '14px 12px' }}>
-              <div className="sidebar-logo" style={{ justifyContent: !isExpanded ? 'center' : 'flex-start', width: '100%' }}>
-                <svg width="28" height="28" fill="none" viewBox="0 0 24 24" style={{ flexShrink: 0 }}>
-                  <rect width="24" height="24" rx="6" fill="var(--primary-color)" opacity="0.15"/>
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="var(--primary-color)" strokeWidth="2"/>
-                  <polyline points="14 2 14 8 20 8" stroke="var(--primary-color)" strokeWidth="2"/>
-                  <line x1="16" y1="13" x2="8" y2="13" stroke="var(--primary-color)" strokeWidth="2"/>
-                  <line x1="16" y1="17" x2="8" y2="17" stroke="var(--primary-color)" strokeWidth="2"/>
-                </svg>
-                {isExpanded && (
-                  <div className="sidebar-brand">
-                    <span className="brand-name">OCR Portal</span>
-                    <span className="brand-sub">Invoice Intelligence</span>
-                  </div>
-                )}
-              </div>
-          <div 
-            className="sidebar-toggle" 
-            onClick={toggleSidebar} 
-            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            style={{
-              position: 'absolute',
-              top: '16px',
-              right: '-12px',
-              width: '24px',
-              height: '24px',
-              borderRadius: '50%',
-              background: '#ffffff',
-              border: '1px solid #e2e8f0',
-              color: '#64748b',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.08), 0 2px 4px rgba(0, 0, 0, 0.04)',
-              zIndex: 1000,
-              padding: 0,
-              transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'scale(1.1)';
-              e.currentTarget.style.color = '#4f46e5';
-              e.currentTarget.style.borderColor = '#cbd5e1';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'scale(1)';
-              e.currentTarget.style.color = '#64748b';
-              e.currentTarget.style.borderColor = '#e2e8f0';
-            }}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              {sidebarCollapsed
-                ? <path d="M9 18l6-6-6-6" />
-                : <path d="M15 18l-6-6 6-6" />}
+      {/* Sidebar - Fixed & Fully Expanded (Matching HRMS, No Auto-Shrink) */}
+      <aside 
+        className="sidebar" 
+        style={{ position: 'relative', width: '220px', minWidth: '220px' }}
+      >
+        <div className="sidebar-header" style={{ justifyContent: 'space-between', padding: '14px 12px' }}>
+          <div className="sidebar-logo" style={{ justifyContent: 'flex-start', width: '100%', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <svg width="28" height="28" fill="none" viewBox="0 0 24 24" style={{ flexShrink: 0 }}>
+              <rect width="24" height="24" rx="6" fill="var(--primary-color)" opacity="0.15"/>
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="var(--primary-color)" strokeWidth="2"/>
+              <polyline points="14 2 14 8 20 8" stroke="var(--primary-color)" strokeWidth="2"/>
+              <line x1="16" y1="13" x2="8" y2="13" stroke="var(--primary-color)" strokeWidth="2"/>
+              <line x1="16" y1="17" x2="8" y2="17" stroke="var(--primary-color)" strokeWidth="2"/>
             </svg>
+            <div className="sidebar-brand">
+              <span className="brand-name">OCR Portal</span>
+              <span className="brand-sub">Invoice Intelligence</span>
+            </div>
           </div>
         </div>
 
-
-
         {/* Quick Stats */}
-        {isExpanded && (
-          <div className="sidebar-stats">
-            <div className="sidebar-stat">
-              <span className="stat-dot processing" />
-              <span className="stat-label">Processing</span>
-              <span className="stat-val">{stats.processing}</span>
-            </div>
-            <div className="sidebar-stat">
-              <span className="stat-dot pending" />
-              <span className="stat-label">Pending</span>
-              <span className="stat-val">{stats.pending}</span>
-            </div>
-            <div className="sidebar-stat">
-              <span className="stat-dot failed" />
-              <span className="stat-label">Failed</span>
-              <span className="stat-val">{stats.failed}</span>
-            </div>
+        <div className="sidebar-stats">
+          <div className="sidebar-stat">
+            <span className="stat-dot processing" />
+            <span className="stat-label">Processing</span>
+            <span className="stat-val">{stats.processing}</span>
           </div>
-        )}
+          <div className="sidebar-stat">
+            <span className="stat-dot pending" />
+            <span className="stat-label">Pending</span>
+            <span className="stat-val">{stats.pending}</span>
+          </div>
+          <div className="sidebar-stat">
+            <span className="stat-dot failed" />
+            <span className="stat-label">Failed</span>
+            <span className="stat-val">{stats.failed}</span>
+          </div>
+        </div>
 
         {/* Navigation */}
         <nav className="sidebar-nav">
@@ -296,7 +236,6 @@ export default function Layout() {
               key={item.to}
               to={item.to}
               className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
-              title={!isExpanded ? item.label : undefined}
               onClick={(e) => {
                 if (item.to.includes("validation") && window.location.pathname.includes("validation")) {
                   window.dispatchEvent(new Event("reset-validation-dashboard"));
@@ -304,8 +243,8 @@ export default function Layout() {
               }}
             >
               <span className="nav-icon">{item.icon}</span>
-              {isExpanded && <span className="nav-label">{item.label}</span>}
-              {isExpanded && item.badge && (
+              <span className="nav-label">{item.label}</span>
+              {item.badge && (
                 <span className="nav-badge" style={{ background: item.badgeColor }}>
                   {item.badge}
                 </span>
@@ -315,12 +254,12 @@ export default function Layout() {
         </nav>
 
         {/* Sidebar Footer: Theme Mode Toggle */}
-        <div className="sidebar-footer" style={{ padding: isExpanded ? '12px 14px' : '12px 0', borderTop: '1px solid var(--border-color)', marginTop: 'auto', display: 'flex', justifyContent: 'center' }}>
+        <div className="sidebar-footer" style={{ padding: '12px 14px', borderTop: '1px solid var(--border-color)', marginTop: 'auto', display: 'flex', justifyContent: 'center' }}>
           <button
             onClick={toggleTheme}
             title={`Switch to ${theme === 'light' ? 'Dark' : 'Light'} Mode`}
             style={{
-              width: isExpanded ? '100%' : '40px',
+              width: '100%',
               height: '40px',
               background: 'var(--bg-card-highlight, #f8fafc)',
               border: '1px solid var(--border-color, #e2e8f0)',
@@ -334,16 +273,14 @@ export default function Layout() {
               justifyContent: 'center',
               gap: '8px',
               transition: 'all 0.2s',
-              padding: isExpanded ? '0 12px' : '0'
+              padding: '0 12px'
             }}
           >
             <span>{theme === 'light' ? '🌙' : '☀️'}</span>
-            {isExpanded && <span>{theme === 'light' ? 'Dark' : 'Light'}</span>}
+            <span>{theme === 'light' ? 'Dark' : 'Light'}</span>
           </button>
         </div>
-       </aside>
-        );
-      })()}
+      </aside>
  
        {/* Main Content Area */}
        <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
