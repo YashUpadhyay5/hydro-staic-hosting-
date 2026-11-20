@@ -1,5 +1,5 @@
 // High-Performance Cache-First Service Worker for Hydro Platform
-const CACHE_NAME = 'hydro-static-v25';
+const CACHE_NAME = 'hydro-static-v26';
 
 
 // Install event - activate immediately

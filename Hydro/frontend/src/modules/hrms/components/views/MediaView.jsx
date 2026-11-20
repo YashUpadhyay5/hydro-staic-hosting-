@@ -37,6 +37,29 @@ export default function MediaView({ employees = [] }) {
     const [toDate, setToDate] = useState('');
     const [selectedClusterId, setSelectedClusterId] = useState('');
 
+    // Searchable Site Dropdown States
+    const [isSiteDropdownOpen, setIsSiteDropdownOpen] = useState(false);
+    const [siteSearchQuery, setSiteSearchQuery] = useState('');
+    const siteDropdownRef = useRef(null);
+    const siteSearchInputRef = useRef(null);
+
+    // Close site dropdown when clicking outside
+    useEffect(() => {
+        const handleOutsideClick = (e) => {
+            if (siteDropdownRef.current && !siteDropdownRef.current.contains(e.target)) {
+                setIsSiteDropdownOpen(false);
+            }
+        };
+        if (isSiteDropdownOpen) {
+            document.addEventListener('mousedown', handleOutsideClick);
+            document.addEventListener('touchstart', handleOutsideClick);
+        }
+        return () => {
+            document.removeEventListener('mousedown', handleOutsideClick);
+            document.removeEventListener('touchstart', handleOutsideClick);
+        };
+    }, [isSiteDropdownOpen]);
+
     // Pagination States
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 15;
@@ -404,6 +427,21 @@ export default function MediaView({ employees = [] }) {
                (cl.centerLongitude && cl.centerLongitude.toString().includes(term));
     });
 
+    // Compute active site label & searchable site options for Photos Gallery filter
+    const selectedClusterObj = selectedClusterId === 'unassigned'
+        ? { id: 'unassigned', name: '⚠️ Unassigned / Out of bounds' }
+        : clusters.find(c => String(c.id) === String(selectedClusterId));
+
+    const selectedClusterLabel = selectedClusterObj
+        ? (selectedClusterId === 'unassigned' ? selectedClusterObj.name : `${selectedClusterObj.name} (${selectedClusterObj.media ? selectedClusterObj.media.length : 0} photos)`)
+        : 'All Sites';
+
+    const filteredSites = clusters.filter(cl => {
+        if (!siteSearchQuery.trim()) return true;
+        const q = siteSearchQuery.toLowerCase().trim();
+        return cl.name && cl.name.toLowerCase().includes(q);
+    });
+
     return (
         <div id="media-view" className="view active" style={{ height: '100%', minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: '16px', overflow: 'auto' }}>
             <div className="view-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
@@ -432,31 +470,256 @@ export default function MediaView({ employees = [] }) {
                     <div className="glass" style={{ padding: '20px', display: 'flex', flexWrap: 'wrap', gap: '15px', alignItems: 'flex-end', justifyContent: 'space-between', flexShrink: 0 }}>
                         <div style={{ display: 'flex', gap: '15px', alignItems: 'center', flexWrap: 'wrap' }}>
                             <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                {/* Searchable Site Filter Dropdown */}
+                                <div ref={siteDropdownRef} style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: '2px', minWidth: '240px', maxWidth: '320px' }}>
                                     <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-primary)' }}>Filter by Site</span>
-                                    <select
-                                        value={selectedClusterId}
-                                        onChange={(e) => setSelectedClusterId(e.target.value)}
+                                    <div
+                                        onClick={() => {
+                                            setIsSiteDropdownOpen(prev => {
+                                                const next = !prev;
+                                                if (next) {
+                                                    setTimeout(() => siteSearchInputRef.current?.focus(), 60);
+                                                }
+                                                return next;
+                                            });
+                                        }}
                                         style={{
                                             padding: '8px 12px',
                                             borderRadius: '6px',
-                                            border: '1px solid var(--border-glass)',
+                                            border: isSiteDropdownOpen ? '1px solid #3b82f6' : '1px solid var(--border-glass)',
                                             fontSize: '0.9rem',
-                                            outline: 'none',
                                             background: 'var(--input-bg)',
                                             color: 'var(--text-primary)',
-                                            colorScheme: 'dark',
-                                            cursor: 'pointer'
+                                            cursor: 'pointer',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'space-between',
+                                            gap: '8px',
+                                            userSelect: 'none',
+                                            boxShadow: isSiteDropdownOpen ? '0 0 0 2px rgba(59, 130, 246, 0.2)' : 'none',
+                                            transition: 'all 0.15s ease',
+                                            minHeight: '38px',
+                                            boxSizing: 'border-box'
                                         }}
+                                        title="Click to search and select a site"
                                     >
-                                        <option value="" style={{ background: '#1a1a1c', color: '#f9fafb' }}>All Sites</option>
-                                        <option value="unassigned" style={{ background: '#1a1a1c', color: '#f9fafb' }}>⚠️ Unassigned / Out of bounds</option>
-                                        {clusters.map(cl => (
-                                            <option key={cl.id} value={cl.id} style={{ background: '#1a1a1c', color: '#f9fafb' }}>
-                                                {cl.name} ({cl.media ? cl.media.length : 0} photos)
-                                            </option>
-                                        ))}
-                                    </select>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
+                                            <i className="fa-solid fa-location-dot" style={{ color: selectedClusterId ? '#3b82f6' : 'var(--text-muted)', fontSize: '0.85rem', flexShrink: 0 }}></i>
+                                            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: selectedClusterId ? 600 : 400 }}>
+                                                {selectedClusterLabel}
+                                            </span>
+                                        </div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                                            {selectedClusterId && (
+                                                <span
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setSelectedClusterId('');
+                                                        setSiteSearchQuery('');
+                                                    }}
+                                                    title="Reset to All Sites"
+                                                    style={{
+                                                        cursor: 'pointer',
+                                                        color: 'var(--text-muted)',
+                                                        padding: '2px 4px',
+                                                        borderRadius: '4px',
+                                                        fontSize: '0.8rem',
+                                                        lineHeight: 1
+                                                    }}
+                                                    onMouseEnter={(e) => e.currentTarget.style.color = '#ef4444'}
+                                                    onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
+                                                >
+                                                    ✕
+                                                </span>
+                                            )}
+                                            <i className={`fa-solid fa-chevron-${isSiteDropdownOpen ? 'up' : 'down'}`} style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}></i>
+                                        </div>
+                                    </div>
+
+                                    {/* Searchable Dropdown Popover */}
+                                    {isSiteDropdownOpen && (
+                                        <div
+                                            className="site-search-dropdown-menu"
+                                            style={{
+                                                position: 'absolute',
+                                                top: 'calc(100% + 4px)',
+                                                left: 0,
+                                                width: '100%',
+                                                minWidth: '280px',
+                                                maxWidth: '360px',
+                                                borderRadius: '8px',
+                                                zIndex: 99999,
+                                                overflow: 'hidden',
+                                                display: 'flex',
+                                                flexDirection: 'column'
+                                            }}
+                                        >
+                                            {/* Search Bar Input */}
+                                            <div className="site-search-header" style={{ padding: '8px 10px', position: 'sticky', top: 0, zIndex: 2 }}>
+                                                <div className="site-search-box" style={{ display: 'flex', alignItems: 'center', gap: '8px', borderRadius: '6px', padding: '6px 10px' }}>
+                                                    <i className="fa-solid fa-magnifying-glass" style={{ color: '#94a3b8', fontSize: '0.8rem', flexShrink: 0 }}></i>
+                                                    <input
+                                                        ref={siteSearchInputRef}
+                                                        type="text"
+                                                        placeholder="Type to search site..."
+                                                        value={siteSearchQuery}
+                                                        onChange={(e) => setSiteSearchQuery(e.target.value)}
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Escape') {
+                                                                setIsSiteDropdownOpen(false);
+                                                            }
+                                                        }}
+                                                        style={{
+                                                            flex: 1,
+                                                            background: 'transparent',
+                                                            border: 'none',
+                                                            outline: 'none',
+                                                            fontSize: '0.85rem'
+                                                        }}
+                                                    />
+                                                    {siteSearchQuery && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setSiteSearchQuery('');
+                                                                siteSearchInputRef.current?.focus();
+                                                            }}
+                                                            style={{
+                                                                background: 'transparent',
+                                                                border: 'none',
+                                                                color: '#94a3b8',
+                                                                cursor: 'pointer',
+                                                                padding: 0,
+                                                                fontSize: '0.8rem',
+                                                                lineHeight: 1
+                                                            }}
+                                                        >
+                                                            ✕
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            {/* Options List */}
+                                            <div
+                                                className="custom-scrollbar"
+                                                style={{
+                                                    maxHeight: '260px',
+                                                    overflowY: 'auto',
+                                                    padding: '4px 0'
+                                                }}
+                                            >
+                                                {/* All Sites Option */}
+                                                {(!siteSearchQuery || 'all sites'.includes(siteSearchQuery.toLowerCase())) && (
+                                                    <div
+                                                        className={`site-option-item ${selectedClusterId === '' ? 'selected' : ''}`}
+                                                        onClick={() => {
+                                                            setSelectedClusterId('');
+                                                            setIsSiteDropdownOpen(false);
+                                                            setSiteSearchQuery('');
+                                                        }}
+                                                        style={{
+                                                            padding: '8px 12px',
+                                                            cursor: 'pointer',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'space-between',
+                                                            fontSize: '0.85rem',
+                                                            transition: 'background 0.1s ease'
+                                                        }}
+                                                    >
+                                                        <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                            <i className="fa-solid fa-border-all" style={{ fontSize: '0.8rem', opacity: 0.7 }}></i>
+                                                            All Sites
+                                                        </span>
+                                                        {selectedClusterId === '' && <i className="fa-solid fa-check" style={{ fontSize: '0.75rem', color: '#3b82f6' }}></i>}
+                                                    </div>
+                                                )}
+
+                                                {/* Unassigned Option */}
+                                                {(!siteSearchQuery || 'unassigned out of bounds'.includes(siteSearchQuery.toLowerCase())) && (
+                                                    <div
+                                                        className={`site-option-item ${selectedClusterId === 'unassigned' ? 'selected' : ''}`}
+                                                        onClick={() => {
+                                                            setSelectedClusterId('unassigned');
+                                                            setIsSiteDropdownOpen(false);
+                                                            setSiteSearchQuery('');
+                                                        }}
+                                                        style={{
+                                                            padding: '8px 12px',
+                                                            cursor: 'pointer',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'space-between',
+                                                            fontSize: '0.85rem',
+                                                            transition: 'background 0.1s ease'
+                                                        }}
+                                                    >
+                                                        <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                            <i className="fa-solid fa-triangle-exclamation" style={{ color: '#f59e0b', fontSize: '0.8rem' }}></i>
+                                                            Unassigned / Out of bounds
+                                                        </span>
+                                                        {selectedClusterId === 'unassigned' && <i className="fa-solid fa-check" style={{ fontSize: '0.75rem', color: '#f59e0b' }}></i>}
+                                                    </div>
+                                                )}
+
+                                                {/* Matching Filtered Sites */}
+                                                {filteredSites.map(cl => {
+                                                    const isSelected = String(selectedClusterId) === String(cl.id);
+                                                    const photoCount = cl.media ? cl.media.length : 0;
+                                                    return (
+                                                        <div
+                                                            key={cl.id}
+                                                            className={`site-option-item ${isSelected ? 'selected' : ''}`}
+                                                            onClick={() => {
+                                                                setSelectedClusterId(String(cl.id));
+                                                                setIsSiteDropdownOpen(false);
+                                                                setSiteSearchQuery('');
+                                                            }}
+                                                            style={{
+                                                                padding: '8px 12px',
+                                                                cursor: 'pointer',
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'space-between',
+                                                                gap: '8px',
+                                                                fontSize: '0.85rem',
+                                                                transition: 'background 0.1s ease'
+                                                            }}
+                                                        >
+                                                            <span style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
+                                                                <i className="fa-solid fa-location-dot" style={{ fontSize: '0.75rem', opacity: 0.6, flexShrink: 0 }}></i>
+                                                                <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                                    {cl.name}
+                                                                </span>
+                                                            </span>
+                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                                                                <span style={{
+                                                                    fontSize: '0.72rem',
+                                                                    padding: '1px 6px',
+                                                                    borderRadius: '10px',
+                                                                    background: photoCount > 0 ? 'rgba(59, 130, 246, 0.18)' : 'rgba(148, 163, 184, 0.15)',
+                                                                    color: photoCount > 0 ? '#3b82f6' : 'var(--text-muted)',
+                                                                    fontWeight: 500
+                                                                }}>
+                                                                    {photoCount} {photoCount === 1 ? 'photo' : 'photos'}
+                                                                </span>
+                                                                {isSelected && <i className="fa-solid fa-check" style={{ fontSize: '0.75rem', color: '#3b82f6' }}></i>}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+
+                                                {/* Empty State */}
+                                                {filteredSites.length === 0 && siteSearchQuery && (
+                                                    <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                                                        <i className="fa-solid fa-magnifying-glass" style={{ marginBottom: '6px', fontSize: '1.2rem', display: 'block', opacity: 0.5 }}></i>
+                                                        No sites matching "<b>{siteSearchQuery}</b>"
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                                     <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-primary)' }}>From Date</span>
@@ -497,7 +760,7 @@ export default function MediaView({ employees = [] }) {
                                 {(fromDate || toDate || selectedClusterId) && (
                                     <button 
                                         className="btn"
-                                        onClick={() => { setFromDate(''); setToDate(''); setSelectedClusterId(''); }}
+                                        onClick={() => { setFromDate(''); setToDate(''); setSelectedClusterId(''); setSiteSearchQuery(''); setIsSiteDropdownOpen(false); }}
                                         style={{ alignSelf: 'flex-end', background: '#ef4444', color: 'white', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', height: '36px' }}
                                     >
                                         Clear Filters

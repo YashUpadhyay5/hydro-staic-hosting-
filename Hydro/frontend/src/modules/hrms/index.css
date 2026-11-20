@@ -3223,3 +3223,61 @@ body.dark-theme .sidebar-collapse-btn:hover {
     color: #60a5fa !important;
     border-color: #3b82f6 !important;
 }
+
+
+/* Searchable Site Filter Dropdown (MediaView) */
+.site-search-dropdown-menu {
+    background: #ffffff !important;
+    border: 1px solid #e2e8f0 !important;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05) !important;
+}
+.site-search-dropdown-menu .site-search-header {
+    background: #f8fafc !important;
+    border-bottom: 1px solid #e2e8f0 !important;
+}
+.site-search-dropdown-menu .site-search-box {
+    background: #ffffff !important;
+    border: 1px solid #cbd5e1 !important;
+}
+.site-search-dropdown-menu .site-search-box input {
+    color: #0f172a !important;
+}
+.site-search-dropdown-menu .site-option-item {
+    color: #334155 !important;
+}
+.site-search-dropdown-menu .site-option-item:hover {
+    background: #f1f5f9 !important;
+}
+.site-search-dropdown-menu .site-option-item.selected {
+    background: #eff6ff !important;
+    color: #2563eb !important;
+    font-weight: 600 !important;
+}
+
+body.dark-theme .site-search-dropdown-menu {
+    background: #1a1a1c !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3) !important;
+}
+body.dark-theme .site-search-dropdown-menu .site-search-header {
+    background: #141416 !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+body.dark-theme .site-search-dropdown-menu .site-search-box {
+    background: #232326 !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+body.dark-theme .site-search-dropdown-menu .site-search-box input {
+    color: #f8fafc !important;
+}
+body.dark-theme .site-search-dropdown-menu .site-option-item {
+    color: #f1f5f9 !important;
+}
+body.dark-theme .site-search-dropdown-menu .site-option-item:hover {
+    background: rgba(255, 255, 255, 0.05) !important;
+}
+body.dark-theme .site-search-dropdown-menu .site-option-item.selected {
+    background: rgba(59, 130, 246, 0.18) !important;
+    color: #60a5fa !important;
+    font-weight: 600 !important;
+}
