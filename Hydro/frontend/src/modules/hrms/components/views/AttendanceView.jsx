@@ -1274,6 +1274,49 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
         return null;
     };
     
+    // Server Clock-Out Action States
+    const [refreshTrigger, setRefreshTrigger] = useState(0);
+    const [isClockingOutAman, setIsClockingOutAman] = useState(false);
+
+    const handleClockOutEmployee = async (targetUserId, targetUserName) => {
+        const uId = String(targetUserId || '').trim();
+        const uName = targetUserName || uId || 'Employee';
+        if (!uId) {
+            alert('Cannot clock out: No employee ID found for this record.');
+            return;
+        }
+
+        if (!window.confirm(`Are you sure you want to clock out ${uName} (${uId}) from the server right now?`)) {
+            return;
+        }
+
+        try {
+            const nowIST = new Date().toLocaleTimeString('en-US', {
+                timeZone: 'Asia/Kolkata',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: true
+            });
+
+            await api.clockOutEmployee(uId, nowIST, 'ADMIN_WEB');
+            alert(`✅ Successfully clocked out ${uName} (${uId}) at ${nowIST}!`);
+            setRefreshTrigger(prev => prev + 1);
+        } catch (err) {
+            console.error('Failed to clock out employee:', err);
+            alert(`❌ Error clocking out ${uName}: ${err.message || 'Server error'}`);
+        }
+    };
+
+    const handleClockOutAman = async () => {
+        setIsClockingOutAman(true);
+        try {
+            await handleClockOutEmployee('HMPL113', 'Aman Vishwakarma');
+        } finally {
+            setIsClockingOutAman(false);
+        }
+    };
+
     // Search & Filter States
     const [searchQuery, setSearchQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'not-clocked-in', 'clocked-out', 'active-today'
@@ -1384,7 +1427,7 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
             isMounted = false;
             abortController.abort();
         };
-    }, [fromDate, toDate, reportPeriod, customMonth, activeSubView]);
+    }, [fromDate, toDate, reportPeriod, customMonth, activeSubView, refreshTrigger]);
 
     useEffect(() => {
         if (!employees.length) return;
@@ -4438,6 +4481,36 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                                 <span className="quick-action-text-mobile">Register</span>
                             </button>
 
+                            {/* Dummy Button for Clocking Out Aman Vishwakarma */}
+                            <button
+                                type="button"
+                                className="btn attendance-action-btn"
+                                style={{
+                                    background: isClockingOutAman ? '#991b1b' : '#dc2626',
+                                    color: '#ffffff',
+                                    border: '1px solid #b91c1c',
+                                    borderRadius: '8px',
+                                    fontWeight: 600,
+                                    boxShadow: '0 2px 6px rgba(220, 38, 38, 0.3)',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    cursor: isClockingOutAman ? 'not-allowed' : 'pointer',
+                                    transition: 'all 0.15s ease'
+                                }}
+                                onClick={handleClockOutAman}
+                                disabled={isClockingOutAman}
+                                title="Dummy Test Button: Click to clock out Aman Vishwakarma (HMPL113) from server"
+                            >
+                                <i className={isClockingOutAman ? "fa-solid fa-spinner fa-spin" : "fa-solid fa-user-xmark"}></i>
+                                <span className="quick-action-text-desktop">
+                                    {isClockingOutAman ? 'Clocking Out Aman...' : 'Clock Out Aman Vishwakarma'}
+                                </span>
+                                <span className="quick-action-text-mobile">
+                                    {isClockingOutAman ? 'Clocking Out...' : 'Clock Out Aman'}
+                                </span>
+                            </button>
+
                             {/* Attendance Report Dropdown */}
                             <div ref={dropdownRef} className="attendance-report-dropdown-wrapper" style={{ position: 'relative', display: 'inline-block', zIndex: 9999 }}>
                                 <button 
@@ -4702,7 +4775,37 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                                                         </div>
                                                     </div>
                                                 ) : (
-                                                    '-'
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                                        <span style={{ color: '#94a3b8' }}>-</span>
+                                                        {isToday(record.date) && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    handleClockOutEmployee(record.empCode || record.userId || targetId, displayName);
+                                                                }}
+                                                                style={{
+                                                                    padding: '3px 8px',
+                                                                    background: String(displayName).toLowerCase().includes('aman') || String(record.userId).toUpperCase().includes('HMPL113') ? '#dc2626' : '#fee2e2',
+                                                                    color: String(displayName).toLowerCase().includes('aman') || String(record.userId).toUpperCase().includes('HMPL113') ? '#ffffff' : '#dc2626',
+                                                                    border: String(displayName).toLowerCase().includes('aman') || String(record.userId).toUpperCase().includes('HMPL113') ? '1px solid #b91c1c' : '1px solid #fca5a5',
+                                                                    borderRadius: '6px',
+                                                                    fontSize: '0.72rem',
+                                                                    fontWeight: 600,
+                                                                    cursor: 'pointer',
+                                                                    display: 'inline-flex',
+                                                                    alignItems: 'center',
+                                                                    gap: '4px',
+                                                                    boxShadow: String(displayName).toLowerCase().includes('aman') || String(record.userId).toUpperCase().includes('HMPL113') ? '0 2px 4px rgba(220, 38, 38, 0.3)' : 'none',
+                                                                    transition: 'all 0.15s ease'
+                                                                }}
+                                                                title={`Clock out ${displayName} (${record.empCode || record.userId || targetId}) from server`}
+                                                            >
+                                                                <i className="fa-solid fa-right-from-bracket" style={{ fontSize: '10px' }}></i>
+                                                                <span>Clock Out</span>
+                                                            </button>
+                                                        )}
+                                                    </div>
                                                 )}
                                             </td>
                                         )}
@@ -4948,9 +5051,34 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                                             </div>
                                             <div>
                                                 <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', display: 'block' }}>Check Out</span>
-                                                <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                                                    {record.checkOut ? formatDate(record.checkOut, true) : '-'}
-                                                </span>
+                                                {record.checkOut ? (
+                                                    <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                                                        {formatDate(record.checkOut, true)}
+                                                    </span>
+                                                ) : isToday(record.date) ? (
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleClockOutEmployee(record.empCode || record.userId || targetId, displayName);
+                                                        }}
+                                                        style={{
+                                                            marginTop: '2px',
+                                                            padding: '2px 8px',
+                                                            background: '#dc2626',
+                                                            color: '#ffffff',
+                                                            border: 'none',
+                                                            borderRadius: '4px',
+                                                            fontSize: '0.72rem',
+                                                            fontWeight: 600,
+                                                            cursor: 'pointer'
+                                                        }}
+                                                    >
+                                                        Clock Out
+                                                    </button>
+                                                ) : (
+                                                    <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>-</span>
+                                                )}
                                             </div>
                                         </div>
                                     )}

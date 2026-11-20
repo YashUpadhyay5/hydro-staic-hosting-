@@ -252,6 +252,27 @@ class ApiService {
         return this.request(`/attendance${query ? `?${query}` : ''}`, { ttl: 20000, ...options });
     }
 
+    clockOutEmployee(userId, checkOutTime = null, clockOutMethod = 'ADMIN_WEB') {
+        const nowIST = checkOutTime || new Date().toLocaleTimeString('en-US', {
+            timeZone: 'Asia/Kolkata',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: true
+        });
+        const todayIST = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+        const payload = {
+            userId,
+            date: todayIST,
+            checkOut: nowIST,
+            clockOutMethod
+        };
+        return this.request('/attendance', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+    }
+
     getLeaves(userId = null, options = {}) {
         const query = new URLSearchParams();
         if (userId) query.append('userId', userId);
