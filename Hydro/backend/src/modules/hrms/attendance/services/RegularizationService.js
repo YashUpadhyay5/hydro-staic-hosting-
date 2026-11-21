@@ -266,6 +266,229 @@ async function cancel(row, now = Date.now()) {
   return row.save();
 }
 
+// -------------------------------------------------------------
+// OVERTIME REGULARIZATION (WORKING HOURS > 8 HOURS / 480 MINS)
+// -------------------------------------------------------------
+
+function formatDurationMins(minutes) {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h > 0 && m > 0) return `${h}h ${m}m`;
+  if (h > 0) return `${h}h`;
+  return `${m}m`;
+}
+
+function formatMinsToHHMMSS(minutes) {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`;
+}
+
+function presentOvertime(row, emp = null) {
+  const plain = row.get ? row.get({ plain: true }) : { ...row };
+  const inM = ShiftEngine.parseTimeToMinutes(plain.checkIn);
+  const outM = ShiftEngine.parseTimeToMinutes(plain.checkOut);
+  const totalMins = (inM != null && outM != null && outM > inM) ? (outM - inM) : 0;
+  const otMins = Math.max(0, totalMins - 480);
+
+  const empCode = emp?.empCode || emp?.emp_code || plain.userId;
+  const employeeName = emp?.name || plain.userName;
+  const status = plain.overtimeStatus || (otMins > 0 ? 'PENDING' : 'NONE');
+
+  const rawWorkingHours = ShiftEngine.calculateWorkingHours(plain.checkIn, plain.checkOut);
+  // When rejected: decrease that extra overtime from total working time (capped at 480m / 08:00:00)
+  // When approved or pending: shows full recorded duration
+  const effectiveMins = status === 'REJECTED' ? Math.min(totalMins, 480) : totalMins;
+  const effectiveHoursFormatted = formatDurationMins(effectiveMins);
+  const effectiveWorkingHours = status === 'REJECTED' ? '08:00:00' : rawWorkingHours;
+
+  return {
+    id: plain.id,
+    attendanceId: plain.id,
+    userId: plain.userId,
+    empCode,
+    employeeName,
+    date: plain.date,
+    checkIn: plain.checkIn,
+    checkOut: plain.checkOut,
+    totalMinutes: totalMins,
+    totalHoursFormatted: formatDurationMins(totalMins),
+    effectiveMinutes: effectiveMins,
+    effectiveHoursFormatted,
+    rawWorkingHours,
+    effectiveWorkingHours,
+    overtimeMinutes: otMins,
+    overtimeHours: plain.overtimeHours || formatMinsToHHMMSS(otMins),
+    overtimeHoursFormatted: formatDurationMins(otMins),
+    overtimeStatus: status,
+    status,
+    decidedBy: plain.overtimeApprovedBy || null,
+    decidedAt: plain.overtimeApprovedAt || null,
+    decisionNote: plain.overtimeDecisionNote || null,
+    department: emp?.department || null,
+    designation: emp?.designation || null,
+    avatar: emp?.avatar || null,
+    createdAt: plain.createdAt,
+    updatedAt: plain.updatedAt
+  };
+}
+
+async function listOvertime({ status = 'PENDING', date, from, to, employeeId, limit = 100, page = 1 } = {}) {
+  const { getCachedEmployees } = require('../../../../core/utils/employeeCache');
+  const { empMap } = await getCachedEmployees();
+
+  const where = {
+    checkIn: { [Op.ne]: null },
+    checkOut: { [Op.ne]: null }
+  };
+
+  const wantedStatus = String(status || 'PENDING').toUpperCase();
+  if (wantedStatus !== 'ALL') {
+    where.overtimeStatus = wantedStatus;
+  } else {
+    where[Op.or] = [
+      { overtimeMinutes: { [Op.gt]: 0 } },
+      { overtimeStatus: { [Op.in]: ['PENDING', 'APPROVED', 'REJECTED'] } }
+    ];
+  }
+
+  if (date) {
+    where.date = text(date, 10);
+  } else if (from || to) {
+    where.date = {};
+    if (from) where.date[Op.gte] = text(from, 10);
+    if (to) where.date[Op.lte] = text(to, 10);
+  }
+
+  if (employeeId) {
+    const emp = await resolveEmployee(employeeId);
+    if (emp) {
+      where.userId = { [Op.in]: idVariants(emp) };
+    }
+  }
+
+  const p = Math.max(1, parseInt(page || 1, 10));
+  const l = Math.min(200, Math.max(1, parseInt(limit || 100, 10)));
+  const offset = (p - 1) * l;
+
+  const { count, rows } = await Attendance.findAndCountAll({
+    where,
+    order: [['date', 'DESC'], ['createdAt', 'DESC']],
+    limit: l,
+    offset
+  });
+
+  const countBase = {
+    checkIn: { [Op.ne]: null },
+    checkOut: { [Op.ne]: null }
+  };
+  if (employeeId) {
+    const emp = await resolveEmployee(employeeId);
+    if (emp) countBase.userId = { [Op.in]: idVariants(emp) };
+  }
+
+  const [pendingCount, approvedCount, rejectedCount] = await Promise.all([
+    Attendance.count({ where: { ...countBase, overtimeStatus: 'PENDING' } }),
+    Attendance.count({ where: { ...countBase, overtimeStatus: 'APPROVED' } }),
+    Attendance.count({ where: { ...countBase, overtimeStatus: 'REJECTED' } })
+  ]);
+
+  const requests = rows.map((row) => {
+    const uKey = String(row.userId || '').toLowerCase();
+    const unKey = String(row.userName || '').toLowerCase();
+    const emp = empMap.get(uKey) || empMap.get(unKey) || null;
+    return presentOvertime(row, emp);
+  });
+
+  return {
+    requests,
+    totalRecords: count,
+    pendingCount,
+    approvedCount,
+    rejectedCount,
+    page: p,
+    limit: l
+  };
+}
+
+async function approveOvertime(id, actor, body = {}) {
+  const row = await Attendance.findByPk(id);
+  if (!row) throw new RegularizationError('Attendance record not found.', 404, 'NOT_FOUND');
+
+  const inM = ShiftEngine.parseTimeToMinutes(row.checkIn);
+  const outM = ShiftEngine.parseTimeToMinutes(row.checkOut);
+  if (inM == null || outM == null || outM <= inM) {
+    throw new RegularizationError('Invalid clock-in or clock-out times for overtime.', 400, 'INVALID_PUNCH');
+  }
+
+  const diff = outM - inM;
+  if (diff <= 480) {
+    throw new RegularizationError('Working hours do not exceed 8 hours.', 400, 'NOT_OVERTIME');
+  }
+
+  const otMins = diff - 480;
+  const otHrs = Math.floor(otMins / 60);
+  const otRemMins = otMins % 60;
+  const otFormatted = `${String(otHrs).padStart(2, '0')}:${String(otRemMins).padStart(2, '0')}:00`;
+
+  row.overtimeStatus = 'APPROVED';
+  row.overtimeMinutes = otMins;
+  row.overtimeHours = otFormatted;
+  row.overtimeApprovedBy = text(actor, 200) || 'admin';
+  row.overtimeApprovedAt = new Date();
+  row.overtimeDecisionNote = text(body.note, 500) || 'Approved';
+  // Rule: When approved, overtime is ADDED to total working hours
+  row.workingHours = ShiftEngine.calculateWorkingHours(row.checkIn, row.checkOut);
+  await row.save();
+
+  const { getCachedEmployees } = require('../../../../core/utils/employeeCache');
+  const { empMap } = await getCachedEmployees();
+  const emp = empMap.get(String(row.userId).toLowerCase()) || null;
+  return presentOvertime(row, emp);
+}
+
+async function rejectOvertime(id, actor, body = {}) {
+  const row = await Attendance.findByPk(id);
+  if (!row) throw new RegularizationError('Attendance record not found.', 404, 'NOT_FOUND');
+
+  const inM = ShiftEngine.parseTimeToMinutes(row.checkIn);
+  const outM = ShiftEngine.parseTimeToMinutes(row.checkOut);
+  if (inM == null || outM == null || outM <= inM) {
+    throw new RegularizationError('Invalid clock-in or clock-out times for overtime.', 400, 'INVALID_PUNCH');
+  }
+
+  row.overtimeStatus = 'REJECTED';
+  row.overtimeApprovedBy = text(actor, 200) || 'admin';
+  row.overtimeApprovedAt = new Date();
+  row.overtimeDecisionNote = text(body.note, 500) || 'Rejected';
+  // Rule: When rejected, overtime is NOT added; working hours capped at 8 hours (08:00:00)
+  row.workingHours = '08:00:00';
+  await row.save();
+
+  const { getCachedEmployees } = require('../../../../core/utils/employeeCache');
+  const { empMap } = await getCachedEmployees();
+  const emp = empMap.get(String(row.userId).toLowerCase()) || null;
+  return presentOvertime(row, emp);
+}
+
+async function resetOvertime(id, actor) {
+  const row = await Attendance.findByPk(id);
+  if (!row) throw new RegularizationError('Attendance record not found.', 404, 'NOT_FOUND');
+
+  row.overtimeStatus = 'PENDING';
+  row.overtimeApprovedBy = null;
+  row.overtimeApprovedAt = null;
+  row.overtimeDecisionNote = null;
+  // Reset back to pending -> restores full recorded working hours
+  row.workingHours = ShiftEngine.calculateWorkingHours(row.checkIn, row.checkOut);
+  await row.save();
+
+  const { getCachedEmployees } = require('../../../../core/utils/employeeCache');
+  const { empMap } = await getCachedEmployees();
+  const emp = empMap.get(String(row.userId).toLowerCase()) || null;
+  return presentOvertime(row, emp);
+}
+
 module.exports = {
   RegularizationError,
   MAX_BACKDATE_DAYS,
@@ -274,10 +497,15 @@ module.exports = {
   istDate,
   resolveEmployee,
   present,
+  presentOvertime,
   createPresentDay,
   create,
   list,
   approve,
   reject,
-  cancel
+  cancel,
+  listOvertime,
+  approveOvertime,
+  rejectOvertime,
+  resetOvertime
 };

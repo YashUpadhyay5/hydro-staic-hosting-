@@ -83,6 +83,67 @@ router.post('/', takeDocuments, handle(async (req, res) => {
   res.status(201).json({ request: R.present(row) });
 }));
 
+// -------------------------------------------------------------
+// OVERTIME REGULARIZATION ROUTES (> 8 HOURS WORKED)
+// -------------------------------------------------------------
+
+// GET /api/regularizations/overtime?status=PENDING|APPROVED|REJECTED|ALL&date=&from=&to=&employeeId=&limit=&page=
+router.get('/overtime', handle(async (req, res) => {
+  const filters = {
+    status: req.query.status,
+    date: req.query.date,
+    from: req.query.from,
+    to: req.query.to,
+    limit: req.query.limit,
+    page: req.query.page
+  };
+  if (isStaff(req)) {
+    if (req.query.employeeId) filters.employeeId = (await targetEmployee(req)).id;
+  } else {
+    filters.employeeId = (await targetEmployee(req)).id;
+  }
+  res.json(await R.listOvertime(filters));
+}));
+
+// POST /api/regularizations/overtime/:id/approve   { note? }
+router.post('/overtime/:id/approve', handle(async (req, res) => {
+  requireStaff(req);
+  const result = await R.approveOvertime(req.params.id, actorOf(req), req.body || {});
+  const io = req.app ? req.app.get('io') : null;
+  if (io) {
+    try {
+      io.emit('ATTENDANCE_UPDATE', { date: result.date, attendanceId: result.id, overtimeStatus: 'APPROVED' });
+    } catch (e) {}
+  }
+  res.json({ request: result });
+}));
+
+// POST /api/regularizations/overtime/:id/reject   { note? }
+router.post('/overtime/:id/reject', handle(async (req, res) => {
+  requireStaff(req);
+  const result = await R.rejectOvertime(req.params.id, actorOf(req), req.body || {});
+  const io = req.app ? req.app.get('io') : null;
+  if (io) {
+    try {
+      io.emit('ATTENDANCE_UPDATE', { date: result.date, attendanceId: result.id, overtimeStatus: 'REJECTED' });
+    } catch (e) {}
+  }
+  res.json({ request: result });
+}));
+
+// POST /api/regularizations/overtime/:id/reset
+router.post('/overtime/:id/reset', handle(async (req, res) => {
+  requireStaff(req);
+  const result = await R.resetOvertime(req.params.id, actorOf(req));
+  const io = req.app ? req.app.get('io') : null;
+  if (io) {
+    try {
+      io.emit('ATTENDANCE_UPDATE', { date: result.date, attendanceId: result.id, overtimeStatus: 'PENDING' });
+    } catch (e) {}
+  }
+  res.json({ request: result });
+}));
+
 // GET /api/regularizations/:id
 router.get('/:id', handle(async (req, res) => {
   res.json({ request: R.present(await requestFor(req)) });

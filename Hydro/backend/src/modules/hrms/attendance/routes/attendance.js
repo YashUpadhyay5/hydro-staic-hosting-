@@ -236,9 +236,40 @@ async function enrichRecordsBatch(records, empMap, empAliasesMap) {
         }
       }
 
-      // Dynamic Working Hours Calculation if missing
-      if (!plain.workingHours && plain.checkIn && plain.checkOut) {
-        plain.workingHours = ShiftEngine.calculateWorkingHours(plain.checkIn, plain.checkOut);
+      // Dynamic Working Hours & Overtime Calculation (> 8 hours / 480 mins):
+      // Rule: Overtime extra is only decreased from total working hours if REJECTED by admin (capped at 08:00:00).
+      // When pending or approved, working hours retains the full recorded duration.
+      if (plain.checkIn && plain.checkOut) {
+        const fullWorkingHours = ShiftEngine.calculateWorkingHours(plain.checkIn, plain.checkOut);
+        plain.rawWorkingHours = fullWorkingHours;
+        const inMins = ShiftEngine.parseTimeToMinutes(plain.checkIn);
+        const outMins = ShiftEngine.parseTimeToMinutes(plain.checkOut);
+        if (inMins != null && outMins != null && outMins > inMins) {
+          const diffMins = outMins - inMins;
+          if (diffMins > 480) {
+            plain.overtimeMinutes = diffMins - 480;
+            const otH = Math.floor((diffMins - 480) / 60);
+            const otM = (diffMins - 480) % 60;
+            plain.overtimeHours = `${String(otH).padStart(2, '0')}:${String(otM).padStart(2, '0')}:00`;
+            plain.overtimeStatus = plain.overtimeStatus || 'PENDING';
+            if (plain.overtimeStatus === 'REJECTED') {
+              plain.workingHours = '08:00:00';
+              plain.isOvertimeApproved = false;
+            } else if (plain.overtimeStatus === 'APPROVED') {
+              plain.workingHours = fullWorkingHours;
+              plain.isOvertimeApproved = true;
+            } else {
+              plain.workingHours = fullWorkingHours;
+              plain.isOvertimeApproved = false;
+            }
+          } else {
+            plain.overtimeMinutes = 0;
+            plain.overtimeStatus = plain.overtimeStatus || 'NONE';
+            plain.workingHours = fullWorkingHours;
+          }
+        } else {
+          plain.workingHours = fullWorkingHours || '00:00:00';
+        }
       }
 
       if (plain.batteryLevel == null) {
@@ -441,7 +472,20 @@ router.post('/', async (req, res) => {
           staleRec.checkOut = autoRes.checkOutTime;
           staleRec.clockOutMethod = autoRes.method || 'AUTO_STALE_CLEANUP';
           staleRec.shiftCode = empShift.code;
-          staleRec.workingHours = ShiftEngine.calculateWorkingHours(staleRec.checkIn, autoRes.checkOutTime);
+          const sFull = ShiftEngine.calculateWorkingHours(staleRec.checkIn, autoRes.checkOutTime);
+          const sIn = ShiftEngine.parseTimeToMinutes(staleRec.checkIn);
+          const sOut = ShiftEngine.parseTimeToMinutes(autoRes.checkOutTime);
+          if (sIn != null && sOut != null && sOut > sIn && (sOut - sIn) > 480) {
+            const otM = (sOut - sIn) - 480;
+            const otH = Math.floor(otM / 60);
+            const otRem = otM % 60;
+            staleRec.overtimeMinutes = otM;
+            staleRec.overtimeHours = `${String(otH).padStart(2, '0')}:${String(otRem).padStart(2, '0')}:00`;
+            staleRec.overtimeStatus = staleRec.overtimeStatus || 'PENDING';
+            staleRec.workingHours = staleRec.overtimeStatus === 'REJECTED' ? '08:00:00' : sFull;
+          } else {
+            staleRec.workingHours = sFull;
+          }
           await staleRec.save().catch(e => console.warn('[Auto-Close Past Session Save Warning]:', e.message));
         }
       }
@@ -491,7 +535,22 @@ router.post('/', async (req, res) => {
         activeRecord.checkOut = cleanCheckOut;
         activeRecord.clockOutMethod = req.body.clockOutMethod || (latVal != null && lonVal != null ? 'MANUAL_APP' : 'MANUAL_WEB');
         activeRecord.shiftCode = activeRecord.shiftCode || empShift.code;
-        activeRecord.workingHours = workingHours || ShiftEngine.calculateWorkingHours(activeRecord.checkIn, cleanCheckOut);
+        const rawCalcHours = workingHours || ShiftEngine.calculateWorkingHours(activeRecord.checkIn, cleanCheckOut);
+        const inMins = ShiftEngine.parseTimeToMinutes(activeRecord.checkIn);
+        const outMins = ShiftEngine.parseTimeToMinutes(cleanCheckOut);
+        if (inMins != null && outMins != null && outMins > inMins && (outMins - inMins) > 480) {
+          const otM = (outMins - inMins) - 480;
+          const otHrs = Math.floor(otM / 60);
+          const otRemM = otM % 60;
+          activeRecord.overtimeMinutes = otM;
+          activeRecord.overtimeHours = `${String(otHrs).padStart(2, '0')}:${String(otRemM).padStart(2, '0')}:00`;
+          if (!activeRecord.overtimeStatus || activeRecord.overtimeStatus === 'NONE') {
+            activeRecord.overtimeStatus = 'PENDING';
+          }
+          activeRecord.workingHours = activeRecord.overtimeStatus === 'REJECTED' ? '08:00:00' : rawCalcHours;
+        } else {
+          activeRecord.workingHours = rawCalcHours;
+        }
         if (coords) activeRecord.coords = typeof coords === 'string' ? coords : JSON.stringify(coords);
         await activeRecord.save();
         GeofenceAlertService.resetTrackingState(activeUserId, null);

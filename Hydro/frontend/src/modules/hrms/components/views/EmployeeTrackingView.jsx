@@ -135,19 +135,28 @@ export default function EmployeeTrackingView({ userId, userName, employees = [],
 
     const getMarkerIcon = (f, isStart, isEnd) => {
         const isCellular = isCellularPing(f);
+        const rawAcc = f.accuracy != null ? parseFloat(f.accuracy) : null;
+        const isLowAccuracy = !isCellular && rawAcc != null && !isNaN(rawAcc) && rawAcc > 50;
+
         let color = isCellular ? '#f59e0b' : '#2563eb';
         let iconClass = isCellular ? 'fa-tower-cell' : 'fa-satellite-dish';
         let badgeText = '';
         let size = 26;
         
+        if (isLowAccuracy) {
+            color = '#f97316'; // Warning Amber/Orange for Low Accuracy (> 50m)
+            iconClass = 'fa-triangle-exclamation';
+            badgeText = `<span style="position: absolute; top: -14px; background: #ea580c; color: white; padding: 1px 4px; border-radius: 4px; font-size: 8px; font-weight: 700; border: 1px solid white; z-index: 999; white-space: nowrap;">⚠️ ±${Math.round(rawAcc)}m</span>`;
+        }
+
         if (isStart) {
-            color = '#10b981';
+            color = isLowAccuracy ? '#ea580c' : '#10b981';
             iconClass = 'fa-play';
-            badgeText = '<span style="position: absolute; top: -14px; background: #10b981; color: white; padding: 1px 4px; border-radius: 4px; font-size: 8px; font-weight: 700; border: 1px solid white; z-index: 999;">START</span>';
+            badgeText = `<span style="position: absolute; top: -14px; background: ${isLowAccuracy ? '#ea580c' : '#10b981'}; color: white; padding: 1px 4px; border-radius: 4px; font-size: 8px; font-weight: 700; border: 1px solid white; z-index: 999;">START${isLowAccuracy ? ' (>50m)' : ''}</span>`;
         } else if (isEnd) {
-            color = '#ef4444';
+            color = isLowAccuracy ? '#ea580c' : '#ef4444';
             iconClass = 'fa-stop';
-            badgeText = '<span style="position: absolute; top: -14px; background: #ef4444; color: white; padding: 1px 4px; border-radius: 4px; font-size: 8px; font-weight: 700; border: 1px solid white; z-index: 999;">CURRENT</span>';
+            badgeText = `<span style="position: absolute; top: -14px; background: ${isLowAccuracy ? '#ea580c' : '#ef4444'}; color: white; padding: 1px 4px; border-radius: 4px; font-size: 8px; font-weight: 700; border: 1px solid white; z-index: 999;">CURRENT${isLowAccuracy ? ' (>50m)' : ''}</span>`;
         }
 
         return window.L.divIcon({
@@ -494,11 +503,18 @@ export default function EmployeeTrackingView({ userId, userName, employees = [],
 
                 const isCellular = isCellularPing(f);
                 const isOff = isExplicitGpsOff(f);
+                const rawAcc = f.accuracy != null ? parseFloat(f.accuracy) : null;
+                const isLowAccuracy = !isCellular && rawAcc != null && !isNaN(rawAcc) && rawAcc > 50;
+
                 const methodLabel = isCellular ? '📱 Cellular' : '🛰️ GPS';
                 const offLabel = isOff ? ' <span style="color: #ef4444; font-weight: bold;">(GPS Off)</span>' : '';
                 const addr = f.address ? `<br><small style="color: #64748b;">${f.address}</small>` : '';
-                const popupContent = `<b>Footprint ${index + 1} (${methodLabel})${offLabel}</b><br>${formatDate(f.timestamp, true)}<br>Battery: ${parseBatteryPercentage(f.batteryLevel)}${addr}`;
+                const accLabel = rawAcc != null && !isNaN(rawAcc)
+                    ? `<br><small style="color: ${isLowAccuracy ? '#ea580c' : '#64748b'}; font-weight: ${isLowAccuracy ? '700' : 'normal'};"><i class="fa-solid fa-crosshairs"></i> Accuracy: ±${Math.round(rawAcc)}m ${isLowAccuracy ? '⚠️ (Low Accuracy / Possible Drift)' : ''}</small>`
+                    : '';
+                const popupContent = `<b>Footprint ${index + 1} (${methodLabel})${offLabel}</b><br>${formatDate(f.timestamp, true)}<br>Battery: ${parseBatteryPercentage(f.batteryLevel)}${accLabel}${addr}`;
                 
+
                 const markerIcon = getMarkerIcon(f, isStart, isEnd);
                 let marker;
                 if (isStart) {
@@ -658,6 +674,10 @@ export default function EmployeeTrackingView({ userId, userName, employees = [],
                             🏠 Employee House
                         </span>
                         <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            <span style={{ width: '9px', height: '9px', borderRadius: '50%', background: '#f97316', border: '1.5px solid #fff' }}></span>
+                            ⚠️ Low Acc (&gt;50m)
+                        </span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
                             <span style={{ width: '9px', height: '9px', borderRadius: '50%', background: '#10b981', border: '1.5px solid #fff' }}></span>
                             Start
                         </span>
@@ -691,6 +711,8 @@ export default function EmployeeTrackingView({ userId, userName, employees = [],
                                 const isOffStatus = isExplicitGpsOff(f);
                                 const lat = parseFloat(f.latitude);
                                 const lon = parseFloat(f.longitude);
+                                const rawAcc = f.accuracy != null ? parseFloat(f.accuracy) : null;
+                                const isLowAccuracy = !isCellular && rawAcc != null && !isNaN(rawAcc) && rawAcc > 50;
                                 const key = f.id || `fp_${originalIndex}_${lat}_${lon}`;
                                 const isSelected = selectedFootprintKey === key;
 
@@ -700,12 +722,18 @@ export default function EmployeeTrackingView({ userId, userName, employees = [],
                                         onClick={() => handleHistoryClick(f, originalIndex)}
                                         style={{
                                             padding: '10px 12px',
-                                            background: isSelected ? 'rgba(37, 99, 235, 0.12)' : 'var(--input-bg)',
+                                            background: isSelected 
+                                                ? (isLowAccuracy ? 'rgba(249, 115, 22, 0.2)' : 'rgba(37, 99, 235, 0.12)') 
+                                                : (isLowAccuracy ? 'rgba(249, 115, 22, 0.08)' : 'var(--input-bg)'),
                                             borderRadius: '8px',
                                             fontSize: '13px',
-                                            borderLeft: `4px solid ${isOffStatus ? 'var(--danger)' : (isCellular ? '#f59e0b' : 'var(--success)')}`,
-                                            border: isSelected ? '2px solid #2563eb' : '1px solid transparent',
-                                            boxShadow: isSelected ? '0 4px 12px rgba(37, 99, 235, 0.2)' : 'var(--shadow-sm)',
+                                            borderLeft: `4px solid ${isOffStatus ? 'var(--danger)' : (isLowAccuracy ? '#f97316' : (isCellular ? '#f59e0b' : 'var(--success)'))}`,
+                                            border: isSelected 
+                                                ? (isLowAccuracy ? '2px solid #f97316' : '2px solid #2563eb') 
+                                                : (isLowAccuracy ? '1px solid rgba(249, 115, 22, 0.3)' : '1px solid transparent'),
+                                            boxShadow: isSelected 
+                                                ? (isLowAccuracy ? '0 4px 12px rgba(249, 115, 22, 0.25)' : '0 4px 12px rgba(37, 99, 235, 0.2)') 
+                                                : 'var(--shadow-sm)',
                                             color: 'var(--text-primary)',
                                             cursor: 'pointer',
                                             transition: 'all 0.2s ease'
@@ -713,16 +741,34 @@ export default function EmployeeTrackingView({ userId, userName, employees = [],
                                     >
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
                                             <strong>{formatDate(f.timestamp, true)} {isSelected && '📍'}</strong>
-                                            <span>
-                                                {isCellular ? (
-                                                    <i className="fa-solid fa-tower-cell" style={{ color: '#f59e0b' }} title="Cellular"></i>
-                                                ) : (
-                                                    <i className="fa-solid fa-satellite-dish" style={{ color: '#2563eb' }} title="GPS"></i>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                {isLowAccuracy && (
+                                                    <span style={{
+                                                        background: 'rgba(249, 115, 22, 0.15)',
+                                                        color: '#ea580c',
+                                                        border: '1px solid rgba(249, 115, 22, 0.4)',
+                                                        padding: '1px 6px',
+                                                        borderRadius: '4px',
+                                                        fontSize: '10px',
+                                                        fontWeight: 700,
+                                                        display: 'inline-flex',
+                                                        alignItems: 'center',
+                                                        gap: '3px'
+                                                    }} title={`GPS accuracy uncertainty is ±${Math.round(rawAcc)}m (exceeds 50m threshold)`}>
+                                                        <i className="fa-solid fa-triangle-exclamation"></i> Acc: ±{Math.round(rawAcc)}m
+                                                    </span>
                                                 )}
-                                            </span>
+                                                <span>
+                                                    {isCellular ? (
+                                                        <i className="fa-solid fa-tower-cell" style={{ color: '#f59e0b' }} title="Cellular"></i>
+                                                    ) : (
+                                                        <i className="fa-solid fa-satellite-dish" style={{ color: isLowAccuracy ? '#f97316' : '#2563eb' }} title={isLowAccuracy ? `Low Accuracy GPS (±${Math.round(rawAcc)}m)` : 'GPS'}></i>
+                                                    )}
+                                                </span>
+                                            </div>
                                         </div>
                                         <div style={{ color: 'var(--text-secondary)', marginBottom: '4px', fontSize: '12px', fontWeight: 500 }}>
-                                            <i className="fa-solid fa-location-dot" style={{ marginRight: '6px', color: isCellular ? '#f59e0b' : '#2563eb' }}></i>
+                                            <i className="fa-solid fa-location-dot" style={{ marginRight: '6px', color: isLowAccuracy ? '#f97316' : (isCellular ? '#f59e0b' : '#2563eb') }}></i>
                                             {getDisplayAddress(f, lat, lon, isOffStatus)}
                                         </div>
                                         {lat !== null && !isNaN(lat) && lon !== null && !isNaN(lon) && (
@@ -736,6 +782,11 @@ export default function EmployeeTrackingView({ userId, userName, employees = [],
                                             )}
                                             {f.batteryTemp && (
                                                 <span><i className="fa-solid fa-temperature-half"></i> {f.batteryTemp}°C</span>
+                                            )}
+                                            {rawAcc != null && !isNaN(rawAcc) && (
+                                                <span style={{ color: isLowAccuracy ? '#ea580c' : 'inherit', fontWeight: isLowAccuracy ? 700 : 'normal' }}>
+                                                    <i className="fa-solid fa-crosshairs" style={{ color: isLowAccuracy ? '#ea580c' : 'inherit' }}></i> Acc: ±{Math.round(rawAcc)}m {isLowAccuracy ? '(Low)' : ''}
+                                                </span>
                                             )}
                                             {f.altitude !== undefined && f.altitude !== null && f.altitude !== 'N/A' && (
                                                 <span><i className="fa-solid fa-mountain"></i> Alt: {f.altitude}m</span>

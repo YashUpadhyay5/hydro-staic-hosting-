@@ -105,7 +105,13 @@ const runMigrations = async (sequelize) => {
     { name: 'notificationCount', type: 'INTEGER DEFAULT 0' },
     { name: 'lastNotificationTime', type: 'BIGINT' },
     { name: 'recoveryTime', type: 'BIGINT' },
-    { name: 'trackingInterruptedDuration', type: 'INTEGER DEFAULT 0' }
+    { name: 'trackingInterruptedDuration', type: 'INTEGER DEFAULT 0' },
+    { name: 'overtimeStatus', type: "VARCHAR(50) DEFAULT 'NONE'" },
+    { name: 'overtimeMinutes', type: 'INTEGER DEFAULT 0' },
+    { name: 'overtimeHours', type: 'VARCHAR(50)' },
+    { name: 'overtimeApprovedBy', type: 'VARCHAR(255)' },
+    { name: 'overtimeApprovedAt', type: 'TIMESTAMP WITH TIME ZONE' },
+    { name: 'overtimeDecisionNote', type: 'TEXT' }
   ];
 
   for (const col of attendanceCols) {
@@ -121,6 +127,27 @@ const runMigrations = async (sequelize) => {
         console.warn(`Attendances table ${col.name} migration warning:`, migErr.message);
       }
     }
+  }
+
+  // Data migration: Enforce Overtime Rejection Rule in Attendances table:
+  // When overtime is REJECTED by admin, workingHours MUST be '08:00:00' (extra overtime decreased from total working time).
+  try {
+    if (isPostgres) {
+      await sequelize.query(`
+        UPDATE "Attendances"
+        SET "workingHours" = '08:00:00'
+        WHERE "overtimeStatus" = 'REJECTED';
+      `);
+    } else {
+      await sequelize.query(`
+        UPDATE Attendances
+        SET workingHours = '08:00:00'
+        WHERE overtimeStatus = 'REJECTED';
+      `);
+    }
+    console.log('Migrated Attendances: enforced 08:00:00 cap on rejected overtime records.');
+  } catch (syncErr) {
+    console.warn('Overtime workingHours sync warning:', syncErr.message);
   }
 
   // --- MERGED MIGRATIONS ENGINE (POSTGRES + SQLITE) ---

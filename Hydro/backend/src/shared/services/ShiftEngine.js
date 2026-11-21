@@ -186,13 +186,13 @@ class ShiftEngine {
     if (!checkInVal || !checkOutVal) return null;
 
     const parseToSecs = (val) => {
-      const s = String(val).trim();
+      const s = String(val).replace(/[\u202f\u00a0]/g, ' ').trim().toUpperCase();
       const match = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i);
       if (match) {
         let hrs = parseInt(match[1], 10);
         const mins = parseInt(match[2], 10);
         const secs = parseInt(match[3] || '0', 10);
-        const ampm = match[4];
+        const ampm = match[4] ? match[4].toUpperCase() : null;
         if (ampm === 'PM' && hrs < 12) hrs += 12;
         if (ampm === 'AM' && hrs === 12) hrs = 0;
         return hrs * 3600 + mins * 60 + secs;

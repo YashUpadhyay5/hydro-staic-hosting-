@@ -186,6 +186,19 @@ function EmployeeSelectDropdown({ employees, selectedEmpId, onSelect }) {
     );
 }
 
+// Haversine formula to compute distance in meters between two lat/lon pairs
+const getDistance = (lat1, lon1, lat2, lon2) => {
+    if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) return Infinity;
+    const toRad = (x) => (x * Math.PI) / 180;
+    const R = 6371000;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+};
+
 // 45 -> "45s", 900 -> "15 min", 5400 -> "1.5 h"
 const formatSeconds = (s) => {
     if (s == null) return '—';
@@ -221,6 +234,11 @@ export default function RouteReplayView({ employees }) {
     const [replayData, setReplayData] = useState(null);
     const [selectedPinKey, setSelectedPinKey] = useState(null);
 
+    // Geofences List (Splits into official office sites and employee residences)
+    const [geofences, setGeofences] = useState([]);
+    const [houseGeofences, setHouseGeofences] = useState([]);
+    const geofenceLayersGroupRef = useRef(null);
+
     // Playback state (Includes 0.5x, 1x, 2x, 5x, 10x speeds)
     const [isPlaying, setIsPlaying] = useState(false);
     const [playbackSpeed, setPlaybackSpeed] = useState(1); // 0.5, 1, 2, 5, 10
@@ -232,6 +250,22 @@ export default function RouteReplayView({ employees }) {
     const markersRef = useRef([]);
     const markersMapRef = useRef(new Map());
     const animMarkerRef = useRef(null);
+
+    // Load Geofences List
+    useEffect(() => {
+        const loadGeofences = async () => {
+            try {
+                const res = await api.getGeofences();
+                if (Array.isArray(res)) {
+                    setGeofences(res.filter(g => (g.category || 'SITE').toUpperCase() === 'SITE'));
+                    setHouseGeofences(res.filter(g => (g.category || 'SITE').toUpperCase() === 'HOUSE'));
+                }
+            } catch (err) {
+                console.warn('Error fetching geofences for route replay map:', err.message);
+            }
+        };
+        loadGeofences();
+    }, []);
 
     // Initialize Leaflet Map
     useEffect(() => {
@@ -245,6 +279,7 @@ export default function RouteReplayView({ employees }) {
                 maxZoom: 19
             }).addTo(leafletMap.current);
             polylinesGroupRef.current = window.L.layerGroup().addTo(leafletMap.current);
+            geofenceLayersGroupRef.current = window.L.layerGroup().addTo(leafletMap.current);
         }
 
         setTimeout(() => {
@@ -255,6 +290,8 @@ export default function RouteReplayView({ employees }) {
             if (leafletMap.current) {
                 leafletMap.current.remove();
                 leafletMap.current = null;
+                polylinesGroupRef.current = null;
+                geofenceLayersGroupRef.current = null;
             }
         };
     }, []);
@@ -341,6 +378,131 @@ export default function RouteReplayView({ employees }) {
         });
     };
 
+    // Render Work Sites & Employee Residences exactly as in EmployeeTrackingView
+    const renderGeofenceLayers = (footprintsList = []) => {
+        if (!leafletMap.current || !window.L) return;
+        if (!geofenceLayersGroupRef.current) {
+            geofenceLayersGroupRef.current = window.L.layerGroup().addTo(leafletMap.current);
+        } else {
+            geofenceLayersGroupRef.current.clearLayers();
+        }
+
+        const validPoints = (footprintsList || []).filter(f => f.latitude && f.longitude);
+        const selectedEmployeeObj = (employees || []).find(e => 
+            String(e.id) === String(selectedEmp) || 
+            String(e.empCode) === String(selectedEmp) || 
+            String(e.emp_code) === String(selectedEmp)
+        );
+
+        // 1. Office Work Sites: Blue circles, turning Green if visited today
+        (geofences || []).forEach(gf => {
+            if (!gf.latitude || !gf.longitude) return;
+            const gfLat = parseFloat(gf.latitude);
+            const gfLng = parseFloat(gf.longitude);
+            const gfRadius = parseFloat(gf.radius) || 100;
+
+            const isVisited = validPoints.some(f => {
+                const dist = getDistance(parseFloat(f.latitude), parseFloat(f.longitude), gfLat, gfLng);
+                return dist <= gfRadius;
+            });
+
+            const circleColor = isVisited ? '#10b981' : '#3b82f6';
+            const circle = window.L.circle([gfLat, gfLng], {
+                color: circleColor,
+                fillColor: circleColor,
+                fillOpacity: isVisited ? 0.25 : 0.12,
+                radius: gfRadius,
+                weight: isVisited ? 2.5 : 1.5
+            });
+
+            const tooltipText = `<b>🏢 ${gf.name}</b><br/>Status: ${isVisited ? '<span style="color:#10b981;font-weight:bold;">Visited ✅</span>' : '<span style="color:#64748b;">Not Visited</span>'}<br/>Radius: ${gfRadius}m`;
+            circle.bindTooltip(tooltipText, { sticky: true, opacity: 0.95 });
+
+            const popupContent = `
+                <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 4px; font-size: 13px; color: #1e293b; min-width: 170px;">
+                    <h4 style="margin: 0 0 6px 0; font-size: 14px; color: ${isVisited ? '#059669' : '#2563eb'}; display: flex; align-items: center; gap: 6px;">
+                        🏢 ${gf.name}
+                    </h4>
+                    <div style="margin-bottom: 6px; font-weight: 700; font-size: 11.5px; color: ${isVisited ? '#10b981' : '#64748b'};">
+                        ${isVisited ? '✅ Visited by Employee Today' : '⚪ Configured Office Site'}
+                    </div>
+                    <div style="font-size: 11px; color: #64748b;">
+                        <b>Coordinates:</b> ${gfLat.toFixed(5)}, ${gfLng.toFixed(5)}<br/>
+                        <b>Radius:</b> ${gfRadius} meters
+                    </div>
+                </div>
+            `;
+            circle.bindPopup(popupContent, { minWidth: 180 });
+            circle.addTo(geofenceLayersGroupRef.current);
+        });
+
+        // 2. Employee Residences (Houses): Purple dashed circle + 🏠 Pin
+        (houseGeofences || []).forEach(house => {
+            if (!house.latitude || !house.longitude) return;
+            const hLat = parseFloat(house.latitude);
+            const hLng = parseFloat(house.longitude);
+            const hRadius = parseFloat(house.radius) || 30;
+
+            const isOwnerHouse = selectedEmployeeObj && house.employeeId && (
+                String(house.employeeId).trim().toLowerCase() === String(selectedEmployeeObj.empCode || selectedEmployeeObj.emp_code || '').trim().toLowerCase() ||
+                String(house.employeeId).trim().toLowerCase() === String(selectedEmployeeObj.id || '').trim().toLowerCase() ||
+                String(house.name || '').toLowerCase().includes(String(selectedEmployeeObj.name || '').toLowerCase().split(' ')[0])
+            );
+
+            const houseCircle = window.L.circle([hLat, hLng], {
+                color: '#8b5cf6',
+                fillColor: '#8b5cf6',
+                fillOpacity: isOwnerHouse ? 0.3 : 0.2,
+                radius: hRadius,
+                weight: isOwnerHouse ? 3 : 2,
+                dashArray: '5, 5'
+            });
+
+            const empLabel = house.employeeId ? ` (${house.employeeId})` : '';
+            const houseTooltipText = `<b>🏠 ${house.name}</b><br/><span style="color:#a78bfa;font-weight:bold;">Employee Residence</span>${empLabel}<br/>Radius: ${hRadius}m`;
+            houseCircle.bindTooltip(houseTooltipText, { sticky: true, opacity: 0.95 });
+
+            const housePopup = `
+                <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 4px; font-size: 13px; color: #1e293b; min-width: 180px;">
+                    <h4 style="margin: 0 0 6px 0; font-size: 14px; color: #8b5cf6; display: flex; align-items: center; gap: 6px;">
+                        🏠 ${house.name}
+                    </h4>
+                    <div style="font-size: 11.5px; color: #64748b; margin-bottom: 4px;">
+                        Employee Residence (Off-Duty Location)
+                    </div>
+                    ${house.employeeId ? `<div style="font-size: 12px; font-weight: 700; color: #475569;">Resident: ${house.employeeId}</div>` : ''}
+                    <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">
+                        <b>Coordinates:</b> ${hLat.toFixed(5)}, ${hLng.toFixed(5)}<br/>
+                        <b>Radius:</b> ${hRadius} meters
+                    </div>
+                </div>
+            `;
+            houseCircle.bindPopup(housePopup, { minWidth: 190 });
+            houseCircle.addTo(geofenceLayersGroupRef.current);
+
+            // Add center 🏠 pin marker
+            const housePin = window.L.marker([hLat, hLng], {
+                icon: window.L.divIcon({
+                    className: 'custom-house-map-marker',
+                    html: `<div style="background: #8b5cf6; color: white; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; border: 2px solid white; box-shadow: 0 2px 10px rgba(139,92,246,0.6); cursor: pointer;" title="${house.name}">🏠</div>`,
+                    iconSize: [22, 22],
+                    iconAnchor: [11, 11]
+                })
+            });
+            housePin.bindTooltip(houseTooltipText, { sticky: true });
+            housePin.bindPopup(housePopup, { minWidth: 190 });
+            housePin.addTo(geofenceLayersGroupRef.current);
+        });
+    };
+
+    // Re-render geofence layers when geofences or selected employee change
+    useEffect(() => {
+        if (leafletMap.current && (geofences.length > 0 || houseGeofences.length > 0)) {
+            const currentLogs = replayData ? (replayData.rawLogs || replayData.rawFootprints || []) : [];
+            renderGeofenceLayers(currentLogs);
+        }
+    }, [geofences, houseGeofences, selectedEmp]);
+
     const handleLoadRoute = async (targetMode = routeMode) => {
         if (!selectedEmp) {
             alert('Please select an employee');
@@ -371,6 +533,7 @@ export default function RouteReplayView({ employees }) {
             }
 
             const rawLogs = data ? (data.rawLogs || data.rawFootprints || []) : [];
+            renderGeofenceLayers(rawLogs);
             const segments = data && data.segments ? data.segments : [];
             const osrmCoords = data && data.geometry && data.geometry.coordinates ? data.geometry.coordinates : [];
 
@@ -976,6 +1139,53 @@ export default function RouteReplayView({ employees }) {
                 {/* Leaflet Map Panel */}
                 <div className="route-replay-map-panel" style={{ background: 'var(--bg-glass)', padding: '16px', borderRadius: '16px', border: '1px solid var(--border-glass)', minHeight: '400px', display: 'flex', flexDirection: 'column', position: 'relative' }}>
                     <div ref={mapRef} style={{ width: '100%', height: '588px', minHeight: '340px', borderRadius: '12px', zIndex: 0 }} />
+
+                    {/* Floating Visual Map Legend matching EmployeeTrackingView */}
+                    <div style={{
+                        position: 'absolute',
+                        bottom: '28px',
+                        left: '28px',
+                        zIndex: 999,
+                        background: 'rgba(15, 23, 42, 0.88)',
+                        backdropFilter: 'blur(8px)',
+                        border: '1px solid rgba(255, 255, 255, 0.12)',
+                        borderRadius: '10px',
+                        padding: '7px 13px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '12px',
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        color: '#cbd5e1',
+                        boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+                        pointerEvents: 'none',
+                        flexWrap: 'wrap'
+                    }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            <span style={{ width: '9px', height: '9px', borderRadius: '50%', background: '#3b82f6', border: '1.5px solid #fff' }}></span>
+                            Office Site
+                        </span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            <span style={{ width: '9px', height: '9px', borderRadius: '50%', background: '#10b981', border: '1.5px solid #fff' }}></span>
+                            Visited Site
+                        </span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            <span style={{ width: '9px', height: '9px', borderRadius: '50%', background: '#8b5cf6', border: '1.5px dashed #fff' }}></span>
+                            🏠 Employee House
+                        </span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            <span style={{ width: '9px', height: '9px', borderRadius: '50%', background: '#10b981', border: '1.5px solid #fff' }}></span>
+                            Start
+                        </span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            <span style={{ width: '9px', height: '9px', borderRadius: '50%', background: '#ef4444', border: '1.5px solid #fff' }}></span>
+                            End
+                        </span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            <span style={{ width: '9px', height: '9px', borderRadius: '50%', background: '#f59e0b', border: '1.5px solid #fff' }}></span>
+                            Stops
+                        </span>
+                    </div>
 
                     {/* Mobile Bottom Summary Card (Matches Screen 4) */}
                     <div className="mobile-cards-only route-summary-card-mobile" style={{

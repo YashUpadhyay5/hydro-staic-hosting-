@@ -255,7 +255,20 @@ class CronScheduler {
           session.checkOut = autoRes.checkOutTime;
           session.clockOutMethod = autoRes.method || 'AUTO_SHIFT_END';
           session.shiftCode = shift.code;
-          session.workingHours = ShiftEngine.calculateWorkingHours(session.checkIn, session.checkOut);
+          const fullHrs = ShiftEngine.calculateWorkingHours(session.checkIn, session.checkOut);
+          const inM = ShiftEngine.parseTimeToMinutes(session.checkIn);
+          const outM = ShiftEngine.parseTimeToMinutes(session.checkOut);
+          if (inM != null && outM != null && outM > inM && (outM - inM) > 480) {
+            const otM = (outM - inM) - 480;
+            const otH = Math.floor(otM / 60);
+            const otRem = otM % 60;
+            session.overtimeMinutes = otM;
+            session.overtimeHours = `${String(otH).padStart(2, '0')}:${String(otRem).padStart(2, '0')}:00`;
+            session.overtimeStatus = session.overtimeStatus || 'PENDING';
+            session.workingHours = session.overtimeStatus === 'REJECTED' ? '08:00:00' : fullHrs;
+          } else {
+            session.workingHours = fullHrs;
+          }
           await session.save();
         }
         console.log(`[CronScheduler] Successfully auto-closed ${staleSessions.length} stale past sessions.`);

@@ -65,6 +65,16 @@ class ApiService {
             return;
         }
 
+        if (baseModule === 'regularizations' || cleanEp.includes('regularization') || baseModule === 'attendance' || cleanEp.includes('attendance')) {
+            this.clearCacheMatching(key => 
+                key.includes('regularization') || 
+                key.includes('attendance') || 
+                key.includes('dashboard') ||
+                key.includes('leave')
+            );
+            return;
+        }
+
         if (baseModule) {
             this.clearCacheMatching(key => key.includes(baseModule) || key.includes('dashboard'));
         } else {
@@ -440,6 +450,39 @@ class ApiService {
 
     rejectRegularization(id, note) {
         return this.request(`/regularizations/${encodeURIComponent(id)}/reject`, { method: 'POST', body: JSON.stringify({ note }) });
+    }
+
+    // Overtime regularization: records where working hours exceed 8 hours / day (no cache: immediate decision update)
+    getOvertimeRegularizations(params = {}) {
+        const q = new URLSearchParams(params).toString();
+        return this.request(`/regularizations/overtime${q ? `?${q}` : ''}`, { ttl: 0 });
+    }
+
+    async approveOvertime(id, note = '') {
+        const res = await this.request(`/regularizations/overtime/${encodeURIComponent(id)}/approve`, { method: 'POST', body: JSON.stringify({ note }) });
+        this.clearCacheMatching(key => key.includes('attendance') || key.includes('regularization') || key.includes('dashboard'));
+        if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('attendance-updated', { detail: { id, overtimeStatus: 'APPROVED' } }));
+        }
+        return res;
+    }
+
+    async rejectOvertime(id, note = '') {
+        const res = await this.request(`/regularizations/overtime/${encodeURIComponent(id)}/reject`, { method: 'POST', body: JSON.stringify({ note }) });
+        this.clearCacheMatching(key => key.includes('attendance') || key.includes('regularization') || key.includes('dashboard'));
+        if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('attendance-updated', { detail: { id, overtimeStatus: 'REJECTED' } }));
+        }
+        return res;
+    }
+
+    async resetOvertime(id) {
+        const res = await this.request(`/regularizations/overtime/${encodeURIComponent(id)}/reset`, { method: 'POST' });
+        this.clearCacheMatching(key => key.includes('attendance') || key.includes('regularization') || key.includes('dashboard'));
+        if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('attendance-updated', { detail: { id, overtimeStatus: 'PENDING' } }));
+        }
+        return res;
     }
 
     // Monthly attendance register (P / EL / A per day) and its admin edits (no cache: edits must show at once)

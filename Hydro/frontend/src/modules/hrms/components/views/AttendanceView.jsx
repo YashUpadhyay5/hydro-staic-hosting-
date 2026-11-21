@@ -346,6 +346,11 @@ const groupAttendanceRecords = (records, footprintsList = [], employeesList = []
                 employee: r.employee || rEmp,
                 checkIn: r.checkIn,
                 checkOut: r.checkOut,
+                overtimeStatus: r.overtimeStatus || 'NONE',
+                overtimeHours: r.overtimeHours,
+                overtimeMinutes: r.overtimeMinutes,
+                isOvertimeApproved: r.isOvertimeApproved,
+                workingHours: r.overtimeStatus === 'REJECTED' ? '08:00:00' : r.workingHours,
                 punchCount: 1,
                 punches: [r]
             };
@@ -368,6 +373,29 @@ const groupAttendanceRecords = (records, footprintsList = [], employeesList = []
             const newCheckOutTs = parseToTimestamp(r.checkOut);
             if (newCheckOutTs && (!existingCheckOutTs || newCheckOutTs > existingCheckOutTs)) {
                 grouped[key].checkOut = r.checkOut;
+            }
+
+            // Propagate overtime status and working hours
+            if (r.overtimeStatus) {
+                if (String(r.overtimeStatus).toUpperCase() === 'REJECTED') {
+                    grouped[key].overtimeStatus = 'REJECTED';
+                } else if (String(r.overtimeStatus).toUpperCase() === 'APPROVED' && grouped[key].overtimeStatus !== 'REJECTED') {
+                    grouped[key].overtimeStatus = 'APPROVED';
+                } else if (!grouped[key].overtimeStatus) {
+                    grouped[key].overtimeStatus = r.overtimeStatus;
+                }
+            }
+            if (r.overtimeHours) grouped[key].overtimeHours = r.overtimeHours;
+            if (r.overtimeMinutes) grouped[key].overtimeMinutes = r.overtimeMinutes;
+            if (r.isOvertimeApproved !== undefined) {
+                grouped[key].isOvertimeApproved = r.isOvertimeApproved;
+            }
+            if (r.workingHours && r.workingHours !== '00:00:00') {
+                if (r.overtimeStatus === 'REJECTED' || grouped[key].overtimeStatus === 'REJECTED') {
+                    grouped[key].workingHours = '08:00:00';
+                } else if (!grouped[key].workingHours || grouped[key].workingHours === '00:00:00') {
+                    grouped[key].workingHours = r.workingHours;
+                }
             }
         }
     });
@@ -1429,6 +1457,17 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
         };
     }, [fromDate, toDate, reportPeriod, customMonth, activeSubView, refreshTrigger]);
 
+    // Live update when an admin approves/rejects overtime in RegularizationPanel
+    useEffect(() => {
+        const handleAttendanceUpdated = () => {
+            setRefreshTrigger(prev => prev + 1);
+        };
+        window.addEventListener('attendance-updated', handleAttendanceUpdated);
+        return () => {
+            window.removeEventListener('attendance-updated', handleAttendanceUpdated);
+        };
+    }, []);
+
     useEffect(() => {
         if (!employees.length) return;
         
@@ -1649,8 +1688,18 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
 
         if (!start || !end) return '-';
         
-        const diffMs = end - start;
+        let diffMs = end - start;
         if (diffMs <= 0) return '0s';
+
+        // Overtime rule: When admin rejects overtime, the extra overtime (> 8h) is decreased/capped at 8h 00m 00s.
+        // When approved or pending, total working hours reflects the full recorded duration.
+        const EIGHT_HOURS_MS = 8 * 3600 * 1000;
+        const isRejected = String(record.overtimeStatus || '').toUpperCase() === 'REJECTED' || 
+                           (record.punches && record.punches.some(p => String(p.overtimeStatus || '').toUpperCase() === 'REJECTED')) ||
+                           (record.workingHours === '08:00:00' && diffMs > EIGHT_HOURS_MS);
+        if (diffMs > EIGHT_HOURS_MS && isRejected) {
+            diffMs = EIGHT_HOURS_MS;
+        }
         
         const diffHrs = Math.floor(diffMs / 3600000);
         const diffMins = Math.floor((diffMs % 3600000) / 60000);
@@ -1762,6 +1811,28 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
     } else if (statusFilter === 'active-today') {
         filteredData = groupedAttendance
             .filter(r => isToday(r.date) && !cleanCheckOutVal(r.checkOut))
+            .map(r => ({ ...r, type: 'log' }));
+    } else if (statusFilter === 'overtime') {
+        filteredData = groupedAttendance
+            .filter(r => {
+                if (!r.checkIn || !r.checkOut) return false;
+                const parseD = (dVal, tVal) => {
+                    if (!tVal) return null;
+                    const m = String(tVal).match(/(\d+):(\d+):?(\d+)?\s*(AM|PM)?/i);
+                    if (!m) return null;
+                    let h = parseInt(m[1], 10);
+                    const min = parseInt(m[2], 10);
+                    const ap = m[4] ? m[4].toUpperCase() : null;
+                    if (ap === 'PM' && h < 12) h += 12;
+                    if (ap === 'AM' && h === 12) h = 0;
+                    const d = new Date(dVal || Date.now());
+                    d.setHours(h, min, 0, 0);
+                    return d;
+                };
+                const s = parseD(r.date, r.checkIn);
+                const e = parseD(r.date, r.checkOut);
+                return s && e && (e - s) > 8 * 3600 * 1000;
+            })
             .map(r => ({ ...r, type: 'log' }));
     }
 
@@ -2128,7 +2199,26 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                         if (start && end) {
                             const totalDurationMs = end - start;
                             if (totalDurationMs > 0) {
-                                totalWorkedMs += totalDurationMs;
+                                // Rule: When admin rejects overtime, extra overtime (> 8h) is decreased/capped at 8 hours.
+                                // When approved or pending, full duration is counted.
+                                const EIGHT_HOURS_MS = 8 * 3600 * 1000;
+                                const isRejected = String(record.overtimeStatus || '').toUpperCase() === 'REJECTED' || 
+                                                   (record.punches && record.punches.some(p => String(p.overtimeStatus || '').toUpperCase() === 'REJECTED')) ||
+                                                   (record.workingHours === '08:00:00' && totalDurationMs > EIGHT_HOURS_MS);
+                                let effectiveDurationMs = totalDurationMs;
+                                let effectiveOvertimeMs = 0;
+
+                                if (totalDurationMs > EIGHT_HOURS_MS) {
+                                    if (isRejected) {
+                                        effectiveDurationMs = EIGHT_HOURS_MS;
+                                        effectiveOvertimeMs = 0;
+                                    } else {
+                                        effectiveDurationMs = totalDurationMs;
+                                        effectiveOvertimeMs = totalDurationMs - EIGHT_HOURS_MS;
+                                    }
+                                }
+                                totalWorkedMs += effectiveDurationMs;
+                                totalOvertimeMs += effectiveOvertimeMs;
                                 
                                 if (!isFlexible) {
                                     const standardStart = new Date(start);
@@ -2146,16 +2236,9 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                                     }
                                 }
                                 
-                                // Calculate Overtime: Clock-out after 06:00 PM (18:00)
-                                const standardEndOvertime = new Date(end);
-                                standardEndOvertime.setHours(standardCheckOutHour, 0, 0, 0);
-                                if (end > standardEndOvertime) {
-                                    totalOvertimeMs += (end - standardEndOvertime);
-                                }
-                                
-                                if (totalDurationMs < requiredNetWorkMs) {
+                                if (effectiveDurationMs < requiredNetWorkMs) {
                                     lackTimes += 1;
-                                    lackDurationMin += Math.floor((requiredNetWorkMs - totalDurationMs) / (60 * 1000));
+                                    lackDurationMin += Math.floor((requiredNetWorkMs - effectiveDurationMs) / (60 * 1000));
                                 }
                             }
                         }
@@ -3835,12 +3918,19 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                         punches.leaveTime = 0;
                     }
 
-                    // 3. Calculate Overtime (Minutes)
+                    // 3. Calculate Overtime (Minutes): Enforce admin approval rule
+                    const isOtApproved = dayLogs.some(l => l.overtimeStatus === 'APPROVED' || l.isOvertimeApproved);
+                    const isOtRejected = dayLogs.some(l => String(l.overtimeStatus || '').toUpperCase() === 'REJECTED' || l.workingHours === '08:00:00');
+                    const isOtPending = !isOtApproved && !isOtRejected && dayLogs.some(l => l.overtimeStatus === 'PENDING' || (l.overtimeMinutes && l.overtimeMinutes > 0));
                     if (punches.overBegin && punches.overEnd) {
                         const overBeginMin = timeToMinutes(punches.overBegin);
                         const overEndMin = timeToMinutes(punches.overEnd);
                         if (overBeginMin !== null && overEndMin !== null && overEndMin > overBeginMin) {
-                            punches.overtime = overEndMin - overBeginMin;
+                            if (isOtApproved) {
+                                punches.overtime = overEndMin - overBeginMin;
+                            } else {
+                                punches.overtime = 0;
+                            }
                         }
                     }
 
@@ -3852,7 +3942,9 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                     if (onApprovedLeave) remarksList.push('On Leave');
                     if (punches.lateTime > 0) remarksList.push(`Late ${punches.lateTime}m`);
                     if (punches.leaveTime > 0) remarksList.push(`Early Leave ${punches.leaveTime}m`);
-                    if (punches.overtime > 0) remarksList.push(`OT ${punches.overtime}m`);
+                    if (isOtApproved && punches.overtime > 0) remarksList.push(`OT ${punches.overtime}m (Approved)`);
+                    else if (isOtPending) remarksList.push('OT Pending');
+                    else if (isOtRejected) remarksList.push('OT Rejected');
                     punches.remarks = remarksList.join(', ') || 'Normal';
                 }
 
@@ -4160,7 +4252,10 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                         const overBeginMin = timeToMinutes(punches.overBegin);
                         const overEndMin = timeToMinutes(punches.overEnd);
                         if (overBeginMin !== null && overEndMin !== null && overEndMin > overBeginMin) {
-                            totalOvertimeMins += (overEndMin - overBeginMin);
+                            const isOtApproved = dayLogs.some(l => l.overtimeStatus === 'APPROVED' || l.isOvertimeApproved);
+                            if (isOtApproved) {
+                                totalOvertimeMins += (overEndMin - overBeginMin);
+                            }
                         }
                     }
                 } else {
@@ -4689,6 +4784,13 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                                 const displayDept = emp?.department || record.department || emp?.designation || record.jobTitle || '';
                                 const targetId = (emp && (emp.id || emp.empCode || emp._id || emp.employeeId)) || record.userId || record.empCode || record.id;
                                 const targetName = (emp && emp.name) || displayName;
+                                const isAmanVishwakarma = Boolean(
+                                    String(displayName || '').toLowerCase().includes('aman') ||
+                                    String(displayCode || '').toUpperCase().includes('HMPL113') ||
+                                    String(record.userId || '').toUpperCase().includes('HMPL113') ||
+                                    String(record.empCode || '').toUpperCase().includes('HMPL113') ||
+                                    String(targetId || '').toUpperCase().includes('HMPL113')
+                                );
                                 
                                 return (
                                     <tr 
@@ -4777,7 +4879,7 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                                                 ) : (
                                                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                                                         <span style={{ color: '#94a3b8' }}>-</span>
-                                                        {isToday(record.date) && (
+                                                        {isToday(record.date) && isAmanVishwakarma && (
                                                             <button
                                                                 type="button"
                                                                 onClick={(e) => {
@@ -4786,9 +4888,9 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                                                                 }}
                                                                 style={{
                                                                     padding: '3px 8px',
-                                                                    background: String(displayName).toLowerCase().includes('aman') || String(record.userId).toUpperCase().includes('HMPL113') ? '#dc2626' : '#fee2e2',
-                                                                    color: String(displayName).toLowerCase().includes('aman') || String(record.userId).toUpperCase().includes('HMPL113') ? '#ffffff' : '#dc2626',
-                                                                    border: String(displayName).toLowerCase().includes('aman') || String(record.userId).toUpperCase().includes('HMPL113') ? '1px solid #b91c1c' : '1px solid #fca5a5',
+                                                                    background: '#dc2626',
+                                                                    color: '#ffffff',
+                                                                    border: '1px solid #b91c1c',
                                                                     borderRadius: '6px',
                                                                     fontSize: '0.72rem',
                                                                     fontWeight: 600,
@@ -4796,7 +4898,7 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                                                                     display: 'inline-flex',
                                                                     alignItems: 'center',
                                                                     gap: '4px',
-                                                                    boxShadow: String(displayName).toLowerCase().includes('aman') || String(record.userId).toUpperCase().includes('HMPL113') ? '0 2px 4px rgba(220, 38, 38, 0.3)' : 'none',
+                                                                    boxShadow: '0 2px 4px rgba(220, 38, 38, 0.3)',
                                                                     transition: 'all 0.15s ease'
                                                                 }}
                                                                 title={`Clock out ${displayName} (${record.empCode || record.userId || targetId}) from server`}
@@ -4812,8 +4914,17 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                                         {statusFilter !== 'not-clocked-in' && (
                                             <td>
                                                 {record.checkOut ? (
-                                                    <span style={{ fontWeight: 600, color: '#10b981' }}>
+                                                    <span style={{ fontWeight: 600, color: (record.overtimeStatus === 'APPROVED' || record.isOvertimeApproved) ? '#10b981' : record.overtimeStatus === 'REJECTED' ? '#ef4444' : 'var(--text-primary)' }}>
                                                         {calculateWorkingHours(record)}
+                                                        {(record.overtimeStatus === 'APPROVED' || record.isOvertimeApproved) && (
+                                                            <span style={{ fontSize: '0.72rem', color: '#10b981', marginLeft: '6px', fontWeight: 700 }}>(OT Approved)</span>
+                                                        )}
+                                                        {record.overtimeStatus === 'REJECTED' && (
+                                                            <span style={{ fontSize: '0.72rem', color: '#ef4444', marginLeft: '6px', fontWeight: 700 }}>(-{record.overtimeHours ? record.overtimeHours.slice(0, 5) : 'OT'} Decreased &bull; OT Rejected)</span>
+                                                        )}
+                                                        {record.overtimeStatus === 'PENDING' && (
+                                                            <span style={{ fontSize: '0.72rem', color: '#d97706', marginLeft: '6px', fontWeight: 700 }}>(OT Pending)</span>
+                                                        )}
                                                     </span>
                                                 ) : isToday(record.date) ? (
                                                     <span style={{ color: '#f59e0b', fontSize: '0.9rem' }}>In Progress</span>
@@ -4981,6 +5092,13 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                             const displayDept = emp?.department || record.department || emp?.designation || record.jobTitle || '';
                             const targetId = (emp && (emp.id || emp.empCode || emp._id || emp.employeeId)) || record.userId || record.empCode || record.id;
                             const targetName = (emp && emp.name) || displayName;
+                            const isAmanVishwakarma = Boolean(
+                                String(displayName || '').toLowerCase().includes('aman') ||
+                                String(displayCode || '').toUpperCase().includes('HMPL113') ||
+                                String(record.userId || '').toUpperCase().includes('HMPL113') ||
+                                String(record.empCode || '').toUpperCase().includes('HMPL113') ||
+                                String(targetId || '').toUpperCase().includes('HMPL113')
+                            );
                             const recDate = record.date ? record.date.split('T')[0] : '';
                             const locInfo = getLocationInfo(emp, record);
                             const auditedDist = getAuditedDistanceForRecord(record, emp);
@@ -5039,8 +5157,11 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                                             </div>
                                             <div>
                                                 <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', display: 'block' }}>Working Hours</span>
-                                                <span style={{ fontWeight: 700, color: record.checkOut ? '#10b981' : '#f59e0b' }}>
+                                                <span style={{ fontWeight: 700, color: (record.overtimeStatus === 'APPROVED' || record.isOvertimeApproved) ? '#10b981' : record.overtimeStatus === 'REJECTED' ? '#ef4444' : record.checkOut ? '#10b981' : '#f59e0b' }}>
                                                     ⏱️ {record.checkOut ? calculateWorkingHours(record) : (isToday(record.date) ? 'In Progress' : '-')}
+                                                    {record.overtimeStatus === 'REJECTED' && <span style={{ fontSize: '0.68rem', display: 'block', color: '#ef4444', fontWeight: 600 }}>(-{record.overtimeHours ? record.overtimeHours.slice(0, 5) : 'OT'} Decreased &bull; Capped 8h)</span>}
+                                                    {(record.overtimeStatus === 'APPROVED' || record.isOvertimeApproved) && <span style={{ fontSize: '0.68rem', display: 'block', color: '#10b981', fontWeight: 600 }}>(OT Approved)</span>}
+                                                    {record.overtimeStatus === 'PENDING' && <span style={{ fontSize: '0.68rem', display: 'block', color: '#d97706', fontWeight: 600 }}>(OT Pending)</span>}
                                                 </span>
                                             </div>
                                             <div>
@@ -5055,7 +5176,7 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                                                     <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
                                                         {formatDate(record.checkOut, true)}
                                                     </span>
-                                                ) : isToday(record.date) ? (
+                                                ) : isToday(record.date) && isAmanVishwakarma ? (
                                                     <button
                                                         type="button"
                                                         onClick={(e) => {
@@ -5268,7 +5389,7 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                         {/* Modal Body - Punch Sessions List */}
                         <div style={{ padding: '20px 24px', maxHeight: '420px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
                             {(selectedPunchHistory.punches && selectedPunchHistory.punches.length > 0 ? selectedPunchHistory.punches : [selectedPunchHistory]).map((p, idx) => {
-                                const sessionWorkingHours = (p.checkIn && p.checkOut) ? calculateWorkingHours({ checkIn: p.checkIn, checkOut: p.checkOut, date: selectedPunchHistory.date }) : null;
+                                const sessionWorkingHours = (p.checkIn && p.checkOut) ? calculateWorkingHours({ ...p, date: selectedPunchHistory.date, overtimeStatus: p.overtimeStatus || selectedPunchHistory.overtimeStatus, isOvertimeApproved: p.isOvertimeApproved || selectedPunchHistory.isOvertimeApproved }) : null;
                                 return (
                                     <div 
                                         key={p.id || idx}

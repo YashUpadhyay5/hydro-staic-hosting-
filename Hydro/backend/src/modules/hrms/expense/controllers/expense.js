@@ -2,9 +2,30 @@ const Expense = require('../../../../shared/models/Expense');
 const Employee = require('../../../../shared/models/Employee');
 const sequelize = require('../../../../config/database');
 const { getCachedEmployees } = require('../../../../core/utils/employeeCache');
+const { getStoragePath } = require('../../../../core/middleware/upload');
 const fs = require('fs');
 const path = require('path');
 const EmailService = require('../../../../core/services/EmailService');
+
+// Helper to safely delete an invoice file from disk
+const safelyDeleteInvoiceFile = (fileRelUrl) => {
+  if (!fileRelUrl) return;
+  try {
+    let targetPath;
+    if (fileRelUrl.startsWith('/static/uploads/')) {
+      const filename = path.basename(fileRelUrl);
+      targetPath = path.join(__dirname, '..', 'uploads', filename);
+    } else {
+      targetPath = path.join(getStoragePath(), fileRelUrl);
+    }
+    if (fs.existsSync(targetPath)) {
+      fs.unlinkSync(targetPath);
+      console.log(`[Storage Log] Cleaned up invoice file: ${targetPath}`);
+    }
+  } catch (err) {
+    console.error(`[Storage Log Error] Failed to delete invoice file ${fileRelUrl}:`, err.message);
+  }
+};
 
 // 1. Fetch all expenses
 exports.getAllExpenses = async (req, res) => {
@@ -17,6 +38,15 @@ exports.getAllExpenses = async (req, res) => {
 
     const enriched = expenses.map(exp => {
       const plain = exp.toJSON();
+      
+      // Ensure invoiceUrls is always a JavaScript array for consumers
+      if (!plain.invoiceUrls || !Array.isArray(plain.invoiceUrls) || plain.invoiceUrls.length === 0) {
+        plain.invoiceUrls = plain.invoiceUrl ? [plain.invoiceUrl] : [];
+      }
+      if (!plain.invoiceUrl && plain.invoiceUrls.length > 0) {
+        plain.invoiceUrl = plain.invoiceUrls[0];
+      }
+
       const matched = empMap.get(String(plain.userId || '').toLowerCase()) || 
                       empMap.get(String(plain.userName || '').toLowerCase());
       if (matched) {
@@ -39,8 +69,10 @@ exports.getAllExpenses = async (req, res) => {
   }
 };
 
-// 2. Create a new expense claim
+// 2. Create a new expense claim (supports multiple multipart file attachments)
 exports.createExpenseClaim = async (req, res) => {
+  const uploadedFiles = req.files && req.files.length > 0 ? req.files : (req.file ? [req.file] : []);
+
   try {
     const { category, amount, description, userId, userName, billNo, billDate, siteName, merchantName } = req.body;
 
@@ -53,7 +85,7 @@ exports.createExpenseClaim = async (req, res) => {
       return res.status(400).json({ error: 'Please enter a valid numeric amount greater than 0.' });
     }
 
-    if (!req.file) {
+    if (uploadedFiles.length === 0) {
       return res.status(400).json({ error: 'Missing required multipart invoice file attachment.' });
     }
 
@@ -78,8 +110,8 @@ exports.createExpenseClaim = async (req, res) => {
       }
     }
 
-    // Use relative path for database storage
-    const invoiceUrl = `invoices/${req.file.filename}`;
+    // Build array of relative invoice URLs
+    const invoiceUrls = uploadedFiles.map(f => `invoices/${f.filename}`);
 
     const newExpense = await Expense.create({
       userId: finalUserId,
@@ -91,20 +123,34 @@ exports.createExpenseClaim = async (req, res) => {
       billDate: billDate ? billDate.trim() : null,
       siteName: siteName ? siteName.trim() : null,
       merchantName: merchantName ? merchantName.trim() : null,
-      invoiceUrl
+      invoiceUrl: invoiceUrls[0],
+      invoiceUrls: invoiceUrls,
+      status: 'pending',
+      suspiciousReason: null
     });
 
-    return res.status(201).json({ message: 'Expense record synchronized successfully!', id: newExpense.id });
+    console.log(`--- [BACKEND] Expense created successfully: #${newExpense.id} with ${invoiceUrls.length} file(s) ---`);
+
+    return res.status(201).json({ 
+      message: 'Expense record synchronized successfully!', 
+      id: newExpense.id,
+      invoiceUrls: newExpense.invoiceUrls,
+      expense: newExpense
+    });
   } catch (error) {
     console.error('❌ Persistence validation failure:', error);
-    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
-      try {
-        fs.unlinkSync(req.file.path);
-        console.log(`[Storage Log] Cleaned up uploaded invoice file: ${req.file.path}`);
-      } catch (unlinkErr) {
-        console.error('[Storage Log Error] Failed to delete orphaned invoice:', unlinkErr.message);
+    // Cleanup any orphaned uploaded files on error
+    uploadedFiles.forEach(f => {
+      if (f.path && fs.existsSync(f.path)) {
+        try {
+          fs.unlinkSync(f.path);
+          console.log(`[Storage Log] Cleaned up uploaded invoice file on error: ${f.path}`);
+        } catch (unlinkErr) {
+          console.error('[Storage Log Error] Failed to delete file:', unlinkErr.message);
+        }
       }
-    }
+    });
+
     return res.status(500).json({ 
       error: 'Server internal validation engine dropped payload instantiation properties.',
       details: error.message
@@ -112,33 +158,45 @@ exports.createExpenseClaim = async (req, res) => {
   }
 };
 
-// 3. Update expense approval status (Pending / Approved / Rejected)
+// 3. Update expense approval status (Pending / Approved / Rejected / Suspicious)
 exports.updateExpenseStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, actionBy } = req.body;
+    const { status, actionBy, reason, suspiciousReason } = req.body;
 
-    if (!['approved', 'rejected', 'pending'].includes(status)) {
-      return res.status(400).json({ error: 'Invalid status. Must be approved, rejected, or pending.' });
+    const validStatuses = ['approved', 'rejected', 'pending', 'suspicious'];
+    if (!validStatuses.includes(String(status).toLowerCase())) {
+      return res.status(400).json({ error: 'Invalid status. Must be approved, rejected, pending, or suspicious.' });
     }
 
+    const normalizedStatus = String(status).toLowerCase();
     const expense = await Expense.findByPk(id);
     if (!expense) {
       return res.status(404).json({ error: 'Expense record not found.' });
     }
 
-    expense.status = status;
-    if (status === 'approved' || status === 'rejected') {
+    expense.status = normalizedStatus;
+
+    if (normalizedStatus === 'suspicious') {
+      expense.suspiciousReason = reason || suspiciousReason || 'Admin marked as suspicious';
       expense.actionBy = actionBy || req.user?.name || req.user?.empCode || req.user?.id || 'Admin';
-    } else if (status === 'pending') {
+    } else if (normalizedStatus === 'approved' || normalizedStatus === 'rejected') {
+      expense.actionBy = actionBy || req.user?.name || req.user?.empCode || req.user?.id || 'Admin';
+      // Clear suspicious reason if it was subsequently approved or rejected
+      if (normalizedStatus === 'approved') {
+        expense.suspiciousReason = null;
+      }
+    } else if (normalizedStatus === 'pending') {
       expense.actionBy = null;
+      expense.suspiciousReason = null;
     }
+
     await expense.save();
 
-    console.log(`--- [BACKEND] Expense ${id} status updated to ${status} by ${expense.actionBy} ---`);
+    console.log(`--- [BACKEND] Expense ${id} status updated to ${normalizedStatus} by ${expense.actionBy} ---`);
 
     // Asynchronously dispatch decision & receipt email to employee if email is registered
-    if (status === 'approved' || status === 'rejected') {
+    if (normalizedStatus === 'approved' || normalizedStatus === 'rejected') {
       (async () => {
         try {
           const emp = await Employee.findOne({
@@ -156,7 +214,7 @@ exports.updateExpenseStatus = async (req, res) => {
               to: emp.email,
               employeeName: emp.name,
               expense: expense.toJSON(),
-              decision: status,
+              decision: normalizedStatus,
               actionBy: expense.actionBy,
               receiptPath: expense.invoiceUrl
             });
@@ -179,15 +237,32 @@ exports.updateExpenseStatus = async (req, res) => {
   }
 };
 
-// 4. Update full expense record details (Includes file replacement handling)
+// 4. Update and resend expense claim (Supports edits, suspicious resubmission, and multiple attachments)
 exports.updateExpense = async (req, res) => {
+  const uploadedFiles = req.files && req.files.length > 0 ? req.files : (req.file ? [req.file] : []);
+
   try {
     const { id } = req.params;
-    const { category, amount, description, billNo, billDate, merchantName, siteName, status, actionBy } = req.body;
+    const { 
+      category, 
+      amount, 
+      description, 
+      billNo, 
+      billDate, 
+      merchantName, 
+      siteName, 
+      status, 
+      actionBy,
+      existingInvoiceUrls,
+      existingInvoiceUrl
+    } = req.body;
+
     console.log(`--- [BACKEND] API hit: Updating expense ${id} ---`, req.body);
 
     const expense = await Expense.findByPk(id);
     if (!expense) {
+      // Clean up newly uploaded files if expense not found
+      uploadedFiles.forEach(f => { if (f.path && fs.existsSync(f.path)) fs.unlinkSync(f.path); });
       return res.status(404).json({ error: 'Expense record not found.' });
     }
 
@@ -203,34 +278,64 @@ exports.updateExpense = async (req, res) => {
     if (billDate !== undefined) expense.billDate = billDate ? billDate.trim() : null;
     if (merchantName !== undefined) expense.merchantName = merchantName ? merchantName.trim() : null;
     if (siteName !== undefined) expense.siteName = siteName ? siteName.trim() : null;
-    if (status !== undefined && ['approved', 'rejected', 'pending'].includes(String(status).toLowerCase())) {
+
+    // Status management:
+    // If status is explicitly passed, update it; otherwise reset to 'pending' on resubmission
+    if (status !== undefined && ['approved', 'rejected', 'pending', 'suspicious'].includes(String(status).toLowerCase())) {
       const lowerStatus = String(status).toLowerCase();
       expense.status = lowerStatus;
-      if (lowerStatus === 'approved' || lowerStatus === 'rejected') {
+      if (lowerStatus === 'approved' || lowerStatus === 'rejected' || lowerStatus === 'suspicious') {
         expense.actionBy = actionBy || req.user?.name || req.user?.empCode || req.user?.id || expense.actionBy || 'Admin';
       } else if (lowerStatus === 'pending') {
         expense.actionBy = null;
+        expense.suspiciousReason = null;
       }
+    } else {
+      // Default employee resubmit workflow: reset to pending and clear suspiciousReason
+      expense.status = 'pending';
+      expense.suspiciousReason = null;
     }
 
-    if (req.file) {
-      // Clean up old file if it exists and is local
-      if (expense.invoiceUrl) {
-        const { getStoragePath } = require('../../../../core/middleware/upload');
-        let oldPath = path.join(getStoragePath(), expense.invoiceUrl);
-        if (expense.invoiceUrl.startsWith('/static/uploads/')) {
-          oldPath = path.join(__dirname, '..', 'uploads', path.basename(expense.invoiceUrl));
-        }
-        if (fs.existsSync(oldPath)) {
-          fs.unlinkSync(oldPath);
-          console.log(`[Storage Log] Cleaned up old invoice file during update: ${oldPath}`);
+    // Attachment Management:
+    // 1. Gather retained existing attachment URLs
+    let preservedUrls = [];
+    if (existingInvoiceUrls) {
+      if (Array.isArray(existingInvoiceUrls)) {
+        preservedUrls = existingInvoiceUrls;
+      } else if (typeof existingInvoiceUrls === 'string') {
+        try {
+          const parsed = JSON.parse(existingInvoiceUrls);
+          if (Array.isArray(parsed)) preservedUrls = parsed;
+          else preservedUrls = [existingInvoiceUrls];
+        } catch (_) {
+          preservedUrls = existingInvoiceUrls.split(',').map(s => s.trim()).filter(Boolean);
         }
       }
-      expense.invoiceUrl = `invoices/${req.file.filename}`;
+    } else if (existingInvoiceUrl) {
+      preservedUrls = [existingInvoiceUrl];
+    } else if (uploadedFiles.length === 0) {
+      // If neither existingInvoiceUrls nor new files were sent, keep current attachments
+      preservedUrls = expense.invoiceUrls || (expense.invoiceUrl ? [expense.invoiceUrl] : []);
+    }
+
+    // 2. Gather newly uploaded file URLs
+    const newlyUploadedUrls = uploadedFiles.map(f => `invoices/${f.filename}`);
+
+    // 3. Combine final attachments list
+    const finalInvoiceUrls = [...preservedUrls, ...newlyUploadedUrls];
+
+    if (finalInvoiceUrls.length > 0) {
+      // Clean up any old files that were explicitly removed from the claim
+      const oldUrls = expense.invoiceUrls || (expense.invoiceUrl ? [expense.invoiceUrl] : []);
+      const removedUrls = oldUrls.filter(oldUrl => !finalInvoiceUrls.includes(oldUrl));
+      removedUrls.forEach(safelyDeleteInvoiceFile);
+
+      expense.invoiceUrls = finalInvoiceUrls;
+      expense.invoiceUrl = finalInvoiceUrls[0];
     }
 
     await expense.save();
-    console.log(`--- [BACKEND] Expense ${id} updated successfully ---`);
+    console.log(`--- [BACKEND] Expense ${id} updated & resent successfully (${expense.invoiceUrls.length} attachments) ---`);
 
     if (expense.status === 'approved' || expense.status === 'rejected') {
       (async () => {
@@ -261,17 +366,21 @@ exports.updateExpense = async (req, res) => {
       })();
     }
 
-    return res.status(200).json(expense);
+    return res.status(200).json({
+      message: 'Expense updated and resent successfully!',
+      expense
+    });
   } catch (error) {
     console.error('❌ Update expense exception:', error);
-    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
-      try {
-        fs.unlinkSync(req.file.path);
-        console.log(`[Storage Log] Cleaned up uploaded invoice file after failed update: ${req.file.path}`);
-      } catch (unlinkErr) {
-        console.error('[Storage Log Error]', unlinkErr.message);
+    // Cleanup newly uploaded files on failure
+    uploadedFiles.forEach(f => {
+      if (f.path && fs.existsSync(f.path)) {
+        try {
+          fs.unlinkSync(f.path);
+        } catch (_) {}
       }
-    }
+    });
+
     return res.status(500).json({ 
       error: 'Failed to update expense.',
       details: error.message 

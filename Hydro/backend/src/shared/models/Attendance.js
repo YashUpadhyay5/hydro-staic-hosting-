@@ -126,6 +126,32 @@ const Attendance = sequelize.define('Attendance', {
   shiftCode: {
     type: DataTypes.STRING,
     allowNull: true,
+  },
+  overtimeStatus: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    defaultValue: 'NONE',
+  },
+  overtimeMinutes: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    defaultValue: 0,
+  },
+  overtimeHours: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  overtimeApprovedBy: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  overtimeApprovedAt: {
+    type: DataTypes.DATE,
+    allowNull: true,
+  },
+  overtimeDecisionNote: {
+    type: DataTypes.TEXT,
+    allowNull: true,
   }
 }, {
   timestamps: true,
