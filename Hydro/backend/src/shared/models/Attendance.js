@@ -152,6 +152,28 @@ const Attendance = sequelize.define('Attendance', {
   overtimeDecisionNote: {
     type: DataTypes.TEXT,
     allowNull: true,
+  },
+  isHomeClockIn: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+  },
+  appCheckIn: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  homeDepartureTime: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  hasExitedHome: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+  },
+  homeGeofenceId: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
   }
 }, {
   timestamps: true,

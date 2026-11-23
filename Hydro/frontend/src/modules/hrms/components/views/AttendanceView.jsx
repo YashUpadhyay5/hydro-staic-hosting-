@@ -346,6 +346,11 @@ const groupAttendanceRecords = (records, footprintsList = [], employeesList = []
                 employee: r.employee || rEmp,
                 checkIn: r.checkIn,
                 checkOut: r.checkOut,
+                isHomeClockIn: !!r.isHomeClockIn,
+                appCheckIn: r.appCheckIn,
+                homeDepartureTime: r.homeDepartureTime,
+                hasExitedHome: r.hasExitedHome !== undefined ? r.hasExitedHome : false,
+                homeGeofenceId: r.homeGeofenceId,
                 overtimeStatus: r.overtimeStatus || 'NONE',
                 overtimeHours: r.overtimeHours,
                 overtimeMinutes: r.overtimeMinutes,
@@ -367,6 +372,13 @@ const groupAttendanceRecords = (records, footprintsList = [], employeesList = []
             const newCheckInTs = parseToTimestamp(r.checkIn);
             if (newCheckInTs && (!existingCheckInTs || newCheckInTs < existingCheckInTs)) {
                 grouped[key].checkIn = r.checkIn;
+            }
+
+            if (r.isHomeClockIn) {
+                grouped[key].isHomeClockIn = true;
+                if (r.appCheckIn) grouped[key].appCheckIn = r.appCheckIn;
+                if (r.homeDepartureTime) grouped[key].homeDepartureTime = r.homeDepartureTime;
+                if (r.hasExitedHome !== undefined) grouped[key].hasExitedHome = r.hasExitedHome;
             }
 
             const existingCheckOutTs = parseToTimestamp(grouped[key].checkOut);
@@ -1259,43 +1271,43 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
         const m = String(method).toUpperCase();
         if (m === 'MANUAL_APP') {
             return (
-                <span style={{ fontSize: '0.68rem', color: '#059669', background: '#d1fae5', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '3px' }} title="Clocked by employee on Mobile App">
-                    ðŸ“± App
+                <span className="punch-method-badge-app" style={{ fontSize: '0.68rem', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="Clocked by employee on Mobile App">
+                    <i className="fa-solid fa-mobile-screen"></i> App
                 </span>
             );
         }
         if (m === 'MANUAL_WEB') {
             return (
-                <span style={{ fontSize: '0.68rem', color: '#2563eb', background: '#dbeafe', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '3px' }} title="Clocked via Web Portal">
-                    ðŸ’» Web
+                <span className="punch-method-badge-web" style={{ fontSize: '0.68rem', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="Clocked via Web Portal">
+                    <i className="fa-solid fa-laptop"></i> Web
                 </span>
             );
         }
         if (m === 'AUTO_SHIFT_END') {
             return (
-                <span style={{ fontSize: '0.68rem', color: '#d97706', background: '#fef3c7', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '3px' }} title="Automatically clocked out at shift end">
-                    ðŸ¤– Auto (Shift)
+                <span className="home-badge-at-home" style={{ fontSize: '0.68rem', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="Automatically clocked out at shift end">
+                    <i className="fa-solid fa-clock"></i> Auto (Shift)
                 </span>
             );
         }
         if (m === 'AUTO_STALE_CLEANUP') {
             return (
-                <span style={{ fontSize: '0.68rem', color: '#b45309', background: '#ffedd5', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '3px' }} title="Auto-closed by system fallback cleanup">
-                    âš ï¸ Auto-Closed
+                <span style={{ fontSize: '0.68rem', color: '#b45309', background: 'rgba(245, 158, 11, 0.15)', border: '1px solid rgba(245, 158, 11, 0.3)', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="Auto-closed by system fallback cleanup">
+                    <i className="fa-solid fa-triangle-exclamation"></i> Auto-Closed
                 </span>
             );
         }
         if (m === 'AUTO_LOCATION_ANCHOR') {
             return (
-                <span style={{ fontSize: '0.68rem', color: '#7c3aed', background: '#ede9fe', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '3px' }} title="Auto-closed at last known GPS location">
-                    ðŸ“ Auto (GPS)
+                <span style={{ fontSize: '0.68rem', color: '#7c3aed', background: 'rgba(124, 58, 237, 0.15)', border: '1px solid rgba(124, 58, 237, 0.3)', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="Auto-closed at last known GPS location">
+                    <i className="fa-solid fa-location-dot"></i> Auto (GPS)
                 </span>
             );
         }
         if (m === 'AUTO_RECOVERY_PUNCH') {
             return (
-                <span style={{ fontSize: '0.68rem', color: '#0284c7', background: '#e0f2fe', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '3px' }} title="Auto-recovered from live device telemetry">
-                    ðŸ”„ Auto-Recovered
+                <span className="punch-method-badge-auto" style={{ fontSize: '0.68rem', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="Auto-recovered from live device telemetry">
+                    <i className="fa-solid fa-arrows-rotate"></i> Auto-Recovered
                 </span>
             );
         }
@@ -4300,7 +4312,7 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
             if (cards.length === 0) return;
             
             try {
-                // Dynamic imports â€” only download when user clicks PDF export
+                // Dynamic imports - only download when user clicks PDF export
                 const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
                     import('jspdf'),
                     import('html2canvas')
@@ -4341,7 +4353,7 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
         };
 
         const handleDownloadExcel = async () => {
-            // Dynamic import â€” xlsx only downloads when user clicks Export Excel
+            // Dynamic import - xlsx only downloads when user clicks Export Excel
             const XLSX = await import('xlsx');
             const wb = XLSX.utils.book_new();
             reportCards.forEach(card => {
@@ -4851,11 +4863,38 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                                         {statusFilter !== 'not-clocked-in' && (
                                             <td>
                                                 {record.checkIn ? (
-                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                                                        <span style={{ fontWeight: 600 }}>{formatDate(record.checkIn, true)}</span>
-                                                        <div>
-                                                            {getPunchMethodBadge(record.checkInMethod || (record.coords ? 'MANUAL_APP' : 'MANUAL_WEB'), false)}
-                                                        </div>
+                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: 'fit-content', justifyContent: 'center' }}>
+                                                        {record.isHomeClockIn ? (
+                                                            <>
+                                                                <div 
+                                                                    className={record.hasExitedHome ? 'home-departure-pill departed' : 'home-departure-pill at-home'}
+                                                                    title={record.hasExitedHome 
+                                                                        ? 'Official duty start (Last ping inside home before departure)' 
+                                                                        : 'Clocked in at home (Still inside home)'}
+                                                                >
+                                                                    <i className={record.hasExitedHome ? "fa-solid fa-person-walking-arrow-right" : "fa-solid fa-house-user"}></i>
+                                                                    <span>{record.hasExitedHome ? 'Departed:' : 'At Home:'} {formatDate(record.checkIn, true)}</span>
+                                                                </div>
+                                                                {record.appCheckIn && (
+                                                                    <div 
+                                                                        className="home-app-punch-pill"
+                                                                        title="Actual Clock-In by Field Worker in Mobile App"
+                                                                    >
+                                                                        <i className="fa-solid fa-mobile-screen"></i>
+                                                                        <span>App: {formatDate(record.appCheckIn, true)}</span>
+                                                                    </div>
+                                                                )}
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <span style={{ fontWeight: 600, fontSize: '0.92rem', color: 'var(--text-primary)' }}>
+                                                                    {formatDate(record.checkIn, true)}
+                                                                </span>
+                                                                <div>
+                                                                    {getPunchMethodBadge(record.checkInMethod || (record.coords ? 'MANUAL_APP' : 'MANUAL_WEB'), false)}
+                                                                </div>
+                                                            </>
+                                                        )}
                                                     </div>
                                                 ) : (
                                                     '-'
@@ -5165,10 +5204,17 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                                                 </span>
                                             </div>
                                             <div>
-                                                <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', display: 'block' }}>Check In</span>
+                                                <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', display: 'block' }}>
+                                                    {record.isHomeClockIn ? 'Effective In (Departed)' : 'Check In'}
+                                                </span>
                                                 <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
                                                     {record.checkIn ? formatDate(record.checkIn, true) : '-'}
                                                 </span>
+                                                {record.isHomeClockIn && record.appCheckIn && (
+                                                    <span style={{ fontSize: '0.68rem', color: '#6366f1', display: 'block', fontWeight: 500 }}>
+                                                        App: {formatDate(record.appCheckIn, true)}
+                                                    </span>
+                                                )}
                                             </div>
                                             <div>
                                                 <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', display: 'block' }}>Check Out</span>
@@ -5256,7 +5302,7 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                         }}
                     >
                         <span>
-                            {startIndex + 1}â€“{endIndex} of {totalItems}
+                            {startIndex + 1} - {endIndex} of {totalItems}
                         </span>
                         <div style={{ display: 'flex', gap: '8px' }}>
                             <button 
@@ -5354,7 +5400,7 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                                         {selectedPunchHistory.userName}
                                     </h3>
                                     <p style={{ margin: '2px 0 0 0', fontSize: '0.85rem', color: '#64748b' }}>
-                                        Punch History â€¢ {formatDate(selectedPunchHistory.date)}
+                                        Punch History &bull; {formatDate(selectedPunchHistory.date)}
                                     </p>
                                 </div>
                             </div>
@@ -5381,7 +5427,7 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                                         borderRadius: '6px'
                                     }}
                                 >
-                                    âœ•
+                                    <i className="fa-solid fa-xmark"></i>
                                 </button>
                             </div>
                         </div>
@@ -5390,6 +5436,10 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
                         <div style={{ padding: '20px 24px', maxHeight: '420px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
                             {(selectedPunchHistory.punches && selectedPunchHistory.punches.length > 0 ? selectedPunchHistory.punches : [selectedPunchHistory]).map((p, idx) => {
                                 const sessionWorkingHours = (p.checkIn && p.checkOut) ? calculateWorkingHours({ ...p, date: selectedPunchHistory.date, overtimeStatus: p.overtimeStatus || selectedPunchHistory.overtimeStatus, isOvertimeApproved: p.isOvertimeApproved || selectedPunchHistory.isOvertimeApproved }) : null;
+                                const isHome = p.isHomeClockIn || selectedPunchHistory.isHomeClockIn;
+                                const appPunchTime = p.appCheckIn || selectedPunchHistory.appCheckIn;
+                                const isExited = p.hasExitedHome !== undefined ? p.hasExitedHome : selectedPunchHistory.hasExitedHome;
+
                                 return (
                                     <div 
                                         key={p.id || idx}
@@ -5420,37 +5470,87 @@ export default function AttendanceView({ employees = [], activeEmployees, onSele
 
                                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                                             {/* Check In Block */}
-                                            <div style={{ background: '#ffffff', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#10b981', fontSize: '0.75rem', fontWeight: 700 }}>
+                                            <div style={{ background: 'var(--card-bg, #ffffff)', padding: '12px 14px', borderRadius: '10px', border: '1px solid var(--border-glass, #e2e8f0)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#10b981', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase' }}>
                                                         <i className="fa-solid fa-right-to-bracket"></i> CHECK IN
                                                     </div>
                                                     {getPunchMethodBadge(p.checkInMethod || (p.coords ? 'MANUAL_APP' : 'MANUAL_WEB'), false)}
                                                 </div>
-                                                <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#1e293b' }}>
-                                                    {formatDate(p.checkIn, true)}
+
+                                                {/* Official Check-In / Last Home Ping */}
+                                                <div className={isHome ? "punch-modal-official-in" : ""} style={{ 
+                                                    padding: isHome ? '8px 10px' : '0', 
+                                                    borderRadius: '8px' 
+                                                }}>
+                                                    <div style={{ fontSize: '0.72rem', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                                        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                                            <i className={isHome ? "fa-solid fa-house-chimney-user" : "fa-solid fa-clock"}></i>
+                                                            {isHome ? 'System Departure (Official In):' : 'Official Check-In:'}
+                                                        </span>
+                                                        {isHome && (
+                                                            <span className={isExited ? "home-badge-departed" : "home-badge-at-home"} style={{ 
+                                                                fontSize: '0.62rem', 
+                                                                padding: '2px 6px', 
+                                                                borderRadius: '4px', 
+                                                                fontWeight: 700,
+                                                                textTransform: 'uppercase'
+                                                            }}>
+                                                                {isExited ? 'Departed Home' : 'At Home Ping'}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <div style={{ fontWeight: 800, fontSize: '1.1rem', color: 'var(--text-primary)', marginTop: '3px' }}>
+                                                        {formatDate(p.checkIn, true)}
+                                                    </div>
+                                                    {isHome && (
+                                                        <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                                                            * Official duty start (working hours calculated from this departure time)
+                                                        </div>
+                                                    )}
                                                 </div>
+
+                                                {/* Field Worker Mobile App Punch */}
+                                                {isHome && appPunchTime ? (
+                                                    <div className="punch-modal-app-punch" style={{ 
+                                                        padding: '8px 10px', 
+                                                        borderRadius: '8px' 
+                                                    }}>
+                                                        <div style={{ fontSize: '0.72rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                            <i className="fa-solid fa-mobile-screen"></i> Field Worker App Punch:
+                                                        </div>
+                                                        <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--text-primary)', marginTop: '3px' }}>
+                                                            {formatDate(appPunchTime, true)}
+                                                        </div>
+                                                        <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                                                            Actual button press time recorded from mobile app
+                                                        </div>
+                                                    </div>
+                                                ) : null}
+
                                                 {p.address && (
-                                                    <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '4px', wordBreak: 'break-word' }}>
-                                                        ðŸ“ {p.address}
+                                                    <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '4px', wordBreak: 'break-word', display: 'flex', alignItems: 'flex-start', gap: '5px' }}>
+                                                        <i className="fa-solid fa-location-dot" style={{ marginTop: '2px', color: '#ef4444' }}></i>
+                                                        <span>{p.address}</span>
                                                     </div>
                                                 )}
                                             </div>
 
                                             {/* Check Out Block */}
-                                            <div style={{ background: '#ffffff', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#ef4444', fontSize: '0.75rem', fontWeight: 700 }}>
+                                            <div style={{ background: 'var(--card-bg, #ffffff)', padding: '12px 14px', borderRadius: '10px', border: '1px solid var(--border-glass, #e2e8f0)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#ef4444', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase' }}>
                                                         <i className="fa-solid fa-right-from-bracket"></i> CHECK OUT
                                                     </div>
                                                     {p.checkOut && getPunchMethodBadge(p.clockOutMethod || (p.checkOut === '19:00:00' ? 'AUTO_STALE_CLEANUP' : (p.coords ? 'MANUAL_APP' : 'MANUAL_WEB')), true)}
                                                 </div>
-                                                <div style={{ fontWeight: 700, fontSize: '0.95rem', color: p.checkOut ? '#1e293b' : '#f59e0b' }}>
+                                                <div style={{ fontWeight: 800, fontSize: '1.1rem', color: p.checkOut ? 'var(--text-primary, #1e293b)' : '#f59e0b' }}>
                                                     {p.checkOut ? formatDate(p.checkOut, true) : (isToday(selectedPunchHistory.date) ? 'Active Session' : (selectedPunchHistory.checkOut ? formatDate(selectedPunchHistory.checkOut, true) : '-'))}
                                                 </div>
                                                 {p.checkOutAddress && (
-                                                    <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '4px', wordBreak: 'break-word' }}>
-                                                        ðŸ“ {p.checkOutAddress}
+                                                    <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '4px', wordBreak: 'break-word', display: 'flex', alignItems: 'flex-start', gap: '5px' }}>
+                                                        <i className="fa-solid fa-location-dot" style={{ marginTop: '2px', color: '#ef4444' }}></i>
+                                                        <span>{p.checkOutAddress}</span>
                                                     </div>
                                                 )}
                                             </div>

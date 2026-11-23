@@ -498,6 +498,11 @@ export default function RegularizationPanel() {
                                                 <div style={{ fontWeight: 700, fontSize: '11px', color: 'var(--text-primary)', marginTop: '2px' }}>
                                                     {r.checkIn || '-'} → {r.checkOut || '-'}
                                                 </div>
+                                                {r.isHomeClockIn && r.appCheckIn && (
+                                                    <div style={{ fontSize: '10px', color: '#6366f1', marginTop: '2px', fontWeight: 600 }}>
+                                                        App Punch: {r.appCheckIn} (Home)
+                                                    </div>
+                                                )}
                                             </div>
                                             <div style={{ background: 'var(--panel-bg, rgba(125,125,125,0.06))', padding: '6px 8px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
                                                 <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 600 }}>Worked Time (Punches)</div>

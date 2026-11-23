@@ -330,6 +330,21 @@ class GeofenceAlertService {
       return { status: 'SKIPPED_NO_ACTIVE_ATTENDANCE', userId: canonicalId, date: targetDate };
     }
 
+    // 3b. Home Geofence Departure Tracking
+    // If employee clocked in from home and hasn't exited home yet, evaluate home departure ping
+    if (activeSession.isHomeClockIn && !activeSession.hasExitedHome) {
+      try {
+        const HomeGeofenceDepartureService = require('./HomeGeofenceDepartureService');
+        const io = options.io || null;
+        const homeRes = await HomeGeofenceDepartureService.evaluateFootprintPing(ping, possibleUserIds, activeSession, io);
+        if (homeRes && homeRes.status === 'INSIDE_HOME') {
+          return { status: 'INSIDE_HOME', userId: canonicalId, departureTime: homeRes.departureTime };
+        }
+      } catch (homeErr) {
+        console.warn(`[GeofenceAlertService] Home departure evaluation error for ${canonicalId}:`, homeErr.message);
+      }
+    }
+
     // 4. Configured Working Hours Check
     const inWorkingHours = this.isWithinWorkingHours(empObj, validTimestamp);
     if (!inWorkingHours) {

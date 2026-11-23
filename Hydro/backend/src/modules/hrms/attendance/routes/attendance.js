@@ -10,6 +10,7 @@ const { getAddressFromCoords } = require('../../../../core/utils/geocoder');
 const { getCachedEmployees, resolveCanonicalEmployee } = require('../../../../core/utils/employeeCache');
 const GeofenceAlertService = require('../../../../shared/services/GeofenceAlertService');
 const SpecialEarnedCreditService = require('../../leave/services/SpecialEarnedCreditService');
+const HomeGeofenceDepartureService = require('../../../../shared/services/HomeGeofenceDepartureService');
 
 const getAuthoritativeISTDate = (d = new Date()) => {
   try {
@@ -660,6 +661,23 @@ router.post('/', async (req, res) => {
           const isOffice = emp && String(emp.designation || '').trim().toUpperCase() === 'OFFICE';
           existingActive.workMode = isOffice ? 'office' : 'field';
         }
+
+        // Check if upgrade punch is from Home Geofence
+        if (latVal != null && lonVal != null) {
+          try {
+            const homeCheck = await HomeGeofenceDepartureService.evaluateClockIn(parseFloat(latVal), parseFloat(lonVal), possibleUserIds);
+            if (homeCheck && homeCheck.isHomeClockIn) {
+              existingActive.isHomeClockIn = true;
+              existingActive.appCheckIn = authoritativeCheckIn;
+              existingActive.homeDepartureTime = existingActive.homeDepartureTime || authoritativeCheckIn;
+              existingActive.hasExitedHome = false;
+              existingActive.homeGeofenceId = homeCheck.homeGeofenceId;
+            }
+          } catch (e) {
+            console.warn('[Home Geofence Upgrade Check Error]:', e.message);
+          }
+        }
+
         await existingActive.save();
         if (emp) {
           SpecialEarnedCreditService.evaluateAndCredit(existingActive, emp).catch(err => console.warn('[SpecialEarnedCredit Upgrade] Warning:', err.message));
@@ -717,6 +735,21 @@ router.post('/', async (req, res) => {
     const isOffice = emp && String(emp.designation || '').trim().toUpperCase() === 'OFFICE';
     const initialWorkMode = isOffice ? 'office' : 'field';
 
+    // Evaluate if Clock-In is from Home Geofence
+    let isHomeClockIn = false;
+    let homeGeofenceId = null;
+    if (latVal != null && lonVal != null) {
+      try {
+        const homeCheck = await HomeGeofenceDepartureService.evaluateClockIn(parseFloat(latVal), parseFloat(lonVal), possibleUserIds);
+        if (homeCheck && homeCheck.isHomeClockIn) {
+          isHomeClockIn = true;
+          homeGeofenceId = homeCheck.homeGeofenceId;
+        }
+      } catch (homeErr) {
+        console.warn('[Home Geofence Clock-In Error]:', homeErr.message);
+      }
+    }
+
     // Create record (Clock In)
     const newRecord = await Attendance.create({ 
       userId: activeUserId, 
@@ -730,7 +763,12 @@ router.post('/', async (req, res) => {
       isSwitched: false,
       checkInMethod: inMethod,
       clockOutMethod: null,
-      shiftCode: resolvedShift.code
+      shiftCode: resolvedShift.code,
+      isHomeClockIn: isHomeClockIn,
+      appCheckIn: isHomeClockIn ? authoritativeCheckIn : null,
+      homeDepartureTime: isHomeClockIn ? authoritativeCheckIn : null,
+      hasExitedHome: false,
+      homeGeofenceId: homeGeofenceId
     });
 
     GeofenceAlertService.resetTrackingState(activeUserId, newRecord.id);

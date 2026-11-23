@@ -803,6 +803,21 @@ router.post('/batch', async (req, res) => {
           } else {
             const isOfficeEmp = empObj && String(empObj.designation || '').trim().toUpperCase() === 'OFFICE';
             const resolvedWorkMode = isOfficeEmp ? 'office' : 'field';
+
+            // Check if auto-recovered session originates from Home Geofence
+            let isAutoHomePunch = false;
+            let autoHomeGfId = null;
+            if (parsedLat != null && parsedLon != null) {
+              try {
+                const HomeGeofenceDepartureService = require('../../../../shared/services/HomeGeofenceDepartureService');
+                const homeCheck = await HomeGeofenceDepartureService.evaluateClockIn(parsedLat, parsedLon, activeUserIds);
+                if (homeCheck && homeCheck.isHomeClockIn) {
+                  isAutoHomePunch = true;
+                  autoHomeGfId = homeCheck.homeGeofenceId;
+                }
+              } catch (_) {}
+            }
+
             attRecord = await Attendance.create({
               userId: activeUid,
               userName: activeUName,
@@ -816,7 +831,12 @@ router.post('/batch', async (req, res) => {
               isSwitched: false,
               checkInMethod: 'AUTO_RECOVERY_PUNCH',
               clockOutMethod: null,
-              shiftCode: resolvedShift.code
+              shiftCode: resolvedShift.code,
+              isHomeClockIn: isAutoHomePunch,
+              appCheckIn: isAutoHomePunch ? autoCheckInTime : null,
+              homeDepartureTime: isAutoHomePunch ? autoCheckInTime : null,
+              hasExitedHome: false,
+              homeGeofenceId: autoHomeGfId
             }, { transaction });
             GeofenceAlertService.resetTrackingState(activeUid, attRecord.id);
           }
@@ -1011,9 +1031,10 @@ router.post('/batch', async (req, res) => {
     // Evaluate valid GPS pings chronologically to monitor consecutive outside pings and trigger alerts
     if (successfulPings.length > 0) {
       try {
+        const io = req.app ? req.app.get('io') : null;
         const sortedPings = [...successfulPings].sort((a, b) => (Number(a.timestamp) || 0) - (Number(b.timestamp) || 0));
         for (const pingItem of sortedPings) {
-          const evalResult = await GeofenceAlertService.evaluatePing(pingItem).catch(err => {
+          const evalResult = await GeofenceAlertService.evaluatePing(pingItem, { io }).catch(err => {
             console.warn(`[Batch Geofence Alert Error for ${pingItem.userId}]:`, err.message);
             return null;
           });
@@ -1239,6 +1260,21 @@ router.post('/', async (req, res) => {
           } else {
             const isOfficeEmp = empObj && String(empObj.designation || '').trim().toUpperCase() === 'OFFICE';
             const resolvedWorkMode = isOfficeEmp ? 'office' : 'field';
+
+            // Check if auto-recovered session originates from Home Geofence
+            let isAutoHomePunch = false;
+            let autoHomeGfId = null;
+            if (parsedLat != null && parsedLon != null) {
+              try {
+                const HomeGeofenceDepartureService = require('../../../../shared/services/HomeGeofenceDepartureService');
+                const homeCheck = await HomeGeofenceDepartureService.evaluateClockIn(parsedLat, parsedLon, possibleUserIds);
+                if (homeCheck && homeCheck.isHomeClockIn) {
+                  isAutoHomePunch = true;
+                  autoHomeGfId = homeCheck.homeGeofenceId;
+                }
+              } catch (_) {}
+            }
+
             todayAttendance = await Attendance.create({
               userId: activeUid,
               userName: activeUName,
@@ -1251,7 +1287,12 @@ router.post('/', async (req, res) => {
               isSwitched: false,
               checkInMethod: 'AUTO_RECOVERY_PUNCH',
               clockOutMethod: null,
-              shiftCode: resolvedShift.code
+              shiftCode: resolvedShift.code,
+              isHomeClockIn: isAutoHomePunch,
+              appCheckIn: isAutoHomePunch ? autoCheckInTime : null,
+              homeDepartureTime: isAutoHomePunch ? autoCheckInTime : null,
+              hasExitedHome: false,
+              homeGeofenceId: autoHomeGfId
             });
             GeofenceAlertService.resetTrackingState(activeUid, todayAttendance.id);
           }
@@ -1415,7 +1456,8 @@ router.post('/', async (req, res) => {
 
     // CONSECUTIVE OUTSIDE GEOFENCE ALERT EVALUATION:
     try {
-      GeofenceAlertService.evaluatePing(newPoint).catch(err => {
+      const io = req.app ? req.app.get('io') : null;
+      GeofenceAlertService.evaluatePing(newPoint, { io }).catch(err => {
         console.warn(`[Single Geofence Alert Error for ${activeUserId}]:`, err.message);
       });
     } catch (evalErr) {
